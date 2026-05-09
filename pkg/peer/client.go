@@ -471,6 +471,20 @@ func (c *Client) handleSessionAction(payload *SessionActionPayload, conn *websoc
 			c.tmuxClient.SelectPane(params.Pane)
 		}
 
+	case "kill":
+		var params struct {
+			ID   string `json:"id,omitempty"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Name == "" {
+			log.WithError(err).Debug("invalid kill session params")
+			return
+		}
+		if err := c.tmuxClient.KillSession(params.ID, params.Name); err != nil {
+			log.WithError(err).Warn("failed to kill session on peer")
+		}
+		c.sendStateUpdate(conn)
+
 	default:
 		log.WithField("action", payload.Action).Debug("unknown session action")
 	}

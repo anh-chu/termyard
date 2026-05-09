@@ -155,13 +155,15 @@ export function Sidebar({
   const [hiddenExpanded, setHiddenExpanded] = useState(false)
   const [renamingSession, setRenamingSession] = useState<RenameState | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const [contextMenu, setContextMenu] = useState<{ key: string; name: string; host?: string; x: number; y: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ key: string; id: string; name: string; host?: string; x: number; y: number } | null>(null)
+  const [confirmKillKey, setConfirmKillKey] = useState<string | null>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null)
   const [, setUptimeTick] = useState(0)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLDivElement>(null)
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (renamingSession && renameInputRef.current) {
@@ -181,6 +183,7 @@ export function Sidebar({
       const target = event.target as Node | null
       if (filterOpen && target && filterRef.current?.contains(target)) return
       setContextMenu(null)
+      setConfirmKillKey(null)
       setFilterOpen(false)
     }
     window.addEventListener('click', handler)
@@ -252,6 +255,20 @@ export function Sidebar({
     setRenamingSession(session)
     setRenameValue(session.name)
     setContextMenu(null)
+  }
+
+  const killSession = async (id: string, name: string, host?: string) => {
+    setContextMenu(null)
+    setConfirmKillKey(null)
+    try {
+      await fetch('/api/session/kill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name, host: host || undefined }),
+      })
+    } catch (err) {
+      console.error('Failed to kill session:', err)
+    }
   }
 
   const submitRename = async () => {
@@ -350,6 +367,24 @@ export function Sidebar({
     const projectName = pathLeaf(session.project_path)
     const agentType = session.agent_type || events[0]?.tool
 
+    const handleTouchStart = (e: React.TouchEvent) => {
+      if (isRenaming) return
+      const touch = e.touches[0]
+      const x = touch.clientX
+      const y = touch.clientY
+      touchTimerRef.current = setTimeout(() => {
+        touchTimerRef.current = null
+        setContextMenu({ key: sk, id: session.id, name: session.name, host: session.host, x, y })
+      }, 600)
+    }
+
+    const handleTouchEnd = () => {
+      if (touchTimerRef.current !== null) {
+        clearTimeout(touchTimerRef.current)
+        touchTimerRef.current = null
+      }
+    }
+
     return (
       <li key={sk}>
         <div
@@ -378,8 +413,11 @@ export function Sidebar({
           }}
           onContextMenu={(e) => {
             e.preventDefault()
-            setContextMenu({ key: sk, name: session.name, host: session.host, x: e.clientX, y: e.clientY })
+            setContextMenu({ key: sk, id: session.id, name: session.name, host: session.host, x: e.clientX, y: e.clientY })
           }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          onTouchMove={handleTouchEnd}
           className={cn(
             'flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink',
             'hover:bg-surface',
@@ -598,6 +636,19 @@ export function Sidebar({
             className="px-3 py-1.5 text-sm text-ink cursor-pointer hover:bg-surface-card hover:text-ink"
           >
             {hiddenSet.has(contextMenu.key) ? 'Unhide' : 'Hide'}
+          </div>
+          <div className="my-1 border-t border-hairline" />
+          <div
+            onClick={() => {
+              if (confirmKillKey === contextMenu.key) {
+                killSession(contextMenu.id, contextMenu.name, contextMenu.host)
+              } else {
+                setConfirmKillKey(contextMenu.key)
+              }
+            }}
+            className="px-3 py-1.5 text-sm cursor-pointer text-red-400 hover:bg-red-500/10"
+          >
+            {confirmKillKey === contextMenu.key ? 'Confirm kill?' : 'Kill'}
           </div>
         </div>
       )}

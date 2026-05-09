@@ -2,9 +2,9 @@
 
 > **Stack:** chi | none | react | go
 
-> 70 routes | 0 models | 13 components | 55 lib files | 6 env vars | 1 middleware | 0% test coverage
-> **Token savings:** this file is ~5,200 tokens. Without it, AI exploration would cost ~65,100 tokens. **Saves ~59,800 tokens per conversation.**
-> **Last scanned:** 2026-05-09 18:27 — re-run after significant changes
+> 72 routes | 0 models | 13 components | 55 lib files | 6 env vars | 1 middleware | 0% test coverage
+> **Token savings:** this file is ~5,300 tokens. Without it, AI exploration would cost ~66,100 tokens. **Saves ~60,900 tokens per conversation.**
+> **Last scanned:** 2026-05-09 19:08 — re-run after significant changes
 
 ---
 
@@ -29,6 +29,7 @@
 - `POST` `/api/session/new` params() [auth, db, queue, ai]
 - `POST` `/api/session/rename` params() [auth, db, queue, ai]
 - `POST` `/api/session/select-window` params() [auth, db, queue, ai]
+- `POST` `/api/session/kill` params() [auth, db, queue, ai]
 - `GET` `/api/tool-events` params() [auth, db, queue, ai]
 - `GET` `/api/session` params() [auth, db, queue, ai]
 - `DELETE` `/api/tool-events` params() [auth, db, queue, ai]
@@ -60,6 +61,7 @@
 - `POST` `/session/new` params() [auth, db, queue, ai]
 - `POST` `/session/rename` params() [auth, db, queue, ai]
 - `POST` `/session/select-window` params() [auth, db, queue, ai]
+- `POST` `/session/kill` params() [auth, db, queue, ai]
 - `GET` `/tool-events` params() [auth, db, queue, ai]
 - `GET` `session` params() [auth, db, queue, ai]
 - `DELETE` `/tool-events` params() [auth, db, queue, ai]

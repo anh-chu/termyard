@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Route list and file locations extracted via AST. Read the source files listed below before implementing or modifying this subsystem.
 
-The Session subsystem handles **8 routes** and touches: auth, db, queue, ai.
+The Session subsystem handles **10 routes** and touches: auth, db, queue, ai.
 
 ## Routes
 
@@ -12,6 +12,8 @@ The Session subsystem handles **8 routes** and touches: auth, db, queue, ai.
   `pkg/server/server.go`
 - `POST` `/api/session/select-window` [auth, db, queue, ai]
   `pkg/server/server.go`
+- `POST` `/api/session/kill` [auth, db, queue, ai]
+  `pkg/server/server.go`
 - `GET` `/api/session` [auth, db, queue, ai]
   `pkg/server/server.go`
 - `POST` `/session/new` [auth, db, queue, ai]
@@ -19,6 +21,8 @@ The Session subsystem handles **8 routes** and touches: auth, db, queue, ai.
 - `POST` `/session/rename` [auth, db, queue, ai]
   `pkg/server/server.go`
 - `POST` `/session/select-window` [auth, db, queue, ai]
+  `pkg/server/server.go`
+- `POST` `/session/kill` [auth, db, queue, ai]
   `pkg/server/server.go`
 - `GET` `session` [auth, db, queue, ai]
   `pkg/server/server.go`

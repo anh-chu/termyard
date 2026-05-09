@@ -281,10 +281,11 @@ func Run(ctx context.Context, opts *Options) error {
 
 			r.Post("/session/new", func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
-					Name    string `json:"name"`
-					Host    string `json:"host,omitempty"`
-					Path    string `json:"path,omitempty"`
-					Command string `json:"command,omitempty"`
+					Name      string `json:"name"`
+					Host      string `json:"host,omitempty"`
+					Path      string `json:"path,omitempty"`
+					Command   string `json:"command,omitempty"`
+					AgentType string `json:"agent_type,omitempty"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -328,6 +329,10 @@ func Run(ctx context.Context, opts *Options) error {
 				if err := opts.Client.NewSession(req.Name, req.Path, req.Command); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
+				}
+				// Store explicit agent type before refresh so it survives inference
+				if req.AgentType != "" && opts.StateMgr != nil {
+					opts.StateMgr.SetSessionAgentType(req.Name, req.AgentType)
 				}
 				// Trigger state refresh so WebSocket clients get notified
 				if fresh, err := opts.Client.ListSessions(); err == nil {
@@ -428,6 +433,49 @@ func Run(ctx context.Context, opts *Options) error {
 					if err := opts.Client.SelectPane(req.Pane); err != nil {
 						logrus.WithError(err).Warn("failed to select pane")
 					}
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})
+
+			r.Post("/session/kill", func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					ID   string `json:"id,omitempty"`
+					Name string `json:"name"`
+					Host string `json:"host,omitempty"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+					http.Error(w, "name is required", http.StatusBadRequest)
+					return
+				}
+
+				// Remote host — forward via peer connection
+				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
+					peerConn := opts.PeerMgr.GetPeerConnection(req.Host)
+					if peerConn == nil {
+						http.Error(w, "peer not connected", http.StatusBadGateway)
+						return
+					}
+					params, _ := json.Marshal(map[string]string{"id": req.ID, "name": req.Name})
+					msg, _ := peer.NewMessage(peer.MsgSessionAction, peer.SessionActionPayload{
+						Action: "kill",
+						Params: params,
+					})
+					select {
+					case peerConn.Send <- msg:
+						w.WriteHeader(http.StatusNoContent)
+					default:
+						http.Error(w, "peer send queue full", http.StatusBadGateway)
+					}
+					return
+				}
+
+				// Kill by ID first (avoids tmux special-target interpretation of names
+				// like '~'); fall back to name. Always clean up state regardless.
+				if err := opts.Client.KillSession(req.ID, req.Name); err != nil {
+					logrus.WithError(err).WithField("session", req.Name).Warn("tmux kill-session failed, removing from state")
+				}
+				if opts.StateMgr != nil {
+					opts.StateMgr.RemoveSession(req.Name)
 				}
 				w.WriteHeader(http.StatusNoContent)
 			})

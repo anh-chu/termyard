@@ -295,6 +295,20 @@ func (c *Client) RenameSession(oldName, newName string) error {
 	return err
 }
 
+// KillSession kills a tmux session, preferring the numeric ID over name.
+// tmux uses special target syntax where characters like '~' have meaning,
+// so name-based targeting is unreliable for sessions with unusual names.
+// Pass id as the tmux session ID (e.g. "$15"); name is the fallback.
+func (c *Client) KillSession(id, name string) error {
+	if id != "" {
+		if _, err := c.Exec("kill-session", "-t", id); err == nil {
+			return nil
+		}
+	}
+	_, err := c.Exec("kill-session", "-t", name)
+	return err
+}
+
 // CapturePaneContent returns the visible text content of a pane
 func (c *Client) CapturePaneContent(paneID string) (string, error) {
 	return c.Exec("capture-pane", "-t", paneID, "-p")

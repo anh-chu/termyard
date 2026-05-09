@@ -6,7 +6,7 @@
 
 ## Scale
 
-70 API routes · 13 UI components · 55 library files · 1 middleware layers · 6 environment variables
+72 API routes · 13 UI components · 55 library files · 1 middleware layers · 6 environment variables
 
 ## Subsystems
 
@@ -26,7 +26,7 @@
 - **[Pty_relay](./pty_relay.md)** — 1 routes — touches: auth, db
 - **[Push](./push.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Rows](./rows.md)** — 1 routes — touches: auth, db, queue, ai
-- **[Session](./session.md)** — 8 routes — touches: auth, db, queue, ai
+- **[Session](./session.md)** — 10 routes — touches: auth, db, queue, ai
 - **[Sessions](./sessions.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Stats](./stats.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Tls](./tls.md)** — 6 routes — touches: auth, db, queue, ai

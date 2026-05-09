@@ -234,6 +234,31 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 	m.broadcast(StateEvent{Type: "sessions-changed"})
 }
 
+// RemoveSession removes a session from the in-memory state, broadcasting
+// removal events. Use this when a tmux session no longer exists but the
+// state manager still holds a reference to it.
+func (m *Manager) RemoveSession(name string) {
+	m.mu.Lock()
+	delete(m.sessions, name)
+	delete(m.meta, name)
+	m.mu.Unlock()
+	m.broadcast(StateEvent{Type: "session-removed", Session: name})
+	m.broadcast(StateEvent{Type: "sessions-changed"})
+}
+
+// SetSessionAgentType explicitly stores an agent type for a session,
+// overriding inference. Used when a session is created with a known preset.
+func (m *Manager) SetSessionAgentType(sessionName, agentType string) {
+	m.mu.Lock()
+	meta := m.meta[sessionName]
+	meta.AgentType = agentType
+	m.meta[sessionName] = meta
+	if session := m.sessions[sessionName]; session != nil && session.AgentType == "" {
+		session.AgentType = agentType
+	}
+	m.mu.Unlock()
+}
+
 // SessionForPane returns the session name for a given pane ID (e.g. "%42").
 // Returns empty string if not found.
 func (m *Manager) SessionForPane(paneID string) string {
