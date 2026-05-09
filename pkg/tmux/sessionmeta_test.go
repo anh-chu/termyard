@@ -6,6 +6,7 @@ func TestNormalizeAgentType(t *testing.T) {
 	tests := map[string]string{
 		"claude":                      "claude",
 		"codex":                       "codex",
+		"pi":                          "pi",
 		"node /usr/lib/codex.js":      "codex",
 		`"claude --dangerously-skip"`: "claude",
 		"gemini":                      "gemini",

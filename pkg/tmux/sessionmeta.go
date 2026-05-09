@@ -36,6 +36,8 @@ func NormalizeAgentType(command string) string {
 		return "opencode"
 	case strings.Contains(cmd, "gemini"):
 		return "gemini"
+	case cmd == "pi":
+		return "pi"
 	default:
 		return ""
 	}
