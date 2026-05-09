@@ -62,7 +62,7 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
     return candidate
   }
   const suggestedName = useMemo(() => {
-    const leaf = basename(path)
+    const leaf = basename(path || '~')
     if (!leaf) return ''
     return uniqueSessionName(`${!preset || preset === 'custom' ? 'session' : preset}-${leaf}`)
   }, [path, preset, existingNames])
@@ -84,9 +84,9 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
   }, [onClose])
 
   const handleSubmit = () => {
-    const trimmedPath = path.trim()
+    const trimmedPath = path.trim() || '~'
     const trimmedName = uniqueSessionName(name.trim() || suggestedName)
-    if (!trimmedPath || !trimmedName) return
+    if (!trimmedName) return
     onCreateSession(trimmedName, trimmedPath, resolvedCommand, selectedHost || undefined)
   }
 
@@ -116,7 +116,7 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
                 value={path}
                 onChange={e => setPath(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="~/projects/my-app"
+                placeholder="~"
                 className="w-full text-[14px] text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none font-sans font-medium placeholder:text-mute/40 focus:border-primary/60 transition-colors"
               />
             </div>
@@ -198,7 +198,7 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
           <div className="flex gap-3">
             <button
               onClick={handleSubmit}
-              disabled={!path.trim() || !(name.trim() || suggestedName) || (preset === 'custom' && !resolvedCommand)}
+              disabled={!(name.trim() || suggestedName) || (preset === 'custom' && !resolvedCommand)}
               className="px-6 py-2 rounded-full text-[13px] font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-white/90 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             >
               Create
