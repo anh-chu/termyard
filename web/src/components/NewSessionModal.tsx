@@ -60,8 +60,8 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
   const suggestedName = useMemo(() => {
     const leaf = basename(path || '~')
     if (!leaf) return ''
-    return uniqueSessionName(`${preset || 'session'}-${leaf}`)
-  }, [path, preset, existingNames])
+    return uniqueSessionName(leaf)
+  }, [path, existingNames])
 
   const handlePresetClick = (id: string) => {
     if (preset === id) {
