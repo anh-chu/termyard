@@ -97,28 +97,28 @@ function formatSystemUptime(seconds: number): string {
 
 function UsageBar({ percent, color, label }: { percent: number; color: string; label: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-8 text-[11px] text-muted-foreground text-right shrink-0">{label}</span>
-      <div className="flex-1 h-2 bg-background rounded overflow-hidden">
+    <div className="flex items-center gap-3">
+      <span className="w-10 text-xs text-mute font-semibold text-right shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-surface-elevated rounded-full overflow-hidden">
         <div
-          className="h-full rounded transition-[width] duration-300"
+          className="h-full rounded-full transition-[width] duration-300"
           style={{
             width: `${Math.min(percent, 100)}%`,
             background: percent > 90 ? 'var(--destructive)' : percent > 70 ? 'var(--warning)' : color,
           }}
         />
       </div>
-      <span className="w-8 text-[11px] text-muted-foreground shrink-0">{percent}%</span>
+      <span className="w-10 text-xs text-mute font-bold shrink-0">{Math.round(percent)}%</span>
     </div>
   )
 }
 
 function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
-    <div className="bg-card border border-border rounded-lg p-4 flex-1 min-w-[120px]">
-      <div className="text-2xl font-bold" style={{ color: color || 'var(--color-foreground)' }}>{value}</div>
-      <div className="text-xs text-muted-foreground mt-1">{label}</div>
-      {sub && <div className="text-[11px] text-muted-foreground/60 mt-0.5">{sub}</div>}
+    <div className="bg-surface border border-hairline rounded-lg p-5 flex-1 min-w-[140px] transition-all hover:border-hairline/60">
+      <div className="text-3xl font-bold tracking-tight" style={{ color: color || 'var(--foreground)' }}>{value}</div>
+      <div className="text-xs font-bold text-mute uppercase tracking-widest mt-1.5">{label}</div>
+      {sub && <div className="text-xs font-medium text-mute/50 mt-1">{sub}</div>}
     </div>
   )
 }
@@ -128,32 +128,31 @@ function ProcessBar({ processes, totalPanes }: { processes: { name: string; coun
   const max = processes[0]?.count || 1
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {processes.slice(0, 10).map(p => {
         const isAgent = agentCommands.has(p.name)
         const pct = totalPanes > 0 ? (p.count / totalPanes) * 100 : 0
         return (
-          <div key={p.name} className="flex items-center gap-2">
+          <div key={p.name} className="flex items-center gap-3">
             <span
-              className="w-[90px] text-xs text-right overflow-hidden text-ellipsis whitespace-nowrap shrink-0"
+              className="w-[100px] text-xs font-semibold text-right overflow-hidden text-ellipsis whitespace-nowrap shrink-0"
               style={{
-                color: isAgent ? (toolColors[p.name] || 'var(--chart-secondary)') : 'var(--color-muted-foreground)',
-                fontWeight: isAgent ? 600 : 400,
+                color: isAgent ? (toolColors[p.name] || 'var(--chart-secondary)') : 'var(--muted-foreground)',
               }}
             >
               {p.name}
             </span>
-            <div className="flex-1 h-[14px] bg-background rounded overflow-hidden">
+            <div className="flex-1 h-1.5 bg-surface-elevated rounded-full overflow-hidden">
               <div
-                className="h-full rounded min-w-[2px]"
+                className="h-full rounded-full min-w-[2px] transition-all"
                 style={{
                   width: `${(p.count / max) * 100}%`,
-                  background: isAgent ? (toolColors[p.name] || 'var(--chart-secondary)') : 'var(--color-border)',
+                  background: isAgent ? (toolColors[p.name] || 'var(--chart-secondary)') : 'var(--border)',
                 }}
               />
             </div>
-            <span className="text-[11px] text-muted-foreground/60 w-[45px] shrink-0">
-              {p.count} ({Math.round(pct)}%)
+            <span className="text-xs font-bold text-mute/50 w-[50px] shrink-0">
+              {p.count}
             </span>
           </div>
         )
@@ -164,57 +163,45 @@ function ProcessBar({ processes, totalPanes }: { processes: { name: string; coun
 
 function SystemStatsCard({ system }: { system: SystemStats }) {
   return (
-    <div className="bg-card border border-border rounded-lg p-3.5 flex flex-col gap-3">
+    <div className="bg-surface border border-hairline rounded-lg p-5 flex flex-col gap-4">
       {system.cpu_percent !== undefined && (
         <UsageBar percent={system.cpu_percent} color="var(--chart-primary)" label="CPU" />
       )}
       {system.memory && (
         <UsageBar percent={system.memory.percent} color="var(--chart-secondary)" label="MEM" />
       )}
-      <div className="grid grid-cols-2 gap-2 mt-1">
+      <div className="grid grid-cols-2 gap-4 mt-2">
         {system.load && (
           <div>
-            <div className="text-[10px] text-muted-foreground/60 mb-0.5">Load Average</div>
-            <div className="text-[13px] text-foreground font-mono">
+            <div className="text-xs font-bold text-mute/50 uppercase tracking-widest mb-1.5">Load Average</div>
+            <div className="text-[14px] text-ink font-mono font-medium">
               {system.load['1m'].toFixed(2)}{' '}
-              <span className="text-muted-foreground">{system.load['5m'].toFixed(2)}</span>{' '}
-              <span className="text-muted-foreground/60">{system.load['15m'].toFixed(2)}</span>
+              <span className="text-mute">{system.load['5m'].toFixed(2)}</span>{' '}
+              <span className="text-mute/60">{system.load['15m'].toFixed(2)}</span>
             </div>
           </div>
         )}
         {system.memory && (
           <div>
-            <div className="text-[10px] text-muted-foreground/60 mb-0.5">Memory</div>
-            <div className="text-[13px] text-foreground">
+            <div className="text-xs font-bold text-mute/50 uppercase tracking-widest mb-1.5">Memory</div>
+            <div className="text-[14px] text-ink font-medium">
               {(system.memory.used_mb / 1024).toFixed(1)}
-              <span className="text-muted-foreground/60"> / {(system.memory.total_mb / 1024).toFixed(1)} GB</span>
+              <span className="text-mute/60 font-normal"> / {(system.memory.total_mb / 1024).toFixed(1)} GB</span>
             </div>
           </div>
         )}
         {system.uptime_seconds !== undefined && (
           <div>
-            <div className="text-[10px] text-muted-foreground/60 mb-0.5">System Uptime</div>
-            <div className="text-[13px] text-foreground">
+            <div className="text-xs font-bold text-mute/50 uppercase tracking-widest mb-1.5">System Uptime</div>
+            <div className="text-[14px] text-ink font-medium">
               {formatSystemUptime(system.uptime_seconds)}
             </div>
           </div>
         )}
         <div>
-          <div className="text-[10px] text-muted-foreground/60 mb-0.5">CPUs</div>
-          <div className="text-[13px] text-foreground">
-            {system.cpus} <span className="text-muted-foreground/60">{system.arch}</span>
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] text-muted-foreground/60 mb-0.5">Guppi Memory</div>
-          <div className="text-[13px] text-foreground">
-            {system.guppi_mem_mb.toFixed(1)} MB
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] text-muted-foreground/60 mb-0.5">Goroutines</div>
-          <div className="text-[13px] text-foreground">
-            {system.goroutines}
+          <div className="text-xs font-bold text-mute/50 uppercase tracking-widest mb-1.5">CPUs</div>
+          <div className="text-[14px] text-ink font-medium">
+            {system.cpus} <span className="text-mute/60 font-normal">{system.arch}</span>
           </div>
         </div>
       </div>
@@ -229,22 +216,22 @@ function HostStatsSection({ host, totalPanes }: { host: Host; totalPanes: number
   const processes = hostStats.processes || []
 
   return (
-    <div className="mb-6">
-      <h3 className="text-foreground text-sm font-semibold mb-2.5 flex items-center gap-2">
+    <div className="mb-10">
+      <h3 className="text-ink text-[13px] font-bold uppercase tracking-widest mb-4 flex items-center gap-2">
         <span className={`w-1.5 h-1.5 rounded-full ${host.online ? 'bg-success' : 'bg-muted-foreground'}`} />
         {host.name}
       </h3>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(360px,1fr))] gap-4">
         {processes.length > 0 && (
           <div>
-            <div className="text-xs text-muted-foreground mb-1.5">Processes</div>
-            <div className="bg-card border border-border rounded-lg p-3.5">
+            <div className="text-xs font-bold text-mute uppercase tracking-widest mb-2.5 ml-1">Processes</div>
+            <div className="bg-surface border border-hairline rounded-lg p-5">
               <ProcessBar processes={processes} totalPanes={totalPanes} />
             </div>
           </div>
         )}
         <div>
-          <div className="text-xs text-muted-foreground mb-1.5">System</div>
+          <div className="text-xs font-bold text-mute uppercase tracking-widest mb-2.5 ml-1">System</div>
           <SystemStatsCard system={hostStats} />
         </div>
       </div>
@@ -280,9 +267,9 @@ export function Overview({
   }, [prefs.overview_refresh_interval])
 
   return (
-    <div className="flex-1 p-6 overflow-y-auto font-mono text-sm font-bold">
+    <div className="flex-1 p-8 overflow-y-auto font-sans text-sm font-medium bg-canvas">
       {/* Stat cards */}
-      <div className="flex gap-3 mb-6 flex-wrap">
+      <div className="flex gap-4 mb-10 flex-wrap">
         {hasMultipleHosts && (
           <StatCard
             label="Hosts"
@@ -306,53 +293,53 @@ export function Overview({
           sub={stats && stats.agent_panes > 0 ? `${stats.agent_panes} agents` : undefined}
         />
         <StatCard
-          label="Agents Active"
+          label="Agents"
           value={stats?.agents.active ?? 0}
           color="var(--success)"
         />
         <StatCard
           label="Waiting"
           value={stats?.agents.waiting ?? 0}
-          color={stats && stats.agents.waiting > 0 ? 'var(--warning)' : 'var(--color-muted-foreground)'}
+          color={stats && stats.agents.waiting > 0 ? 'var(--warning)' : 'var(--muted-foreground)'}
         />
       </div>
 
       {/* Pending alerts */}
       {pendingAlerts.length > 0 && (
-        <div className="mb-6">
-          <h3 className="text-foreground text-sm font-semibold mb-2.5">
+        <div className="mb-10">
+          <h3 className="text-ink text-[13px] font-bold uppercase tracking-widest mb-4">
             Pending Alerts ({pendingAlerts.length})
           </h3>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             {pendingAlerts.map((evt, i) => {
               const cfg = statusConfig[evt.status] || { color: 'var(--muted-foreground)', label: evt.status, bg: 'transparent' }
               const tc = toolColors[evt.tool] || 'var(--muted-foreground)'
               return (
                 <div
                   key={`${evt.tool}-${evt.session}-${evt.pane}-${i}`}
-                  className="bg-card rounded-md p-2.5 px-3.5 flex items-center gap-2.5 cursor-pointer transition-colors hover:bg-sidebar-accent"
+                  className="bg-surface rounded-md p-3 px-4 flex items-center gap-3 cursor-pointer transition-all hover:bg-surface-elevated border-hairline"
                   style={{
-                    border: `1px solid color-mix(in oklch, ${cfg.color} 20%, transparent)`,
+                    border: `1px solid color-mix(in oklch, ${cfg.color} 15%, transparent)`,
                     borderLeft: `3px solid ${cfg.color}`,
                   }}
                   onClick={() => onJumpToSession(evt.host ? `${evt.host}/${evt.session}` : evt.session, evt.window, evt.pane)}
                 >
                   <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${evt.status === 'waiting' ? 'animate-[pulse_1.5s_ease-in-out_infinite]' : ''}`}
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${evt.status === 'waiting' ? 'animate-[pulse_1.5s_ease-in-out_infinite]' : ''}`}
                     style={{ background: cfg.color }}
                   />
-                  <span className="font-semibold text-[13px]" style={{ color: tc }}>{evt.tool}</span>
-                  <span className="text-xs" style={{ color: cfg.color }}>{cfg.label}</span>
-                  <span className="text-muted-foreground text-xs">in</span>
-                  <span className="text-foreground font-semibold text-xs">{evt.host_name ? `${evt.host_name}: ` : ''}{evt.session}</span>
+                  <span className="font-bold text-[13px] tracking-tight" style={{ color: tc }}>{evt.tool.toUpperCase()}</span>
+                  <span className="text-xs font-bold" style={{ color: cfg.color }}>{cfg.label.toUpperCase()}</span>
+                  <span className="text-mute/60 text-xs font-bold tracking-widest uppercase px-1">IN</span>
+                  <span className="text-ink font-bold text-[13px]">{evt.host_name ? `${evt.host_name}: ` : ''}{evt.session}</span>
                   {evt.message && (
-                    <span className="text-muted-foreground/60 text-[11px] flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <span className="text-mute/50 text-xs font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap italic ml-2">
                       — {evt.message}
                     </span>
                   )}
                   <span
                     onClick={(e) => { e.stopPropagation(); onDismissAlert(evt) }}
-                    className="text-muted-foreground text-base cursor-pointer leading-none hover:text-foreground"
+                    className="text-mute/30 text-xl cursor-pointer leading-none hover:text-ink transition-colors"
                   >×</span>
                 </div>
               )
@@ -363,7 +350,7 @@ export function Overview({
 
       {/* Sessions grid */}
       {sessions.length === 0 && (
-        <div className="text-muted-foreground text-sm mb-6">
+        <div className="text-mute text-[13px] font-medium mb-10 ml-1">
           No tmux sessions found. Start a tmux session to get started.
         </div>
       )}
@@ -378,17 +365,17 @@ export function Overview({
           a === 'Local' || a === 'Sessions' ? -1 : b === 'Local' || b === 'Sessions' ? 1 : a.localeCompare(b)
         )
         return sortedGroups.map(([groupLabel, groupSessions]) => (
-          <div key={groupLabel} className="mb-6">
-            <h3 className="text-foreground text-sm font-semibold mb-2.5 flex items-center gap-2">
+          <div key={groupLabel} className="mb-10">
+            <h3 className="text-ink text-[13px] font-bold uppercase tracking-widest mb-4 flex items-center gap-2">
               {hasMultipleHosts && (
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   groupSessions[0]?.host_online !== false ? 'bg-success' : 'bg-muted-foreground'
                 }`} />
               )}
               {groupLabel}
-              <span className="text-muted-foreground/60 font-normal text-xs">({groupSessions.length})</span>
+              <span className="text-mute/40 font-bold text-xs ml-1">({groupSessions.length})</span>
             </h3>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
               {groupSessions.map((session) => {
                 const sk = sessionKey(session)
                 const events = getSessionEvents(sk)
@@ -396,8 +383,6 @@ export function Overview({
                 const act = getSessionActivity(sk)
                 const active = isSessionActive(session)
                 const isOffline = session.host && session.host_online === false
-                // Count agents by pane command name OR by tool event detection
-                // (catches agents like codex/copilot that show as "node")
                 const eventPanes = new Set(events.map(e => e.pane).filter(Boolean))
                 const agentCount = (session.windows || []).reduce((n, w) =>
                   n + (w.panes || []).filter(p => agentCommands.has(p.current_command) || eventPanes.has(p.id)).length, 0)
@@ -406,74 +391,52 @@ export function Overview({
                   <div
                     key={sk}
                     onClick={() => onSessionSelect(session)}
-                    className={`bg-card rounded-lg p-3.5 cursor-pointer transition-colors hover:border-primary/40 ${isOffline ? 'opacity-60' : ''}`}
+                    className={`bg-surface rounded-lg p-5 cursor-pointer transition-all hover:border-hairline/60 border border-hairline group ${isOffline ? 'opacity-60' : ''}`}
                     style={{
-                      border: `1px solid ${hasWaiting ? 'var(--warning)' : 'var(--color-border)'}`,
+                      borderColor: hasWaiting ? 'var(--warning)' : undefined,
                     }}
                   >
                     {/* Header row */}
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-sm font-semibold text-foreground">{session.name}</span>
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-[15px] font-bold tracking-tight text-ink group-hover:text-primary transition-colors">{session.name}</span>
                       {session.attached && (
-                        <span className="text-[10px] text-success px-1.5 py-[1px] rounded-lg bg-success/10 border border-success/20">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-success px-1.5 py-[1.5px] rounded-sm bg-success/10 border border-success/20">
                           attached
                         </span>
                       )}
-                      <span className="ml-auto text-[10px] text-muted-foreground/60">
-                        up {formatUptime(session.created, prefs.timestamp_format)}
+                      <span className="ml-auto text-xs font-bold text-mute/40 uppercase tracking-wider">
+                        {formatUptime(session.created, prefs.timestamp_format)}
                       </span>
                     </div>
 
                     {/* Stats row */}
-                    <div className="flex items-center gap-3 mb-2 text-xs text-muted-foreground">
-                      <span>{session.windows?.length || 0} windows</span>
+                    <div className="flex items-center gap-4 mb-3 text-xs font-bold text-mute/70 uppercase tracking-wide">
+                      <span className="flex items-center gap-1.5">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+                        {session.windows?.length || 0}
+                      </span>
                       {agentCount > 0 && (
-                        <span style={{ color: toolColors.claude }}>{agentCount} agent{agentCount > 1 ? 's' : ''}</span>
+                        <span className="flex items-center gap-1.5" style={{ color: toolColors.claude }}>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                          {agentCount}
+                        </span>
                       )}
                       {active ? (
-                        <span className="text-success">active</span>
+                        <span className="text-success flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                          ACTIVE
+                        </span>
                       ) : (
-                        <span className="text-muted-foreground/60">idle</span>
+                        <span className="text-mute/40 font-bold uppercase">IDLE</span>
                       )}
                     </div>
 
                     {/* Sparkline */}
                     {prefs.sparklines_visible && act && act.sparkline && (
-                      <div className={events.length > 0 ? 'mb-2' : ''}>
-                        <Sparkline data={act.sparkline} height={18} />
+                      <div className="mt-4 pt-4 border-t border-hairline/40">
+                        <Sparkline data={act.sparkline} height={20} />
                       </div>
                     )}
-
-                    {/* Agent status — commented out for now
-                    {events.length > 0 && (
-                      <div className="flex flex-col gap-1">
-                        {events.map((evt, i) => {
-                          const config = statusConfig[evt.status]
-                          const tc = toolColors[evt.tool] || 'var(--muted-foreground)'
-                          if (!config) return null
-                          return (
-                            <div
-                              key={`${evt.tool}-${evt.pane}-${i}`}
-                              className="flex items-center gap-1.5 py-1 px-2 rounded text-[11px]"
-                              style={{ background: config.bg }}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full shrink-0 ${evt.status === 'waiting' ? 'animate-[pulse_1.5s_ease-in-out_infinite]' : ''}`}
-                                style={{ background: config.color }}
-                              />
-                              <span className="font-semibold" style={{ color: tc }}>{evt.tool}</span>
-                              <span className="text-muted-foreground">{config.label}</span>
-                              {evt.message && (
-                                <span className="text-muted-foreground/60 ml-auto overflow-hidden text-ellipsis whitespace-nowrap text-[10px]">
-                                  {evt.message}
-                                </span>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                    */}
                   </div>
                 )
               })}
@@ -490,11 +453,11 @@ export function Overview({
           return <HostStatsSection key={host.id} host={host} totalPanes={paneCount} />
         })
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(360px,1fr))] gap-4">
           {stats && stats.processes && stats.processes.length > 0 && (
             <div>
-              <h3 className="text-foreground text-sm font-semibold mb-2.5">Processes</h3>
-              <div className="bg-card border border-border rounded-lg p-3.5">
+              <h3 className="text-ink text-[13px] font-bold uppercase tracking-widest mb-4 ml-1">Processes</h3>
+              <div className="bg-surface border border-hairline rounded-lg p-5">
                 <ProcessBar processes={stats.processes} totalPanes={stats.panes} />
               </div>
             </div>
@@ -502,7 +465,7 @@ export function Overview({
 
           {stats?.system && (
             <div>
-              <h3 className="text-foreground text-sm font-semibold mb-2.5">System</h3>
+              <h3 className="text-ink text-[13px] font-bold uppercase tracking-widest mb-4 ml-1">System</h3>
               <SystemStatsCard system={stats.system} />
             </div>
           )}

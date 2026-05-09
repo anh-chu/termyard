@@ -5,43 +5,83 @@
 :root {
   --app-height: 100dvh;
   --app-width: 100vw;
-  /* Retro CRT Blue Theme */
-  --background: oklch(0.08 0.02 250);
-  --foreground: oklch(0.78 0.12 230);
-  --card: oklch(0.1 0.02 250);
-  --card-foreground: oklch(0.78 0.12 230);
-  --popover: oklch(0.1 0.02 250);
-  --popover-foreground: oklch(0.78 0.12 230);
-  --primary: oklch(0.72 0.15 230);
-  --primary-foreground: oklch(0.08 0.02 250);
-  --secondary: oklch(0.15 0.03 250);
-  --secondary-foreground: oklch(0.68 0.1 230);
-  --muted: oklch(0.12 0.02 250);
-  --muted-foreground: oklch(0.55 0.08 230);
-  --accent: oklch(0.7 0.15 200);
-  --accent-foreground: oklch(0.08 0.02 250);
-  --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.95 0 0);
-  --border: oklch(0.28 0.08 230);
-  --input: oklch(0.12 0.02 250);
-  --ring: oklch(0.72 0.15 230);
-  --success: oklch(0.65 0.15 145);
-  --warning: oklch(0.65 0.15 80);
-  --radius: 0.25rem;
-  --sidebar: oklch(0.06 0.02 250);
-  --sidebar-foreground: oklch(0.78 0.12 230);
-  --sidebar-primary: oklch(0.72 0.15 230);
-  --sidebar-primary-foreground: oklch(0.08 0.02 250);
-  --sidebar-accent: oklch(0.15 0.03 250);
-  --sidebar-accent-foreground: oklch(0.78 0.12 230);
-  --sidebar-border: oklch(0.28 0.08 230);
-  --sidebar-ring: oklch(0.72 0.15 230);
-  --chart-primary: oklch(0.72 0.12 230);
-  --chart-secondary: oklch(0.72 0.12 300);
+
+  /* Raycast Design Tokens — Surface */
+  --canvas: #07080a;
+  --surface: #0d0d0d;
+  --surface-elevated: #101111;
+  --surface-card: #121212;
+
+  /* Raycast Design Tokens — Hairline */
+  --hairline: #242728;
+  --hairline-soft: rgba(255,255,255,0.08);
+  --hairline-strong: rgba(255,255,255,0.16);
+
+  /* Raycast Design Tokens — Text */
+  --ink: #f4f4f6;
+  --body-text: #cdcdcd;
+  --charcoal: #d3d3d4;
+  --mute: #9c9c9d;
+  --ash: #6a6b6c;
+  --stone: #434345;
+  --on-dark: #ffffff;
+  --on-dark-mute: rgba(255,255,255,0.72);
+
+  /* Raycast Design Tokens — Brand */
+  --primary: #ffffff;
+  --primary-pressed: #e8e8e8;
+  --on-primary: #000000;
+  --button-fg: #18191a;
+
+  /* Raycast Design Tokens — Accent */
+  --accent-blue: #57c1ff;
+  --accent-blue-soft: rgba(87,193,255,0.15);
+  --accent-red: #ff6161;
+  --accent-red-soft: rgba(255,97,97,0.15);
+  --accent-green: #59d499;
+  --accent-green-soft: rgba(89,212,153,0.15);
+  --accent-yellow: #ffc533;
+  --accent-yellow-soft: rgba(255,197,51,0.15);
+  --hero-stripe-start: #ff5757;
+  --hero-stripe-end: #a1131a;
+  --key-bg-start: #121212;
+  --key-bg-end: #0d0d0d;
+
+  /* Shadcn-compatible mappings (Raycast-themed) */
+  --background: var(--canvas);
+  --foreground: var(--body-text);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface-elevated);
+  --popover-foreground: var(--body-text);
+  --secondary: var(--surface-elevated);
+  --secondary-foreground: var(--body-text);
+  --muted: var(--surface);
+  --muted-foreground: var(--mute);
+  --accent: var(--accent-blue);
+  --accent-foreground: var(--on-dark);
+  --destructive: var(--accent-red);
+  --destructive-foreground: var(--on-dark);
+  --border: var(--hairline);
+  --input: var(--surface-elevated);
+  --ring: var(--accent-blue);
+  --success: var(--accent-green);
+  --warning: var(--accent-yellow);
+  --radius: 0.5rem;
+  --sidebar: var(--canvas);
+  --sidebar-foreground: var(--body-text);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--on-primary);
+  --sidebar-accent: var(--surface-elevated);
+  --sidebar-accent-foreground: var(--body-text);
+  --sidebar-border: var(--hairline);
+  --sidebar-ring: var(--accent-blue);
+  --chart-primary: var(--accent-blue);
+  --chart-secondary: var(--accent-green);
 }
 
 @theme inline {
-  --font-sans: 'VT323', monospace;
+  --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -64,10 +104,11 @@
   --color-ring: var(--ring);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -78,6 +119,30 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-chart-primary: var(--chart-primary);
   --color-chart-secondary: var(--chart-secondary);
+  /* Raycast semantic color tokens for Tailwind utilities */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-card: var(--surface-card);
+  --color-hairline: var(--hairline);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-ink: var(--ink);
+  --color-body-text: var(--body-text);
+  --color-charcoal: var(--charcoal);
+  --color-mute: var(--mute);
+  --color-ash: var(--ash);
+  --color-stone: var(--stone);
+  --color-on-dark: var(--on-dark);
+  --color-on-dark-mute: var(--on-dark-mute);
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-blue-soft: var(--accent-blue-soft);
+  --color-accent-red: var(--accent-red);
+  --color-accent-red-soft: var(--accent-red-soft);
+  --color-accent-green: var(--accent-green);
+  --color-accent-green-soft: var(--accent-green-soft);
+  --color-accent-yellow: var(--accent-yellow);
+  --color-accent-yellow-soft: var(--accent-yellow-soft);
 }
 
 @layer base {
@@ -86,6 +151,7 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    font-feature-settings: "calt", "kern", "liga", "ss03";
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;

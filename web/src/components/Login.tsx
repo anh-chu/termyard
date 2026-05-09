@@ -38,17 +38,26 @@ export function Login({ mode, error, onSubmit, onTrustCert }: LoginProps) {
   }
 
   return (
-    <div className="flex items-center justify-center h-full w-full bg-background font-mono text-sm font-bold">
-      <div className="w-full max-w-sm p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">guppi</h1>
-          <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
-            all your tmux sessions<br />
-            all your ai agents<br />
-            one interface
-          </p>
+    <div className="flex items-center justify-center h-full w-full bg-canvas font-sans text-[13px] font-medium">
+      <div className="w-full max-w-sm p-10 bg-surface border border-hairline rounded-xl">
+        <div className="text-center mb-10">
+          <div className="flex justify-center mb-6">
+            <img src="/favicon.svg" alt="guppi" width="48" height="48" className="rounded-lg border border-hairline" />
+          </div>
+          <h1 className="text-2xl font-bold text-ink tracking-tight uppercase tracking-[0.2em]">GUPPI</h1>
+          <div className="flex flex-col gap-1 mt-4">
+            <p className="text-xs font-bold text-mute/60 uppercase tracking-widest leading-relaxed">
+              All tmux sessions
+            </p>
+            <p className="text-xs font-bold text-mute/60 uppercase tracking-widest leading-relaxed">
+              All AI agents
+            </p>
+            <p className="text-xs font-bold text-mute/60 uppercase tracking-widest leading-relaxed text-primary">
+              One Interface
+            </p>
+          </div>
           {isSetup && (
-            <p className="text-xs text-muted-foreground mt-3">set a password to get started</p>
+            <p className="text-xs font-bold text-success/80 mt-6 uppercase tracking-widest">Set a password to initialize</p>
           )}
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -57,9 +66,9 @@ export function Login({ mode, error, onSubmit, onTrustCert }: LoginProps) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={isSetup ? 'Choose a password' : 'Password'}
+              placeholder={isSetup ? 'Choose password' : 'Password'}
               autoFocus
-              className="w-full px-3 py-2 bg-input border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full px-4 py-2.5 bg-surface-elevated border border-hairline rounded-sm text-ink placeholder:text-mute/40 outline-none focus:border-primary/60 transition-colors font-sans"
             />
           </div>
           {isSetup && (
@@ -69,32 +78,32 @@ export function Login({ mode, error, onSubmit, onTrustCert }: LoginProps) {
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 placeholder="Confirm password"
-                className="w-full px-3 py-2 bg-input border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full px-4 py-2.5 bg-surface-elevated border border-hairline rounded-sm text-ink placeholder:text-mute/40 outline-none focus:border-primary/60 transition-colors font-sans"
               />
             </div>
           )}
           {displayError && (
-            <p className="text-sm text-destructive">{displayError}</p>
+            <p className="text-xs font-bold text-destructive uppercase tracking-wide text-center">{displayError}</p>
           )}
           <button
             type="submit"
             disabled={submitting || !password || (isSetup && !confirm)}
-            className="w-full px-3 py-2 bg-primary text-primary-foreground rounded font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="w-full px-4 py-3 bg-primary text-primary-foreground rounded-full font-bold uppercase tracking-widest hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-all mt-2"
           >
             {submitting
-              ? (isSetup ? 'Setting up...' : 'Signing in...')
-              : (isSetup ? 'Set password' : 'Sign in')
+              ? (isSetup ? 'Initializing...' : 'Verifying...')
+              : (isSetup ? 'Set Password' : 'Enter Workspace')
             }
           </button>
         </form>
         {onTrustCert && (
-          <div className="mt-6 text-center">
+          <div className="mt-8 text-center">
             <button
               type="button"
               onClick={onTrustCert}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="text-xs font-bold text-mute/40 hover:text-ink transition-colors uppercase tracking-widest"
             >
-              Need to trust the certificate?
+              Need to trust SSL certificate?
             </button>
           </div>
         )}

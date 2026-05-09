@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
+import { cn } from '../lib/utils'
 
 interface TerminalProps {
   sessionName: string
@@ -431,67 +432,71 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
   }, [termRef])
 
   return (
-    <div className="flex-1 p-1 overflow-hidden relative group">
-      <div className="h-full w-full flex flex-col gap-1">
+    <div className="flex-1 p-2 overflow-hidden relative group bg-canvas">
+      <div className="h-full w-full flex flex-col gap-2">
         <div
-          className="min-h-0 flex-1 border border-border rounded bg-card relative"
-          style={{ boxShadow: 'inset 0 0 20px rgba(102, 179, 255, 0.08)' }}
+          className="min-h-0 flex-1 border border-hairline rounded-lg bg-canvas relative"
         >
           <div
             ref={containerRef}
-            className="absolute inset-0.5 overflow-hidden rounded-sm"
+            className="absolute inset-1 overflow-hidden rounded-md"
           />
         {/* Fullscreen toggle */}
           {onToggleFullscreen && (
             <button
               onClick={onToggleFullscreen}
               title={fullscreen ? 'Exit fullscreen (Esc / Cmd+Shift+F)' : 'Fullscreen (Cmd+Shift+F)'}
-              className="absolute top-2 right-2 z-20 p-1.5 rounded bg-card border border-border text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+              className="absolute top-2.5 right-2.5 z-20 p-1.5 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-colors"
             >
               {fullscreen ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
               ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
               )}
             </button>
           )}
           {!termConnected && (
-            <div className="absolute inset-0 flex items-center justify-center bg-background/85 z-10 pointer-events-none rounded">
-              <div className="py-4 px-6 rounded bg-card border border-border text-foreground text-sm font-mono font-bold flex items-center gap-2.5">
+            <div className="absolute inset-0 flex items-center justify-center bg-canvas/90 z-10 pointer-events-none rounded-lg">
+              <div className="py-4 px-6 rounded-md bg-surface border border-hairline text-ink text-[13px] font-sans font-bold uppercase tracking-widest flex items-center gap-3">
                 <span className="inline-block w-2 h-2 rounded-full bg-destructive animate-[pulse_1.5s_ease-in-out_infinite]" />
-                Disconnected — reconnecting...
+                Disconnected — Reconnecting
               </div>
             </div>
           )}
         </div>
         {showMobileKeyBar && (
-          <div className="terminal-keybar-shell">
-            <div className="terminal-keybar">
+          <div className="flex-none pt-1">
+            <div className="grid grid-cols-6 gap-1.5 p-1.5 bg-surface border border-hairline rounded-md">
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => setClipboardMenuOpen((open) => !open)}
-                className="terminal-key terminal-key-clipboard"
+                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-lg relative"
                 title="Clipboard"
                 aria-label="Clipboard"
               >
                 📋
+                {clipboardMenuOpen && (
+                  <div className="absolute bottom-full left-0 mb-2 min-w-[120px] bg-surface-elevated border border-hairline rounded-md flex flex-col overflow-hidden z-50">
+                    <button type="button" onClick={handlePaste} className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-widest hover:bg-surface-elevated transition-colors border-b border-hairline/40">Paste</button>
+                    <button type="button" onClick={handleCopy} className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-widest hover:bg-surface-elevated transition-colors">Copy</button>
+                  </div>
+                )}
               </button>
-              {clipboardMenuOpen && (
-                <div className="terminal-keybar-menu">
-                  <button type="button" onClick={handlePaste} className="terminal-keybar-menu-item">Paste</button>
-                  <button type="button" onClick={handleCopy} className="terminal-keybar-menu-item">Copy</button>
-                </div>
-              )}
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={toggleCtrlModifier}
-                className={`terminal-key ${ctrlModifierActive ? 'terminal-key-active' : ''}`}
+                className={cn(
+                  "h-10 rounded-xs border border-hairline flex items-center justify-center text-xs font-bold uppercase tracking-widest transition-all",
+                  ctrlModifierActive 
+                    ? "bg-primary text-primary-foreground border-primary" 
+                    : "bg-gradient-to-b from-[#121212] to-[#0d0d0d] text-mute"
+                )}
               >
                 Ctrl
               </button>
@@ -502,17 +507,21 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
                   clearCtrlModifier()
                   sendSequence('\x1b')
                 }}
-                className="terminal-key"
+                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
               >
                 Esc
               </button>
-              <HoldableKey
-                label="Bksp"
-                onPress={() => {
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
                   clearCtrlModifier()
                   sendSequence(new Uint8Array([0x7f]))
                 }}
-              />
+                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
+              >
+                Bksp
+              </button>
               <MobileGestureKey
                 label="Pg ↕"
                 directions={['up', 'down']}
@@ -520,16 +529,16 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
                   clearCtrlModifier()
                   sendPage(direction)
                 }}
-                className="terminal-key-page"
+                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
               />
               <MobileGestureKey
-                label="← ↑ ↓ →"
+                label="Arrows"
                 directions={['left', 'right', 'up', 'down']}
                 onTrigger={(direction) => {
                   clearCtrlModifier()
                   sendArrow(direction)
                 }}
-                className="terminal-key-pad"
+                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
               />
             </div>
           </div>
@@ -537,31 +546,31 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
       </div>
       {capturedText && (
         <div
-          className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 p-3"
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-4"
           onClick={() => setCapturedText(null)}
         >
           <div
-            className="flex h-full max-h-[32rem] w-full max-w-2xl flex-col rounded border border-border bg-card shadow-2xl"
+            className="flex h-full max-h-[36rem] w-full max-w-2xl flex-col rounded-lg border border-hairline bg-surface overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-border px-3 py-2">
-              <div className="text-sm font-mono font-bold text-foreground">Captured Terminal Text</div>
+            <div className="flex items-center justify-between border-b border-hairline px-4 py-3 bg-surface-elevated/30">
+              <div className="text-[13px] font-bold uppercase tracking-widest text-ink">Captured Terminal Text</div>
               <button
                 type="button"
                 onClick={() => setCapturedText(null)}
-                className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                className="rounded-sm border border-hairline px-3 py-1 text-xs font-bold uppercase tracking-widest text-mute hover:text-ink hover:bg-surface-elevated transition-all"
               >
                 Close
               </button>
             </div>
-            <div className="px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="px-4 py-2.5 text-xs font-medium text-mute/60 italic">
               Select the text you want, then use the system copy action.
             </div>
             <textarea
               ref={captureTextareaRef}
               readOnly
               value={capturedText}
-              className="min-h-0 flex-1 resize-none bg-background px-3 py-2 font-mono text-xs text-foreground outline-none"
+              className="min-h-0 flex-1 resize-none bg-canvas px-4 py-3 font-mono text-[13px] text-ink outline-none border-t border-hairline"
               spellCheck={false}
             />
           </div>

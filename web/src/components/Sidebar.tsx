@@ -43,7 +43,7 @@ function ToolBadge({ event }: { event: ToolEvent }) {
   return (
     <div
       title={event.message || `${event.tool}: ${indicator.label}`}
-      className="inline-flex items-center gap-[3px] px-[5px] py-[1px] rounded-lg text-[10px]"
+      className="inline-flex items-center gap-[3px] px-[5px] py-[1px] rounded-lg text-xs"
       style={{
         background: `${toolColor}18`,
         border: `1px solid ${toolColor}40`,
@@ -381,11 +381,11 @@ export function Sidebar({
             setContextMenu({ key: sk, name: session.name, host: session.host, x: e.clientX, y: e.clientY })
           }}
           className={cn(
-            'flex flex-col w-full p-3 rounded transition-all duration-200 text-sidebar-foreground',
-            'hover:bg-sidebar-accent',
-            isSelected && 'bg-sidebar-accent text-sidebar-primary border-l-2 border-primary',
-            needsAttention && !isSelected && 'border-l-2 border-warning bg-warning/5',
-            !isSelected && !needsAttention && 'border-l-2 border-transparent',
+            'flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink',
+            'hover:bg-surface',
+            isSelected && 'bg-surface text-primary border border-hairline',
+            needsAttention && !isSelected && 'border-l border-warning bg-warning/5',
+            !isSelected && !needsAttention && 'border border-transparent',
             (isHiddenSection || isOffline) && 'opacity-60',
             isRenaming && 'cursor-default',
             draggingKey === sk && 'opacity-75 cursor-grabbing',
@@ -393,7 +393,7 @@ export function Sidebar({
           )}
         >
           <div className="flex items-center gap-2 w-full">
-            {!collapsed && <AgentMark agentType={agentType} className="h-5 min-w-8 px-1.5 shrink-0" />}
+            {!collapsed && <AgentMark agentType={agentType} className="h-4.5 min-w-8 px-1.5 shrink-0" />}
             {isRenaming ? (
               <input
                 ref={renameInputRef}
@@ -405,44 +405,44 @@ export function Sidebar({
                 }}
                 onBlur={submitRename}
                 onClick={(e) => e.stopPropagation()}
-                className="flex-1 text-sm text-foreground bg-input border border-primary rounded px-1 py-0.5 outline-none font-mono"
+                className="flex-1 text-sm text-ink bg-surface-elevated border border-primary rounded-sm px-1.5 py-0.5 outline-none font-sans font-medium"
               />
             ) : (
               <span className={cn(
-                'tracking-wide flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left',
+                'text-[13px] font-medium tracking-tight flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left',
                 isSelected && 'text-primary',
               )}>
                 {collapsed ? session.name.charAt(0).toUpperCase() : session.name}
               </span>
             )}
             {!collapsed && session.agent_session_id && (
-              <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono" title={session.agent_session_id}>
+              <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 text-xs text-mute font-mono" title={session.agent_session_id}>
                 {shortSessionId(session.agent_session_id)}
               </span>
             )}
             {!collapsed && (
-              <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground" title={`Uptime: ${formatUptime(session.created)}`}>
+              <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 text-xs text-mute font-medium" title={`Uptime: ${formatUptime(session.created)}`}>
                 {formatUptime(session.created)}
               </span>
             )}
             {!collapsed && session.attached && (
-              <span className="w-2 h-2 rounded-full bg-success shrink-0" title="attached" />
+              <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" title="attached" />
             )}
             {!collapsed && active && (
-              <span className="text-[10px] text-success shrink-0">active</span>
+              <span className="text-xs text-success font-semibold shrink-0">ACTIVE</span>
             )}
           </div>
 
           {!collapsed && (projectName || promptPreview) && (
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <div className="mt-1 flex items-center gap-2 text-xs text-mute font-medium">
               {projectName && (
-                <span className="shrink-0 rounded border border-border px-1.5 py-0.5" title={session.project_path}>
+                <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 bg-surface-card/50" title={session.project_path}>
                   {projectName}
                 </span>
               )}
               {promptPreview && (
-                <span className="min-w-0 truncate italic" title={promptPreview}>
-                  "{promptPreview}"
+                <span className="min-w-0 truncate opacity-80" title={promptPreview}>
+                  {promptPreview}
                 </span>
               )}
             </div>
@@ -477,34 +477,35 @@ export function Sidebar({
 
   return (
     <aside className={cn(
-      'flex flex-col h-full bg-sidebar transition-all duration-300 font-mono text-sm font-bold',
+      'flex flex-col h-full bg-canvas transition-all duration-300 font-sans text-sm font-medium',
       collapsed
         ? collapseMode === 'hidden' ? 'w-0 overflow-hidden' : 'w-16'
         : 'w-72',
-      !isHidden && 'border-r border-sidebar-border',
+      !isHidden && 'border-r border-hairline',
     )}>
       {!collapsed && (
         <div className="px-2 pt-2" ref={filterRef}>
           <button
             type="button"
             onClick={() => setFilterOpen(value => !value)}
-            className="w-full rounded border border-sidebar-border bg-sidebar-accent px-3 py-2 text-left text-[11px] text-muted-foreground hover:text-sidebar-foreground"
+            className="w-full rounded-md border border-hairline bg-surface-elevated px-3 py-2 text-left text-xs text-mute hover:text-ink font-medium transition-colors"
           >
             {filterLabel}
           </button>
           {filterOpen && (
-            <div className="mt-1 rounded border border-sidebar-border bg-sidebar p-2 shadow-lg">
-              <label className="flex items-center gap-2 px-1 py-1 text-[11px] text-sidebar-foreground">
+            <div className="mt-1 rounded-lg border border-hairline bg-surface p-2">
+              <label className="flex items-center gap-2 px-1 py-1 text-xs text-ink font-medium">
                 <input
                   type="checkbox"
                   checked={projectFilters.length === 0}
                   onChange={() => setProjectFilters([])}
+                  className="rounded-xs border-hairline bg-surface-elevated"
                 />
                 All projects
               </label>
               <div className="max-h-48 overflow-y-auto">
                 {projects.map(project => (
-                  <label key={project} className="flex items-center gap-2 px-1 py-1 text-[11px] text-sidebar-foreground" title={project}>
+                  <label key={project} className="flex items-center gap-2 px-1 py-1 text-xs text-ink font-medium" title={project}>
                     <input
                       type="checkbox"
                       checked={projectFilters.includes(project)}
@@ -513,6 +514,7 @@ export function Sidebar({
                           ? current.filter(value => value !== project)
                           : [...current, project])
                       }}
+                      className="rounded-xs border-hairline bg-surface-elevated"
                     />
                     <span className="truncate">{pathLeaf(project)}</span>
                   </label>
@@ -524,9 +526,9 @@ export function Sidebar({
       )}
 
       <nav className="flex-1 overflow-y-auto p-2">
-        <ul className="space-y-1">
+        <ul className="space-y-0.5">
           {visibleSessions.length === 0 && (
-            <li className="p-3 text-muted-foreground text-sm">
+            <li className="p-3 text-mute text-sm">
               {collapsed ? '—' : 'No sessions'}
             </li>
           )}
@@ -535,7 +537,7 @@ export function Sidebar({
             groupedVisibleSessions.map(group => (
               <li key={group.label}>
                 {!collapsed && (
-                  <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1.5">
+                  <div className="px-3 pt-2 pb-1 text-xs uppercase tracking-wider text-mute font-semibold flex items-center gap-1.5">
                     <span className={cn(
                       'w-1.5 h-1.5 rounded-full',
                       group.sessions[0]?.host_online !== false ? 'bg-success' : 'bg-muted-foreground',
@@ -556,10 +558,10 @@ export function Sidebar({
             <>
               <li
                 onClick={() => setHiddenExpanded(!hiddenExpanded)}
-                className="px-3 mt-2 text-[11px] text-muted-foreground cursor-pointer select-none flex items-center gap-1"
+                className="px-3 mt-2 text-xs text-mute cursor-pointer select-none flex items-center gap-1"
               >
                 <span
-                  className="inline-block text-[10px] transition-transform duration-150"
+                  className="inline-block text-xs transition-transform duration-150"
                   style={{ transform: hiddenExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
                 >
                   ▶
@@ -574,7 +576,7 @@ export function Sidebar({
 
       {contextMenu && (
         <div
-          className="fixed bg-popover border border-border rounded-md py-1 z-[1000] shadow-lg min-w-[140px]"
+          className="fixed bg-surface-elevated border border-hairline rounded-md py-1 z-[1000] min-w-[140px]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -585,7 +587,7 @@ export function Sidebar({
               host: contextMenu.host,
             })}
             className={cn(
-              'px-3 py-1.5 text-sm text-popover-foreground hover:bg-accent hover:text-accent-foreground',
+              'px-3 py-1.5 text-sm text-ink hover:bg-surface-card hover:text-ink',
               canRenameContextTarget ? 'cursor-pointer' : 'cursor-not-allowed opacity-50',
             )}
           >
@@ -593,7 +595,7 @@ export function Sidebar({
           </div>
           <div
             onClick={() => toggleHide(contextMenu.key)}
-            className="px-3 py-1.5 text-sm text-popover-foreground cursor-pointer hover:bg-accent hover:text-accent-foreground"
+            className="px-3 py-1.5 text-sm text-ink cursor-pointer hover:bg-surface-card hover:text-ink"
           >
             {hiddenSet.has(contextMenu.key) ? 'Unhide' : 'Hide'}
           </div>

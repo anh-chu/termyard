@@ -36,7 +36,7 @@ export const defaultPreferences: Preferences = {
     font_family: 'Space Mono',
     scrollback: 5000,
   },
-  theme: 'retro-blue',
+  theme: 'raycast',
   custom_theme: {},
   sidebar: {
     default_collapsed: false,

@@ -52,7 +52,7 @@ func Default() *Preferences {
 			FontFamily: "Space Mono",
 			Scrollback: 5000,
 		},
-		Theme:        "retro-blue",
+		Theme:        "raycast",
 		CustomTheme:  map[string]string{},
 		Sidebar: Sidebar{
 			DefaultCollapsed: false,

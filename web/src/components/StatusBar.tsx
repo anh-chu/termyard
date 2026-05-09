@@ -57,24 +57,24 @@ export function StatusBar({ sessionCount, connected, activeSession, waitingCount
   const totalAgents = stats.agent_panes ?? agentCount
 
   return (
-    <footer className="flex items-center justify-between px-4 py-1 border-t border-border bg-card text-xs text-muted-foreground font-mono font-bold">
+    <footer className="flex items-center justify-between px-4 py-1 border-t border-hairline bg-surface text-xs text-mute font-mono font-bold">
       <div className="flex items-center gap-4">
         {peersConfigured > 0 && (
-          <span>PEERS: <span className={peersConnected === peersConfigured ? 'text-foreground' : 'text-warning'}>{peersConnected}/{peersConfigured}</span></span>
+          <span>PEERS: <span className={peersConnected === peersConfigured ? 'text-ink' : 'text-warning'}>{peersConnected}/{peersConfigured}</span></span>
         )}
         {hosts.length > 1 && (
-          <span>HOSTS: <span className="text-foreground">{hostCount}</span></span>
+          <span>HOSTS: <span className="text-ink">{hostCount}</span></span>
         )}
-        <span>SESSIONS: <span className="text-foreground">{sessionCount}</span></span>
-        <span>AGENTS: <span className={totalAgents > 0 ? 'text-foreground' : ''}>{totalAgents}</span></span>
+        <span>SESSIONS: <span className="text-ink">{sessionCount}</span></span>
+        <span>AGENTS: <span className={totalAgents > 0 ? 'text-ink' : ''}>{totalAgents}</span></span>
         {activeSession && (
-          <span>SESSION: <span className="text-foreground">{activeSession.host ? `${activeSession.host_name || activeSession.host}/` : ''}{activeSession.name}</span></span>
+          <span>SESSION: <span className="text-ink">{activeSession.host ? `${activeSession.host_name || activeSession.host}/` : ''}{activeSession.name}</span></span>
         )}
         {activeWindow && (
-          <span>WIN: <span className="text-foreground">{activeWindow.index}:{activeWindow.name}</span></span>
+          <span>WIN: <span className="text-ink">{activeWindow.index}:{activeWindow.name}</span></span>
         )}
         {paneCount > 1 && (
-          <span>PANES: <span className="text-foreground">{paneCount}</span></span>
+          <span>PANES: <span className="text-ink">{paneCount}</span></span>
         )}
         {waitingCount > 0 && (
           <span className="text-warning">WAITING: {waitingCount}</span>
@@ -82,10 +82,10 @@ export function StatusBar({ sessionCount, connected, activeSession, waitingCount
       </div>
       <div className="flex items-center gap-4">
         {stats.cpu_percent !== undefined && (
-          <span>CPU: <span className="text-foreground">{stats.cpu_percent}%</span></span>
+          <span>CPU: <span className="text-ink">{stats.cpu_percent}%</span></span>
         )}
         {stats.memory && (
-          <span>MEM: <span className="text-foreground">{stats.memory.percent}%</span></span>
+          <span>MEM: <span className="text-ink">{stats.memory.percent}%</span></span>
         )}
         {pushState !== 'unsupported' && (
           <span className="flex items-center gap-1">
@@ -110,20 +110,20 @@ export function StatusBar({ sessionCount, connected, activeSession, waitingCount
             {updateAvailable ? (
               <button
                 onClick={() => window.location.reload()}
-                className="text-warning hover:text-foreground transition-colors"
+                className="text-warning hover:text-ink transition-colors"
                 title="A new version is available — click to reload"
               >
                 {version} (update available)
               </button>
             ) : (
-              <span className="text-muted-foreground">{version}</span>
+              <span className="text-mute">{version}</span>
             )}
           </span>
         )}
         {onHelp && (
           <button
             onClick={onHelp}
-            className="text-muted-foreground hover:text-foreground transition-colors"
+            className="text-mute hover:text-ink transition-colors"
             title="Keyboard shortcuts (Ctrl+/)"
           >
             ?

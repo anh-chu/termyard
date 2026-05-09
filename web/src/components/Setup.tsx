@@ -20,15 +20,15 @@ export function AgentStatusList({ agents }: { agents: AgentStatus[] }) {
   return (
     <div className="space-y-2">
       {agents.map(agent => (
-        <div key={agent.key} className="flex items-center justify-between py-2 px-3 rounded border border-border bg-background">
-          <span className="text-sm text-foreground">{agent.name}</span>
-          <div className="flex items-center gap-3 text-xs">
-            <span className={agent.installed ? 'text-success' : 'text-muted-foreground'}>
-              {agent.installed ? 'installed' : 'not found'}
+        <div key={agent.key} className="flex items-center justify-between py-3 px-4 rounded-lg border border-hairline bg-surface transition-all hover:border-hairline/60">
+          <span className="text-[13px] font-bold text-ink tracking-tight">{agent.name}</span>
+          <div className="flex items-center gap-3 text-xs font-bold uppercase tracking-widest">
+            <span className={agent.installed ? 'text-success' : 'text-mute/40'}>
+              {agent.installed ? 'INSTALLED' : 'NOT FOUND'}
             </span>
             {agent.installed && (
               <span className={agent.configured ? 'text-success' : 'text-warning'}>
-                {agent.configured ? 'configured' : 'needs setup'}
+                {agent.configured ? 'READY' : 'SETUP REQUIRED'}
               </span>
             )}
           </div>
@@ -51,11 +51,11 @@ export function SetupCommandBox({ command }: { command: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="w-full flex items-center justify-between px-4 py-3 rounded border border-border bg-input text-foreground font-mono text-sm hover:border-primary transition-colors cursor-pointer"
+      className="w-full flex items-center justify-between px-4 py-3.5 rounded border border-hairline bg-surface-elevated text-ink font-mono text-[13px] hover:border-primary/40 transition-all cursor-pointer group"
     >
-      <span>$ {command}</span>
-      <span className="text-xs text-muted-foreground">
-        {copied ? 'copied!' : 'click to copy'}
+      <span className="opacity-90">$ {command}</span>
+      <span className="text-xs font-bold uppercase tracking-widest text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+        {copied ? 'COPIED!' : 'CLICK TO COPY'}
       </span>
     </button>
   )
@@ -93,70 +93,72 @@ export function Setup({ onComplete, fullPage = false }: { onComplete: () => void
   }
 
   return (
-    <div className={fullPage ? "flex items-center justify-center min-h-full w-full bg-background py-8" : "flex-1 flex items-center justify-center overflow-y-auto"}>
-      <div className="w-full max-w-md p-8">
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">
-            {step === 'agents' ? 'agent setup' : 'preferences'}
+    <div className={fullPage ? "flex items-center justify-center min-h-full w-full bg-canvas py-10" : "flex-1 flex items-center justify-center overflow-y-auto"}>
+      <div className="w-full max-w-md p-10 bg-surface border border-hairline rounded-xl">
+        <div className="text-center mb-10">
+          <h1 className="text-xl font-bold text-ink tracking-tight uppercase tracking-[0.15em]">
+            {step === 'agents' ? 'Agent Setup' : 'Preferences'}
           </h1>
-          <p className="text-sm text-muted-foreground mt-2">
+          <p className="text-[13px] font-medium text-mute/60 mt-4 leading-relaxed">
             {step === 'agents'
-              ? 'Configure your agents to report status to guppi'
-              : 'Pick a theme and enable notifications'}
+              ? 'Configure your agents to report status to GUPPI'
+              : 'Pick a theme and enable system notifications'}
           </p>
         </div>
 
         {step === 'agents' && (
           <>
             {loading && !status ? (
-              <div className="text-center text-sm text-muted-foreground py-8">Checking agents...</div>
+              <div className="text-center text-xs font-bold uppercase tracking-widest text-mute/40 py-10 animate-pulse">Checking status...</div>
             ) : status ? (
-              <div className="space-y-5">
+              <div className="space-y-8">
                 <AgentStatusList agents={status.agents} />
 
                 {!allConfigured && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Run this command to configure hooks for all installed agents:
+                  <div className="space-y-4">
+                    <p className="text-xs font-bold text-mute uppercase tracking-widest ml-1">
+                      Configuration Command
                     </p>
                     <SetupCommandBox command={status.setup_command} />
                   </div>
                 )}
 
                 {allConfigured && (
-                  <p className="text-xs text-success text-center">
-                    All installed agents are configured.
-                  </p>
+                  <div className="py-4 px-4 bg-success/5 border border-success/20 rounded-lg text-center">
+                    <p className="text-xs font-bold text-success uppercase tracking-widest">
+                      All agents configured
+                    </p>
+                  </div>
                 )}
 
-                <div className="flex gap-3">
+                <div className="flex gap-4 pt-2">
                   <button
                     onClick={fetchStatus}
                     disabled={loading}
-                    className="flex-1 px-3 py-2 rounded text-sm border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                    className="flex-1 px-4 py-3 rounded-full text-[13px] font-bold uppercase tracking-widest border border-hairline bg-surface text-ink hover:bg-surface-elevated transition-all disabled:opacity-50"
                   >
-                    {loading ? 'Checking...' : 'Refresh'}
+                    {loading ? 'WAIT...' : 'REFRESH'}
                   </button>
                   <button
                     onClick={() => setStep('preferences')}
-                    className="flex-1 px-3 py-2 bg-primary text-primary-foreground rounded text-sm font-medium hover:opacity-90 transition-opacity"
+                    className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-full text-[13px] font-bold uppercase tracking-widest hover:bg-white/90 transition-all"
                   >
-                    Next
+                    NEXT
                   </button>
                 </div>
 
-                <p className="text-xs text-muted-foreground text-center">
+                <p className="text-xs font-medium text-mute/40 text-center leading-relaxed">
                   Multi-host? Run the setup command on each machine where you use agents.
                 </p>
               </div>
             ) : (
               <div className="text-center">
-                <p className="text-sm text-muted-foreground mb-4">Could not check agent status.</p>
+                <p className="text-[13px] font-medium text-mute mb-6">Could not check agent status.</p>
                 <button
                   onClick={() => setStep('preferences')}
-                  className="px-4 py-2 bg-primary text-primary-foreground rounded text-sm font-medium hover:opacity-90 transition-opacity"
+                  className="w-full px-4 py-3 bg-primary text-primary-foreground rounded-full text-[13px] font-bold uppercase tracking-widest hover:bg-white/90 transition-all"
                 >
-                  Next
+                  NEXT
                 </button>
               </div>
             )}
@@ -164,29 +166,32 @@ export function Setup({ onComplete, fullPage = false }: { onComplete: () => void
         )}
 
         {step === 'preferences' && (
-          <div className="space-y-5">
+          <div className="space-y-8">
             {/* Theme picker */}
             <div>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Theme</h3>
-              <div className="grid grid-cols-2 gap-2">
+              <h3 className="text-xs font-bold text-mute uppercase tracking-widest mb-4 ml-1">Theme</h3>
+              <div className="grid grid-cols-2 gap-3">
                 {Object.values(themePresets).map(theme => (
                   <button
                     key={theme.name}
                     onClick={() => handleThemeChange(theme.name)}
                     className={cn(
-                      'p-3 rounded-lg border text-left transition-colors',
+                      'p-4 rounded-lg border text-left transition-all duration-200',
                       prefs.theme === theme.name
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-background text-foreground hover:border-primary/40',
+                        ? 'border-primary bg-primary/5'
+                        : 'border-hairline bg-surface-elevated/30 hover:border-hairline/60',
                     )}
                   >
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <div className="w-3 h-3 rounded-full border border-border" style={{ background: theme.xterm.background }} />
-                      <div className="w-3 h-3 rounded-full border border-border" style={{ background: theme.xterm.foreground }} />
-                      <div className="w-3 h-3 rounded-full border border-border" style={{ background: theme.xterm.blue }} />
-                      <div className="w-3 h-3 rounded-full border border-border" style={{ background: theme.xterm.green }} />
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <div className="w-3.5 h-3.5 rounded-full border border-hairline/40" style={{ background: theme.xterm.background }} />
+                      <div className="w-3.5 h-3.5 rounded-full border border-hairline/40" style={{ background: theme.xterm.foreground }} />
+                      <div className="w-3.5 h-3.5 rounded-full border border-hairline/40" style={{ background: theme.xterm.blue }} />
+                      <div className="w-3.5 h-3.5 rounded-full border border-hairline/40" style={{ background: theme.xterm.green }} />
                     </div>
-                    <div className="text-sm font-semibold">{theme.label}</div>
+                    <div className={cn(
+                      'text-xs font-bold tracking-tight',
+                      prefs.theme === theme.name ? 'text-primary' : 'text-ink/80'
+                    )}>{theme.label}</div>
                   </button>
                 ))}
               </div>
@@ -194,55 +199,51 @@ export function Setup({ onComplete, fullPage = false }: { onComplete: () => void
 
             {/* Push notifications */}
             <div>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Notifications</h3>
-              <div className="rounded border border-border bg-background p-3">
+              <h3 className="text-xs font-bold text-mute uppercase tracking-widest mb-4 ml-1">Notifications</h3>
+              <div className="rounded-lg border border-hairline bg-surface p-4">
                 {pushState === 'unsupported' ? (
-                  <p className="text-sm text-muted-foreground">
-                    Push notifications require HTTPS or localhost with a supported browser.
+                  <p className="text-xs font-medium text-mute/60 italic">
+                    Requires HTTPS or localhost with a supported browser.
                   </p>
                 ) : pushState === 'denied' ? (
-                  <p className="text-sm text-muted-foreground">
-                    Push notifications are blocked by your browser. You can reset this in your browser's site settings.
+                  <p className="text-xs font-medium text-destructive uppercase tracking-widest">
+                    Blocked by browser settings
                   </p>
                 ) : pushState === 'subscribed' ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-success text-sm">Push notifications enabled</span>
+                  <div className="flex items-center justify-center gap-2 py-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                    <span className="text-success text-xs font-bold uppercase tracking-widest">Push Enabled</span>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-foreground">Push notifications</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Get alerted when agents need attention</p>
+                      <p className="text-[13px] font-bold text-ink uppercase tracking-tight">Push Alerts</p>
+                      <p className="text-xs font-medium text-mute/60 mt-1 uppercase tracking-wide">Receive agent alerts</p>
                     </div>
                     <button
                       onClick={pushSubscribe}
-                      className="px-3 py-1.5 rounded text-sm border border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
+                      className="px-5 py-2 rounded-full text-xs font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-white/90 transition-all"
                     >
-                      Enable
+                      ENABLE
                     </button>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Keyboard shortcuts hint */}
-            <p className="text-xs text-muted-foreground text-center">
-              Press <kbd className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded border border-border bg-muted text-foreground text-xs font-mono">{/Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl'}</kbd>+<kbd className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded border border-border bg-muted text-foreground text-xs font-mono">/</kbd> anytime to see all keyboard shortcuts
-            </p>
-
             {/* Navigation */}
-            <div className="flex gap-3">
+            <div className="flex gap-4 pt-2">
               <button
                 onClick={() => setStep('agents')}
-                className="flex-1 px-3 py-2 rounded text-sm border border-border text-foreground hover:bg-muted transition-colors"
+                className="flex-1 px-4 py-3 rounded-full text-[13px] font-bold uppercase tracking-widest border border-hairline bg-surface text-ink hover:bg-surface-elevated transition-all"
               >
-                Back
+                BACK
               </button>
               <button
                 onClick={onComplete}
-                className="flex-1 px-3 py-2 bg-primary text-primary-foreground rounded text-sm font-medium hover:opacity-90 transition-opacity"
+                className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded-full text-[13px] font-bold uppercase tracking-widest hover:bg-white/90 transition-all"
               >
-                Continue to Dashboard
+                FINISH
               </button>
             </div>
           </div>

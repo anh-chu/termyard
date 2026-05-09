@@ -41,7 +41,7 @@ function getShortcuts(quickSwitcherKey: string): ShortcutItem[] {
 
 function Kbd({ children }: { children: string }) {
   return (
-    <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded border border-border bg-muted text-foreground text-xs font-mono">
+    <kbd className="inline-flex items-center justify-center min-w-[28px] h-6 px-1.5 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] text-mute text-xs font-mono font-bold">
       {children}
     </kbd>
   )
@@ -65,27 +65,27 @@ export function HelpModal({ onClose }: HelpModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-card border border-border rounded-lg shadow-lg w-full max-w-md mx-4 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold text-foreground tracking-wider uppercase">Keyboard Shortcuts</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-lg leading-none px-1">×</button>
+      <div className="bg-surface border border-hairline rounded-xl shadow-[0_32px_128px_rgba(0,0,0,0.8)] w-full max-w-md mx-4 overflow-hidden font-sans">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline bg-surface">
+          <h2 className="text-[13px] font-bold text-ink tracking-widest uppercase">Keyboard Shortcuts</h2>
+          <button onClick={onClose} className="text-mute/40 hover:text-ink text-2xl leading-none px-1 transition-colors">×</button>
         </div>
-        <div className="px-5 py-4 max-h-[70vh] overflow-y-auto">
+        <div className="px-6 py-6 max-h-[75vh] overflow-y-auto bg-surface">
           {shortcuts.map((item, i) => {
             if ('section' in item && item.section) {
               return (
-                <div key={i} className={`text-xs font-semibold text-muted-foreground uppercase tracking-wider ${i > 0 ? 'mt-4' : ''} mb-2`}>
+                <div key={i} className={`text-[11px] font-bold text-primary uppercase tracking-widest ${i > 0 ? 'mt-8' : ''} mb-3 ml-1`}>
                   {item.section}
                 </div>
               )
             }
             return (
-              <div key={i} className="flex items-center justify-between py-1.5">
-                <span className="text-sm text-foreground">{'label' in item ? item.label : ''}</span>
-                <div className="flex items-center gap-1">
+              <div key={i} className="flex items-center justify-between py-2 group hover:bg-surface-elevated/10 rounded-md px-2 -mx-2 transition-colors">
+                <span className="text-[13px] font-medium text-mute/80 group-hover:text-ink transition-colors">{'label' in item ? item.label : ''}</span>
+                <div className="flex items-center gap-1.5">
                   {'keys' in item && item.keys?.map((k, j) => (
                     <Kbd key={j}>{k}</Kbd>
                   ))}
@@ -94,8 +94,10 @@ export function HelpModal({ onClose }: HelpModalProps) {
             )
           })}
         </div>
-        <div className="px-5 py-2.5 border-t border-border text-xs text-muted-foreground">
-          Press <Kbd>Esc</Kbd> to close
+        <div className="px-6 py-3.5 border-t border-hairline bg-surface-elevated/20 text-xs font-bold uppercase tracking-widest text-mute/40 flex items-center gap-2">
+          <span>Press</span>
+          <Kbd>Esc</Kbd>
+          <span>to close reference</span>
         </div>
       </div>
     </div>

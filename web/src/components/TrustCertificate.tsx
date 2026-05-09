@@ -26,7 +26,7 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
     case 'ios':
       return (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-mute">
             Tap the button below to download the configuration profile, then follow these steps:
           </p>
           <a
@@ -35,7 +35,7 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
           >
             Install Profile
           </a>
-          <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+          <ol className="text-sm text-mute space-y-2 list-decimal list-inside">
             <li>Tap "Allow" when prompted to download the profile</li>
             <li>Open <strong>Settings</strong> &rarr; <strong>General</strong> &rarr; <strong>VPN & Device Management</strong></li>
             <li>Tap the <strong>guppi CA Trust</strong> profile and tap <strong>Install</strong></li>
@@ -47,7 +47,7 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
     case 'macos':
       return (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-mute">
             Download the certificate and add it to your Keychain:
           </p>
           <div className="flex gap-2">
@@ -59,22 +59,22 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
             </a>
             <a
               href="/api/tls/ca.mobileconfig"
-              className="flex-1 px-3 py-2 bg-card border border-border text-foreground rounded font-medium text-center hover:opacity-90 transition-opacity"
+              className="flex-1 px-3 py-2 bg-surface border border-hairline text-ink rounded font-medium text-center hover:opacity-90 transition-opacity"
             >
               Install Profile
             </a>
           </div>
-          <div className="text-sm text-muted-foreground">
-            <p className="font-medium text-foreground mb-1">Option A: Configuration Profile (easiest)</p>
+          <div className="text-sm text-mute">
+            <p className="font-medium text-ink mb-1">Option A: Configuration Profile (easiest)</p>
             <ol className="space-y-1 list-decimal list-inside mb-3">
               <li>Click "Install Profile" above</li>
               <li>Open <strong>System Settings</strong> &rarr; <strong>Privacy & Security</strong> &rarr; <strong>Profiles</strong></li>
               <li>Click the <strong>guppi CA Trust</strong> profile and click <strong>Install</strong></li>
             </ol>
-            <p className="font-medium text-foreground mb-1">Option B: Manual</p>
+            <p className="font-medium text-ink mb-1">Option B: Manual</p>
             <ol className="space-y-1 list-decimal list-inside">
               <li>Click "Download CA Certificate" above</li>
-              <li>Double-click the downloaded <code className="text-xs bg-card px-1 rounded">guppi-ca.crt</code> file</li>
+              <li>Double-click the downloaded <code className="text-xs bg-surface px-1 rounded">guppi-ca.crt</code> file</li>
               <li>Keychain Access will open — add it to the <strong>login</strong> keychain</li>
               <li>Double-click the certificate, expand <strong>Trust</strong>, set to <strong>Always Trust</strong></li>
             </ol>
@@ -84,7 +84,7 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
     case 'android':
       return (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-mute">
             Download the certificate and install it:
           </p>
           <a
@@ -93,13 +93,13 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
           >
             Download CA Certificate
           </a>
-          <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+          <ol className="text-sm text-mute space-y-2 list-decimal list-inside">
             <li>Tap the button above to download the certificate</li>
             <li>Open <strong>Settings</strong> &rarr; <strong>Security</strong> &rarr; <strong>Encryption & credentials</strong></li>
             <li>Tap <strong>Install a certificate</strong> &rarr; <strong>CA certificate</strong></li>
-            <li>Select the downloaded <code className="text-xs bg-card px-1 rounded">guppi-ca.crt</code> file</li>
+            <li>Select the downloaded <code className="text-xs bg-surface px-1 rounded">guppi-ca.crt</code> file</li>
           </ol>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-mute">
             Note: Menu paths may vary by device manufacturer.
           </p>
         </div>
@@ -107,7 +107,7 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
     case 'windows':
       return (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-mute">
             Download the certificate and install it to the Windows certificate store:
           </p>
           <a
@@ -116,8 +116,8 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
           >
             Download CA Certificate
           </a>
-          <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-            <li>Double-click the downloaded <code className="text-xs bg-card px-1 rounded">guppi-ca.crt</code> file</li>
+          <ol className="text-sm text-mute space-y-2 list-decimal list-inside">
+            <li>Double-click the downloaded <code className="text-xs bg-surface px-1 rounded">guppi-ca.crt</code> file</li>
             <li>Click <strong>Install Certificate</strong></li>
             <li>Select <strong>Current User</strong> and click Next</li>
             <li>Choose <strong>Place all certificates in the following store</strong></li>
@@ -129,7 +129,7 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
     case 'linux':
       return (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-mute">
             Download the certificate and add it to your system trust store:
           </p>
           <a
@@ -138,23 +138,23 @@ function PlatformInstructions({ platform }: { platform: Platform }) {
           >
             Download CA Certificate
           </a>
-          <div className="text-sm text-muted-foreground">
-            <p className="font-medium text-foreground mb-1">Debian / Ubuntu:</p>
-            <pre className="bg-card border border-border rounded p-2 text-xs overflow-x-auto mb-3">
+          <div className="text-sm text-mute">
+            <p className="font-medium text-ink mb-1">Debian / Ubuntu:</p>
+            <pre className="bg-surface border border-hairline rounded p-2 text-xs overflow-x-auto mb-3">
 {`sudo cp guppi-ca.crt /usr/local/share/ca-certificates/
 sudo update-ca-certificates`}
             </pre>
-            <p className="font-medium text-foreground mb-1">Fedora / RHEL:</p>
-            <pre className="bg-card border border-border rounded p-2 text-xs overflow-x-auto mb-3">
+            <p className="font-medium text-ink mb-1">Fedora / RHEL:</p>
+            <pre className="bg-surface border border-hairline rounded p-2 text-xs overflow-x-auto mb-3">
 {`sudo cp guppi-ca.crt /etc/pki/ca-trust/source/anchors/
 sudo update-ca-trust`}
             </pre>
-            <p className="font-medium text-foreground mb-1">Arch:</p>
-            <pre className="bg-card border border-border rounded p-2 text-xs overflow-x-auto">
+            <p className="font-medium text-ink mb-1">Arch:</p>
+            <pre className="bg-surface border border-hairline rounded p-2 text-xs overflow-x-auto">
 {`sudo trust anchor guppi-ca.crt`}
             </pre>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-mute">
             Note: Browsers like Chrome and Firefox may need to be restarted after installing.
             Firefox uses its own certificate store — import via Preferences &rarr; Certificates.
           </p>
@@ -169,7 +169,7 @@ sudo update-ca-trust`}
           >
             Download CA Certificate
           </a>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-mute">
             Download the certificate and add it to your operating system or browser's trusted certificate store.
           </p>
         </div>
@@ -190,21 +190,21 @@ export function TrustCertificate({ onBack }: { onBack: () => void }) {
   }, [])
 
   if (caAvailable === null) {
-    return <div className="flex items-center justify-center h-full w-full bg-background" />
+    return <div className="flex items-center justify-center h-full w-full bg-canvas" />
   }
 
   if (!caAvailable) {
     return (
-      <div className="flex items-center justify-center h-full w-full bg-background">
+      <div className="flex items-center justify-center h-full w-full bg-canvas">
         <div className="w-full max-w-md p-8">
           <div className="text-center mb-6">
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">guppi</h1>
-            <p className="text-sm text-muted-foreground mt-1">certificate trust</p>
+            <h1 className="text-2xl font-bold text-ink tracking-tight">guppi</h1>
+            <p className="text-sm text-mute mt-1">certificate trust</p>
           </div>
-          <p className="text-sm text-muted-foreground text-center mb-4">
+          <p className="text-sm text-mute text-center mb-4">
             No CA certificate is available. This server may be using an external certificate that is already trusted, or TLS is disabled.
           </p>
-          <button onClick={onBack} className="w-full px-3 py-2 bg-card border border-border text-foreground rounded font-medium hover:opacity-90 transition-opacity">
+          <button onClick={onBack} className="w-full px-3 py-2 bg-surface border border-hairline text-ink rounded font-medium hover:opacity-90 transition-opacity">
             Back to login
           </button>
         </div>
@@ -215,14 +215,14 @@ export function TrustCertificate({ onBack }: { onBack: () => void }) {
   const platforms: Platform[] = ['ios', 'macos', 'android', 'windows', 'linux']
 
   return (
-    <div className="flex items-center justify-center min-h-full w-full bg-background py-8">
+    <div className="flex items-center justify-center min-h-full w-full bg-canvas py-8">
       <div className="w-full max-w-md px-8">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">guppi</h1>
-          <p className="text-sm text-muted-foreground mt-1">trust certificate</p>
+          <h1 className="text-2xl font-bold text-ink tracking-tight">guppi</h1>
+          <p className="text-sm text-mute mt-1">trust certificate</p>
         </div>
 
-        <p className="text-sm text-muted-foreground mb-4">
+        <p className="text-sm text-mute mb-4">
           Guppi uses a self-signed CA certificate for HTTPS. Trust this certificate on your device to avoid browser warnings and enable PWA installation.
         </p>
 
@@ -235,7 +235,7 @@ export function TrustCertificate({ onBack }: { onBack: () => void }) {
               className={`px-2 py-1 text-xs rounded transition-colors ${
                 selectedPlatform === p
                   ? 'bg-accent text-accent-foreground'
-                  : 'bg-card border border-border text-muted-foreground hover:text-foreground'
+                  : 'bg-surface border border-hairline text-mute hover:text-ink'
               }`}
             >
               {platformLabels[p]}
@@ -245,13 +245,13 @@ export function TrustCertificate({ onBack }: { onBack: () => void }) {
         </div>
 
         {/* Instructions for selected platform */}
-        <div className="bg-card border border-border rounded-lg p-4 mb-4">
+        <div className="bg-surface border border-hairline rounded-lg p-4 mb-4">
           <PlatformInstructions platform={selectedPlatform} />
         </div>
 
         <button
           onClick={onBack}
-          className="w-full px-3 py-2 bg-card border border-border text-foreground rounded font-medium hover:opacity-90 transition-opacity"
+          className="w-full px-3 py-2 bg-surface border border-hairline text-ink rounded font-medium hover:opacity-90 transition-opacity"
         >
           Back to login
         </button>

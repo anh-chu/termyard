@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Host } from '../hooks/useHosts'
 import { Session } from '../hooks/useSessions'
+import { cn } from '../lib/utils'
 import { AgentMark } from './AgentMark'
 
 interface NewSessionModalProps {
@@ -98,29 +99,29 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-start justify-center pt-[20vh] bg-black/50"
+      className="fixed inset-0 z-[9999] flex items-start justify-center pt-[18vh] bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-[400px] bg-card border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
+        className="w-[440px] bg-surface border border-hairline rounded-xl shadow-[0_32px_128px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-border">
-          <div className="text-sm text-foreground font-semibold mb-3">New Session</div>
-          <div className="space-y-3">
+        <div className="p-6">
+          <div className="text-[15px] text-ink font-bold tracking-tight mb-5 uppercase tracking-widest">New Session</div>
+          <div className="space-y-4">
             <div>
-              <div className="text-xs text-muted-foreground mb-1.5">Location</div>
+              <div className="text-xs font-bold text-mute/60 uppercase tracking-wider mb-2 ml-1">Location</div>
               <input
                 ref={pathInputRef}
                 value={path}
                 onChange={e => setPath(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="/path/to/project"
-                className="w-full text-[15px] text-foreground bg-input border border-border rounded px-3 py-1.5 outline-none font-mono placeholder:text-muted-foreground focus:border-primary"
+                placeholder="~/projects/my-app"
+                className="w-full text-[14px] text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none font-sans font-medium placeholder:text-mute/40 focus:border-primary/60 transition-colors"
               />
             </div>
             <div>
-              <div className="text-xs text-muted-foreground mb-1.5">Agent</div>
+              <div className="text-xs font-bold text-mute/60 uppercase tracking-wider mb-2 ml-1">Agent</div>
               <div className="grid grid-cols-3 gap-2">
                 {presets.map(option => {
                   const active = option.id === preset
@@ -129,10 +130,18 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
                       key={option.id}
                       type="button"
                       onClick={() => setPreset(current => (current === option.id ? null : option.id))}
-                      className={`flex items-center gap-2 rounded border px-2 py-2 text-xs transition-colors ${active ? 'border-primary bg-primary/15 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}`}
+                      className={cn(
+                        'flex flex-col items-center gap-2 rounded-lg border p-3 transition-all duration-200',
+                        active 
+                          ? 'border-primary bg-primary/5' 
+                          : 'border-hairline bg-surface-elevated/30 hover:border-hairline/60 grayscale opacity-70 hover:grayscale-0 hover:opacity-100'
+                      )}
                     >
-                      <AgentMark agentType={option.id} className="h-5 min-w-8 px-1.5" />
-                      <span>{option.label}</span>
+                      <AgentMark agentType={option.id} className="h-6 min-w-10 px-2 shrink-0" />
+                      <span className={cn(
+                        'text-xs font-bold uppercase tracking-tight',
+                        active ? 'text-primary' : 'text-mute'
+                      )}>{option.label}</span>
                     </button>
                   )
                 })}
@@ -142,52 +151,55 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
                   value={customCommand}
                   onChange={e => setCustomCommand(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="custom command..."
-                  className="mt-2 w-full text-[14px] text-foreground bg-input border border-border rounded px-3 py-1.5 outline-none font-mono placeholder:text-muted-foreground focus:border-primary"
+                  placeholder="Custom shell command..."
+                  className="mt-3 w-full text-[13px] text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none font-mono placeholder:text-mute/40 focus:border-primary/60 transition-colors"
                 />
               )}
             </div>
             <div>
-              <div className="text-xs text-muted-foreground mb-1.5">Session Name</div>
+              <div className="text-xs font-bold text-mute/60 uppercase tracking-wider mb-2 ml-1">Session Name</div>
               <input
                 value={name}
                 onChange={e => setName(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={suggestedName || 'auto-generated'}
-                className="w-full text-[15px] text-foreground bg-input border border-border rounded px-3 py-1.5 outline-none font-mono placeholder:text-muted-foreground focus:border-primary"
+                placeholder={suggestedName || 'Automatic name...'}
+                className="w-full text-[14px] text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none font-sans font-medium placeholder:text-mute/40 focus:border-primary/60 transition-colors"
               />
             </div>
           </div>
           {showHostSelect && (
-            <div className="mt-3">
-              <div className="text-xs text-muted-foreground mb-1.5">Host</div>
+            <div className="mt-4">
+              <div className="text-xs font-bold text-mute/60 uppercase tracking-wider mb-2 ml-1">Host</div>
               <select
                 value={selectedHost}
                 onChange={e => setSelectedHost(e.target.value)}
-                className="w-full text-sm text-foreground bg-input border border-border rounded px-3 py-1.5 outline-none focus:border-primary"
+                className="w-full text-[13px] font-bold text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none focus:border-primary/60 transition-colors cursor-pointer"
               >
                 {onlineHosts.map(h => (
                   <option key={h.id} value={h.id}>
-                    {h.name}{h.local ? ' (local)' : ''}
+                    {h.name}{h.local ? ' (LOCAL)' : ''}
                   </option>
                 ))}
               </select>
             </div>
           )}
         </div>
-        <div className="py-2 px-4 border-t border-border flex justify-between items-center">
-          <span className="text-[11px] text-muted-foreground">↵ create &nbsp; esc cancel</span>
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded transition-colors"
-            >
-              Cancel
-            </button>
+        <div className="py-4 px-6 border-t border-hairline bg-surface-elevated/10 flex justify-between items-center">
+          <div className="flex items-center gap-4 text-xs font-bold uppercase tracking-widest text-mute/40">
+             <div className="flex items-center gap-1.5">
+               <span className="px-1.5 py-0.5 rounded-xs border border-hairline bg-surface font-mono text-[9px]">↵</span>
+               <span>Create</span>
+             </div>
+             <div className="flex items-center gap-1.5">
+               <span className="px-1.5 py-0.5 rounded-xs border border-hairline bg-surface font-mono text-[9px]">ESC</span>
+               <span>Cancel</span>
+             </div>
+          </div>
+          <div className="flex gap-3">
             <button
               onClick={handleSubmit}
               disabled={!path.trim() || !(name.trim() || suggestedName) || (preset === 'custom' && !resolvedCommand)}
-              className="text-xs text-foreground bg-primary/20 hover:bg-primary/30 border border-primary/40 px-3 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-6 py-2 rounded-full text-[13px] font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-white/90 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             >
               Create
             </button>
