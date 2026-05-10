@@ -693,6 +693,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             getSessionActivity={getSessionActivity}
             splitPanes={paneTree ? getLeaves(paneTree) : []}
             onPairSessions={handlePairSessions}
+            onReorderSplitPanes={(a, b) => setPaneTree(prev => prev ? swapLeaves(prev, a, b) : prev)}
           />
         )}
         <div className="flex-1 flex flex-col overflow-hidden">
