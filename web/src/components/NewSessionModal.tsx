@@ -24,6 +24,7 @@ const presets = [
 function basename(value: string): string {
   const trimmed = value.trim().replace(/[\\/]+$/, '')
   if (!trimmed) return ''
+  if (trimmed === '~') return 'home'
   const parts = trimmed.split(/[\\/]/)
   return parts[parts.length - 1] || ''
 }
@@ -51,6 +52,7 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
   const uniqueSessionName = (value: string) => {
     const trimmed = value.trim()
     if (!trimmed) return ''
+  if (trimmed === '~') return 'home'
     if (!existingNames.has(trimmed)) return trimmed
     let suffix = 2
     let candidate = `${trimmed}-${suffix}`

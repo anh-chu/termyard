@@ -3,8 +3,8 @@
 > **Stack:** chi | none | react | go
 
 > 72 routes | 0 models | 13 components | 55 lib files | 7 env vars | 1 middleware | 0% test coverage
-> **Token savings:** this file is ~5,300 tokens. Without it, AI exploration would cost ~66,200 tokens. **Saves ~61,000 tokens per conversation.**
-> **Last scanned:** 2026-05-10 05:53 — re-run after significant changes
+> **Token savings:** this file is ~5,300 tokens. Without it, AI exploration would cost ~66,200 tokens. **Saves ~60,900 tokens per conversation.**
+> **Last scanned:** 2026-05-10 06:10 — re-run after significant changes
 
 ---
 
@@ -199,7 +199,10 @@
   - function LoadTLSConfig: (certPath, keyPath string) (*tls.Config, error)
   - function LoadTLSConfigWithReloader: (certPath, keyPath string) (*tls.Config, *CertReloader, error)
   - _...1 more_
-- `pkg/tmux/client.go` — function NewClient: () (*Client, error), class Client
+- `pkg/tmux/client.go`
+  - function NewClient: () (*Client, error)
+  - function ValidateSessionName: (name string) error
+  - class Client
 - `pkg/tmux/controlmode.go`
   - function ControlSessionName: () string
   - function WithRefreshDelay: (d time.Duration) ControlModeOption
