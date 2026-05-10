@@ -164,7 +164,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   // Persist pane tree across reloads
   useEffect(() => {
     try {
-      if (paneTree && currentView === 'session') {
+      if (paneTree) {
         localStorage.setItem('guppi:pane-tree', JSON.stringify(paneTree))
         localStorage.setItem('guppi:active-key', activeKey || '')
       } else {
@@ -172,7 +172,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         localStorage.removeItem('guppi:active-key')
       }
     } catch {}
-  }, [paneTree, activeKey, currentView])
+  }, [paneTree, activeKey])
 
   // Sync URL -> state on popstate (back/forward)
   useEffect(() => {
@@ -180,11 +180,13 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       const { view, sessionKey } = getViewFromPath()
       setCurrentView(view)
       if (sessionKey) {
-        setPaneTree(popOut(sessionKey))
-        setActiveKey(sessionKey)
+        setPaneTree(prev => {
+          if (prev && findLeaf(prev, sessionKey)) { setActiveKey(sessionKey); setSingleView(null); return prev }
+          setSingleView(sessionKey); return prev
+        })
       } else {
-        setPaneTree(null)
-        setActiveKey(null)
+        setSingleView(null)
+        // paneTree and activeKey untouched — split persists in background
       }
     }
     window.addEventListener('popstate', onPopState)
@@ -215,13 +217,11 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     setCurrentView(view || (sessKey ? 'session' : 'overview'))
     if (!sessKey) {
       setSingleView(null)
-      setPaneTree(null)
-      setActiveKey(null)
+      // paneTree and activeKey intentionally untouched — split persists
       return
     }
-    setSingleView(null)
-    setPaneTree(popOut(sessKey))
-    setActiveKey(sessKey)
+    // sessKey path: kept for safety but selectSession() is preferred
+    setSingleView(sessKey)
   }, [])
 
   const handleDropSession = useCallback((sessKey: string) => {
