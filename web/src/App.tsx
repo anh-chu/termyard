@@ -208,14 +208,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       setActiveKey(null)
       return
     }
-    setPaneTree(prev => {
-      if (prev === null) return popOut(sessKey)
-      const currentActive = activeKeyRef.current
-      if (currentActive !== null && findLeaf(prev, currentActive)) {
-        return replaceLeaf(prev, currentActive, sessKey)
-      }
-      return prev
-    })
+    setPaneTree(popOut(sessKey))
     setActiveKey(sessKey)
   }, [])
 
@@ -456,7 +449,18 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   }, [sessions, paneTree]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSessionSelect = (session: Session) => {
-    navigateTo(sessionKey(session))
+    const sk = sessionKey(session)
+    // If already in the split layout, just focus — don't collapse
+    if (paneTree && findLeaf(paneTree, sk)) {
+      setActiveKey(sk)
+      const { host, name } = parseSessionKey(sk)
+      const path = host
+        ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
+        : `/session/${encodeURIComponent(name)}`
+      if (window.location.pathname !== path) window.history.pushState(null, '', path)
+      return
+    }
+    navigateTo(sk)
   }
 
   const refocusTerminal = useCallback(() => {
@@ -467,7 +471,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   }, [])
 
   const jumpToSession = useCallback(async (sessKey: string, windowIndex?: number, pane?: string) => {
-    navigateTo(sessKey, 'session')
+    // If already in the split layout, just focus — don't collapse
+    if (paneTree && findLeaf(paneTree, sessKey)) {
+      setActiveKey(sessKey)
+    } else {
+      navigateTo(sessKey, 'session')
+    }
     if (windowIndex !== undefined) {
       const { host, name } = parseSessionKey(sessKey)
       try {
