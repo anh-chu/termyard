@@ -43,6 +43,7 @@ type Preferences struct {
 	LockBackgroundFaster    bool              `json:"lock_background_faster"`
 	LockBackgroundMinutes   int               `json:"lock_background_minutes"`
 	FullscreenHideAlerts    bool              `json:"fullscreen_hide_alerts"`
+	DefaultAgent            string            `json:"default_agent"`
 }
 
 func Default() *Preferences {
@@ -74,6 +75,7 @@ func Default() *Preferences {
 		LockBackgroundFaster:    true,
 		LockBackgroundMinutes:   10,
 		FullscreenHideAlerts:    true,
+		DefaultAgent:            "claude",
 	}
 }
 
