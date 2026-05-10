@@ -45,8 +45,8 @@ Changes to these files have the widest blast radius across the codebase:
 
 - `path/filepath` — imported by **19** files
 - `encoding/json` — imported by **15** files
-- `web/src/hooks/usePreferences.ts` — imported by **10** files
 - `crypto/rand` — imported by **9** files
+- `web/src/hooks/usePreferences.ts` — imported by **9** files
 - `web/src/theme.ts` — imported by **9** files
 - `web/src/lib/utils.ts` — imported by **9** files
 

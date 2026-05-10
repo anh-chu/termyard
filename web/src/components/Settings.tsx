@@ -21,12 +21,6 @@ const timestampFormats = [
   { value: 'absolute', label: 'Absolute (14:32:05)' },
 ]
 
-const shortcutOptions = [
-  { value: 'ctrl+k', label: 'Ctrl+K / Cmd+K' },
-  { value: 'ctrl+p', label: 'Ctrl+P / Cmd+P' },
-  { value: 'ctrl+space', label: 'Ctrl+Space' },
-]
-
 const notifStatuses = [
   { value: 'waiting', label: 'Waiting' },
   { value: 'error', label: 'Error' },
@@ -416,14 +410,6 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
               <Toggle
                 checked={prefs.sparklines_visible}
                 onChange={(v) => update({ sparklines_visible: v })}
-              />
-            </Row>
-            <Divider />
-            <Row label="Quick Switcher Shortcut" description="Keyboard shortcut to open quick switcher">
-              <SelectInput
-                value={prefs.quick_switcher_shortcut}
-                onChange={(v) => update({ quick_switcher_shortcut: v })}
-                options={shortcutOptions}
               />
             </Row>
           </Section>

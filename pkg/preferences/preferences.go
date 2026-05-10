@@ -35,7 +35,6 @@ type Preferences struct {
 	DefaultView             string            `json:"default_view"`
 	Notifications           Notifications     `json:"notifications"`
 	AgentBanner             AgentBanner       `json:"agent_banner"`
-	QuickSwitcherShortcut   string            `json:"quick_switcher_shortcut"`
 	SparklinesVisible       bool              `json:"sparklines_visible"`
 	OverviewRefreshInterval int               `json:"overview_refresh_interval"`
 	TimestampFormat         string            `json:"timestamp_format"`
@@ -67,7 +66,6 @@ func Default() *Preferences {
 		AgentBanner: AgentBanner{
 			AutoDismissSeconds: 0,
 		},
-		QuickSwitcherShortcut:   "ctrl+k",
 		SparklinesVisible:       true,
 		OverviewRefreshInterval: 5,
 		TimestampFormat:         "relative",

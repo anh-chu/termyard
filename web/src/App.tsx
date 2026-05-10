@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { Terminal } from './components/Terminal'
 import { Overview } from './components/Overview'
-import { QuickSwitcher } from './components/QuickSwitcher'
 import { NewSessionModal } from './components/NewSessionModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
@@ -137,7 +136,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const [serverVersion, setServerVersion] = useState<string | null>(null)
   const loadedVersionRef = useRef<string | null>(null)
   const updateAvailable = loadedVersionRef.current !== null && serverVersion !== null && serverVersion !== loadedVersionRef.current
-  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false)
   const [newSessionModalOpen, setNewSessionModalOpen] = useState(false)
   const terminalContainerRef = useRef<HTMLDivElement>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -368,40 +366,18 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   }, [paneTree, activeGroupId])
 
   const openNewSessionModal = useCallback(() => {
-    setQuickSwitcherOpen(false)
     setNewSessionModalOpen(true)
   }, [])
 
   // Global keyboard shortcuts
   useEffect(() => {
-    const shortcut = prefs.quick_switcher_shortcut || 'ctrl+k'
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
-
-      // Quick switcher
-      if (mod) {
-        let match = false
-        if (shortcut === 'ctrl+k' && e.key === 'k') match = true
-        if (shortcut === 'ctrl+p' && e.key === 'p') match = true
-        if (shortcut === 'ctrl+space' && e.key === ' ') match = true
-        if (match) {
-          e.preventDefault()
-          setQuickSwitcherOpen(prev => !prev)
-          return
-        }
-      }
 
       // Help: Cmd/Ctrl + ? or Cmd/Ctrl + / (Linux Ctrl+Shift+/ often doesn't produce '?')
       if (mod && (e.key === '?' || e.key === '/' || (e.shiftKey && e.code === 'Slash'))) {
         e.preventDefault()
         setHelpOpen(prev => !prev)
-        return
-      }
-
-      // Overview: Cmd/Ctrl + H
-      if (mod && e.key === 'h' && !e.shiftKey) {
-        e.preventDefault()
-        navigateTo(null)
         return
       }
 
@@ -419,35 +395,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         return
       }
 
-      // Lock / Sign out: Cmd/Ctrl + L
-      if (mod && e.key === 'l' && !e.shiftKey && onLogout) {
-        e.preventDefault()
-        onLogout()
-        return
-      }
-
-      // Jump to next alert: Cmd/Ctrl + J
-      if (mod && e.key === 'j' && !e.shiftKey) {
-        e.preventDefault()
-        const pending = allToolEvents.filter(ev => ev.status === 'waiting' || ev.status === 'error')
-        if (pending.length === 0) return
-        const currentIdx = selectedSession
-          ? pending.findIndex(ev => (ev.host ? `${ev.host}/${ev.session}` : ev.session) === selectedSession)
-          : -1
-        const next = pending[(currentIdx + 1) % pending.length]
-        const sessKey = next.host ? `${next.host}/${next.session}` : next.session
-        selectSession(sessKey)
-        if (next.window !== undefined) {
-          const { host, name } = parseSessionKey(sessKey)
-          fetch('/api/session/select-window', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host: host || undefined, session: name, window: next.window, pane: next.pane || undefined }),
-          }).catch(() => {})
-        }
-        return
-      }
-
       // Split pane: Cmd/Ctrl + Shift + \
       if (mod && e.shiftKey && e.key === '\\') {
         e.preventDefault()
@@ -457,49 +404,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         }
         return
       }
-
-      // Close active pane: Cmd/Ctrl + Shift + W
-      if (mod && e.shiftKey && (e.key === 'w' || e.key === 'W')) {
-        e.preventDefault()
-        if (activeKey !== null) {
-          closePane(activeKey)
-        }
-        return
-      }
-
-      // Previous pane: Cmd/Ctrl + Shift + [ or Cmd/Ctrl + Alt + Left
-      if (mod && ((e.shiftKey && e.key === '[') || (e.altKey && e.key === 'ArrowLeft'))) {
-        e.preventDefault()
-        if (activeKey !== null) {
-          const leaves = paneTree ? getLeaves(paneTree) : []
-          if (leaves.length > 1) {
-            const idx = leaves.indexOf(activeKey)
-            if (idx >= 0) {
-              setActiveKey(leaves[(idx - 1 + leaves.length) % leaves.length])
-            }
-          }
-        }
-        return
-      }
-
-      // Next pane: Cmd/Ctrl + Shift + ] or Cmd/Ctrl + Alt + Right
-      if (mod && ((e.shiftKey && e.key === ']') || (e.altKey && e.key === 'ArrowRight'))) {
-        e.preventDefault()
-        if (activeKey !== null) {
-          const leaves = paneTree ? getLeaves(paneTree) : []
-          if (leaves.length > 1) {
-            const idx = leaves.indexOf(activeKey)
-            if (idx >= 0) {
-              setActiveKey(leaves[(idx + 1) % leaves.length])
-            }
-          }
-        }
-        return
-      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [prefs.quick_switcher_shortcut, navigateTo, onLogout, allToolEvents, selectedSession, paneTree, activeKey, closePane, openNewSessionModal])
+  }, [navigateTo, activeKey, openNewSessionModal])
 
   // Listen for state events via WebSocket
   const onEvent = useCallback((evt: any) => {
@@ -694,39 +602,24 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     navigateTo(null, 'settings')
   }, [navigateTo])
 
-  const closeQuickSwitcher = useCallback(() => {
-    setQuickSwitcherOpen(false)
-    if (selectedSession) refocusTerminal()
-  }, [selectedSession, refocusTerminal])
-
-  const handleQuickSwitch = useCallback(async (sessKey: string, windowIndex?: number) => {
-    setQuickSwitcherOpen(false)
-    selectSession(sessKey)
-    if (windowIndex !== undefined) {
-      const { host, name } = parseSessionKey(sessKey)
-      try {
-        await fetch('/api/session/select-window', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ host: host || undefined, session: name, window: windowIndex }),
-        })
-      } catch (err) {
-        console.error('Failed to select window:', err)
-      }
-    }
-    // Refocus after navigation and window switch settle
-    setTimeout(() => refocusTerminal(), 200)
-  }, [selectSession, refocusTerminal])
-
-  const handleCreateSession = useCallback(async (name: string, path: string, command: string, hostId?: string, agentType?: string) => {
-    setNewSessionModalOpen(false)
+  const handleCreateSession = useCallback(async (name: string, path: string, command: string, hostId?: string, worktreeBranch?: string, agentType?: string): Promise<string | null> => {
+    // For worktree sessions keep the modal open until we confirm success.
+    if (!worktreeBranch) setNewSessionModalOpen(false)
     try {
       const res = await fetch('/api/session/new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, path, command, host: hostId || undefined, agent_type: agentType || undefined }),
+        body: JSON.stringify({ name, path, command, host: hostId || undefined, agent_type: agentType || undefined, worktree_branch: worktreeBranch || undefined }),
       })
-      if (res.ok) {
+      if (!res.ok) {
+        if (worktreeBranch) {
+          const msg = await res.text().catch(() => 'Failed to create worktree')
+          return msg
+        }
+        return null
+      }
+      if (worktreeBranch) setNewSessionModalOpen(false)
+      {
         const payload = await res.json().catch(() => null)
         const resolvedName = payload?.name || name
         const sessKey = hostId ? `${hostId}/${resolvedName}` : resolvedName
@@ -758,6 +651,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       console.error('Failed to create session:', err)
       pendingSessionRef.current = null
     }
+    return null
   }, [selectSession, refresh, refocusTerminal])
 
   const handleDropNewSession = useCallback((targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
@@ -814,16 +708,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   return (
     <div className="flex flex-col h-full w-full bg-background text-foreground relative">
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
-      {quickSwitcherOpen && (
-        <QuickSwitcher
-          sessions={sessions}
-          waitingEvents={allToolEvents.filter(e => e.status === 'waiting')}
-          onSelect={handleQuickSwitch}
-          onOverview={() => { closeQuickSwitcher(); navigateTo(null) }}
-          onCreateSession={openNewSessionModal}
-          onClose={closeQuickSwitcher}
-        />
-      )}
       {newSessionModalOpen && (
         <NewSessionModal
           hosts={hosts}

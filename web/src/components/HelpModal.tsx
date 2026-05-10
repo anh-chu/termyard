@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { usePreferences } from '../hooks/usePreferences'
 
 interface HelpModalProps {
   onClose: () => void
@@ -8,34 +7,18 @@ interface HelpModalProps {
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
 const mod = isMac ? '⌘' : 'Ctrl'
 
-const shortcutLabels: Record<string, string> = {
-  'ctrl+k': `${mod}+K`,
-  'ctrl+p': `${mod}+P`,
-  'ctrl+space': `${mod}+Space`,
-}
-
 type ShortcutItem = { section: string } | { keys: string[]; label: string }
 
-function getShortcuts(quickSwitcherKey: string): ShortcutItem[] {
+function getShortcuts(): ShortcutItem[] {
   return [
     { section: 'Navigation' },
-    { keys: [shortcutLabels[quickSwitcherKey] || `${mod}+K`], label: 'Quick Switcher' },
-    { keys: [`${mod}+J`], label: 'Jump to next alert' },
-    { keys: [`${mod}+H`], label: 'Overview' },
     { keys: [`${mod}+,`], label: 'Settings' },
     { keys: [`${mod}+/`], label: 'Help' },
-    { keys: [`${mod}+L`], label: 'Lock / Sign out' },
-
     { keys: [`${mod}+\\`], label: 'Toggle sidebar' },
 
     { section: 'Terminal' },
     { keys: [`${mod}+Shift+F`], label: 'Toggle fullscreen' },
     { keys: ['Esc'], label: 'Exit fullscreen' },
-
-    { section: 'Quick Switcher' },
-    { keys: ['↑ ↓'], label: 'Navigate items' },
-    { keys: ['↵'], label: 'Select / Create' },
-    { keys: ['Esc'], label: 'Close' },
   ]
 }
 
@@ -48,8 +31,7 @@ function Kbd({ children }: { children: string }) {
 }
 
 export function HelpModal({ onClose }: HelpModalProps) {
-  const { prefs } = usePreferences()
-  const shortcuts = getShortcuts(prefs.quick_switcher_shortcut || 'ctrl+k')
+  const shortcuts = getShortcuts()
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

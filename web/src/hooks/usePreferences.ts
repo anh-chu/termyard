@@ -20,7 +20,6 @@ export interface Preferences {
   agent_banner: {
     auto_dismiss_seconds: number
   }
-  quick_switcher_shortcut: string
   sparklines_visible: boolean
   overview_refresh_interval: number
   timestamp_format: string
@@ -51,7 +50,6 @@ export const defaultPreferences: Preferences = {
   agent_banner: {
     auto_dismiss_seconds: 0,
   },
-  quick_switcher_shortcut: 'ctrl+k',
   sparklines_visible: true,
   overview_refresh_interval: 5,
   timestamp_format: 'relative',

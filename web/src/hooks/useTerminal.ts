@@ -233,14 +233,13 @@ export function useTerminal(sessionName: string, hostId?: string) {
           return false
         }
       }
-      // Don't let xterm process global app shortcuts (quick switcher, overview, etc.)
+      // Don't let xterm process global app shortcuts (help, sidebar, settings, split pane)
       if (e.type === 'keydown' && (e.metaKey || e.ctrlKey)) {
         const key = e.key.toLowerCase()
-        if (!e.shiftKey && (key === 'k' || key === 'p' || key === 'h' ||
-            key === 'l' || key === ',' || key === '\\' || key === ' ')) {
+        if (!e.shiftKey && (key === ',' || key === '\\')) {
           return false
         }
-        if (e.shiftKey && (key === '/' || key === '?')) {
+        if (e.shiftKey && (key === '/' || key === '?' || key === '\\')) {
           return false
         }
       }
