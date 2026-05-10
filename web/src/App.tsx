@@ -448,19 +448,29 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     })
   }, [sessions, paneTree]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSessionSelect = (session: Session) => {
-    const sk = sessionKey(session)
-    // If already in the split layout, just focus — don't collapse
+  const selectSession = useCallback((sk: string) => {
+    const currentActive = activeKeyRef.current
+    const { host, name } = parseSessionKey(sk)
+    const path = host
+      ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
+      : `/session/${encodeURIComponent(name)}`
+    if (window.location.pathname !== path) window.history.pushState(null, '', path)
+    setCurrentView('session')
     if (paneTree && findLeaf(paneTree, sk)) {
+      // Already in split — just focus
       setActiveKey(sk)
-      const { host, name } = parseSessionKey(sk)
-      const path = host
-        ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
-        : `/session/${encodeURIComponent(name)}`
-      if (window.location.pathname !== path) window.history.pushState(null, '', path)
-      return
+    } else if (paneTree && currentActive && findLeaf(paneTree, currentActive)) {
+      // In a split but session not in it — replace active pane, keep layout
+      setPaneTree(prev => prev ? replaceLeaf(prev, currentActive, sk) : popOut(sk))
+      setActiveKey(sk)
+    } else {
+      setPaneTree(popOut(sk))
+      setActiveKey(sk)
     }
-    navigateTo(sk)
+  }, [paneTree])
+
+  const handleSessionSelect = (session: Session) => {
+    selectSession(sessionKey(session))
   }
 
   const refocusTerminal = useCallback(() => {
@@ -471,12 +481,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   }, [])
 
   const jumpToSession = useCallback(async (sessKey: string, windowIndex?: number, pane?: string) => {
-    // If already in the split layout, just focus — don't collapse
-    if (paneTree && findLeaf(paneTree, sessKey)) {
-      setActiveKey(sessKey)
-    } else {
-      navigateTo(sessKey, 'session')
-    }
+    selectSession(sessKey)
     if (windowIndex !== undefined) {
       const { host, name } = parseSessionKey(sessKey)
       try {
@@ -490,7 +495,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       }
     }
     setTimeout(() => refocusTerminal(), 200)
-  }, [navigateTo, refocusTerminal])
+  }, [selectSession, refocusTerminal])
 
   const navigateToSettings = useCallback(() => {
     navigateTo(null, 'settings')
@@ -503,7 +508,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   const handleQuickSwitch = useCallback(async (sessKey: string, windowIndex?: number) => {
     setQuickSwitcherOpen(false)
-    navigateTo(sessKey)
+    selectSession(sessKey)
     if (windowIndex !== undefined) {
       const { host, name } = parseSessionKey(sessKey)
       try {
@@ -518,7 +523,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     }
     // Refocus after navigation and window switch settle
     setTimeout(() => refocusTerminal(), 200)
-  }, [navigateTo, refocusTerminal])
+  }, [selectSession, refocusTerminal])
 
   const handleCreateSession = useCallback(async (name: string, path: string, command: string, hostId?: string, agentType?: string) => {
     setNewSessionModalOpen(false)
