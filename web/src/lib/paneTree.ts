@@ -140,3 +140,20 @@ export function updateRatio(
 export function popOut(key: string): PaneTree {
   return { type: 'leaf', sessionKey: key }
 }
+
+/**
+ * Swaps the sessionKey values of two matching leaves.
+ * Returns a new tree with the keys swapped.
+ */
+export function swapLeaves(tree: PaneTree, keyA: string, keyB: string): PaneTree {
+  if (tree.type === 'leaf') {
+    if (tree.sessionKey === keyA) return { type: 'leaf', sessionKey: keyB }
+    if (tree.sessionKey === keyB) return { type: 'leaf', sessionKey: keyA }
+    return tree
+  }
+  return {
+    ...tree,
+    first: swapLeaves(tree.first, keyA, keyB),
+    second: swapLeaves(tree.second, keyA, keyB),
+  }
+}

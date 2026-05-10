@@ -6,7 +6,7 @@ import { QuickSwitcher } from './components/QuickSwitcher'
 import { NewSessionModal } from './components/NewSessionModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
-import { PaneTree, getLeaves, findLeaf, splitLeaf, removeLeaf, replaceLeaf, updateRatio, popOut } from './lib/paneTree'
+import { PaneTree, getLeaves, findLeaf, splitLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves } from './lib/paneTree'
 import { StatusBar } from './components/StatusBar'
 import { Settings } from './components/Settings'
 import { HelpModal } from './components/HelpModal'
@@ -56,11 +56,33 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const { hosts, refresh: refreshHosts } = useHosts()
   const [currentView, setCurrentView] = useState<View>(() => getViewFromPath().view)
   const [paneTree, setPaneTree] = useState<PaneTree | null>(() => {
-    const sk = getViewFromPath().sessionKey
-    return sk ? popOut(sk) : null
+    const urlKey = getViewFromPath().sessionKey
+    if (!urlKey) return null
+    // Try to restore full tree from localStorage
+    try {
+      const stored = localStorage.getItem('guppi:pane-tree')
+      if (stored) {
+        const tree = JSON.parse(stored) as PaneTree
+        // Only restore if the URL's session key is in the stored tree
+        if (findLeaf(tree, urlKey)) return tree
+      }
+    } catch {}
+    return popOut(urlKey)
   })
   const [activeKey, setActiveKey] = useState<string | null>(() => {
-    return getViewFromPath().sessionKey
+    const urlKey = getViewFromPath().sessionKey
+    if (!urlKey) return null
+    try {
+      const stored = localStorage.getItem('guppi:pane-tree')
+      const storedActiveKey = localStorage.getItem('guppi:active-key')
+      if (stored && storedActiveKey) {
+        const tree = JSON.parse(stored) as PaneTree
+        if (findLeaf(tree, urlKey) && findLeaf(tree, storedActiveKey)) {
+          return storedActiveKey
+        }
+      }
+    } catch {}
+    return urlKey
   })
   const selectedSession = activeKey
   const hasMultipleHosts = hosts.length > 1
@@ -128,6 +150,19 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   useEffect(() => {
     localStorage.setItem('guppi:sidebar-collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
+
+  // Persist pane tree across reloads
+  useEffect(() => {
+    try {
+      if (paneTree && currentView === 'session') {
+        localStorage.setItem('guppi:pane-tree', JSON.stringify(paneTree))
+        localStorage.setItem('guppi:active-key', activeKey || '')
+      } else {
+        localStorage.removeItem('guppi:pane-tree')
+        localStorage.removeItem('guppi:active-key')
+      }
+    } catch {}
+  }, [paneTree, activeKey, currentView])
 
   // Sync URL -> state on popstate (back/forward)
   useEffect(() => {
@@ -636,6 +671,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
               onToggleFullscreen={toggleFullscreen}
               terminalContainerRef={terminalContainerRef}
               onDropSession={handleDropSession}
+              onSwapPanes={(a, b) => setPaneTree(prev => prev ? swapLeaves(prev, a, b) : prev)}
             />
           ) : (
             <Overview

@@ -16,6 +16,7 @@ interface TiledViewProps {
   onToggleFullscreen: () => void
   terminalContainerRef?: React.RefObject<HTMLDivElement | null>
   onDropSession?: (key: string) => void
+  onSwapPanes?: (keyA: string, keyB: string) => void
 }
 
 const MIN_PANE_SIZE = 200 // px
@@ -32,9 +33,11 @@ export function TiledView({
   onToggleFullscreen,
   terminalContainerRef,
   onDropSession,
+  onSwapPanes,
 }: TiledViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [swapTarget, setSwapTarget] = useState<string | null>(null)
 
   const totalLeaves = tree ? getLeaves(tree).length : 0
 
@@ -103,12 +106,16 @@ export function TiledView({
   // --------------- drop handling ---------------
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
+    // Ignore pane swap drags
+    if (e.dataTransfer.types.includes('application/x-guppi-pane')) return
     e.preventDefault()
     e.stopPropagation()
     setDragOver(true)
   }, [])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Ignore pane swap drags
+    if (e.dataTransfer.types.includes('application/x-guppi-pane')) return
     e.preventDefault()
     e.stopPropagation()
     setDragOver(false)
@@ -119,6 +126,8 @@ export function TiledView({
       e.preventDefault()
       e.stopPropagation()
       setDragOver(false)
+      // Only handle sidebar drops (text/plain), not pane swaps
+      if (e.dataTransfer.types.includes('application/x-guppi-pane')) return
       const sessKey = e.dataTransfer.getData('text/plain')
       if (sessKey) {
         onDropSession?.(sessKey)
@@ -138,22 +147,62 @@ export function TiledView({
   const renderPane = (sessionKey: string) => {
     const { host, name } = parseSessionKey(sessionKey)
     const isActive = sessionKey === activeKey
+    const isSwapTarget = swapTarget === sessionKey
 
     return (
       <div
         key={sessionKey}
         className={cn(
-          'flex-1 flex flex-col overflow-hidden rounded-lg border min-h-0',
+          'flex-1 flex flex-col overflow-hidden rounded-lg border min-h-0 relative',
           isActive ? 'border-primary' : 'border-hairline',
         )}
         onClick={() => {
           if (sessionKey !== activeKey) onActivate(sessionKey)
         }}
+        onDragOver={(e) => {
+          if (totalLeaves > 1) {
+            const dt = e.dataTransfer
+            if (dt.types.includes('application/x-guppi-pane')) {
+              const droppedKey = dt.getData('application/x-guppi-pane')
+              if (droppedKey !== sessionKey) {
+                e.preventDefault()
+                setSwapTarget(sessionKey)
+              }
+            }
+          }
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) {
+            setSwapTarget(null)
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setSwapTarget(null)
+          const droppedKey = e.dataTransfer.getData('application/x-guppi-pane')
+          if (droppedKey && droppedKey !== sessionKey && totalLeaves > 1) {
+            onSwapPanes?.(droppedKey, sessionKey)
+          }
+        }}
       >
+        {/* Swap overlay */}
+        {isSwapTarget && totalLeaves > 1 && (
+          <div className="absolute inset-0 z-10 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center pointer-events-none">
+            <span className="text-sm font-medium text-primary">Swap</span>
+          </div>
+        )}
         {/* Header — only when more than one leaf */}
         {totalLeaves > 1 && (
           <div className="flex items-center justify-between px-2.5 py-1 bg-surface border-b border-hairline rounded-t-lg shrink-0">
-            <span className="text-[11px] font-medium text-ink truncate min-w-0 mr-2">
+            <span
+              draggable={totalLeaves > 1}
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/x-guppi-pane', sessionKey)
+                e.dataTransfer.effectAllowed = 'move'
+              }}
+              className="text-[11px] font-medium text-ink truncate min-w-0 mr-2 cursor-grab"
+            >
               {name}
             </span>
             <div className="flex items-center gap-1">

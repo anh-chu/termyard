@@ -182,7 +182,7 @@
   - function removeLeaf: (tree, key) => PaneTree | null
   - function replaceLeaf: (tree, oldKey, newKey) => PaneTree
   - function updateRatio: (tree, path, ratio) => PaneTree
-  - _...4 more_
+  - _...5 more_
 - `web/src/lib/utils.ts` — function cn: (...inputs) => void
 - `web/src/theme.ts`
   - function applyTheme: (themeName, customTheme?, string>) => void
