@@ -6,7 +6,7 @@ import { QuickSwitcher } from './components/QuickSwitcher'
 import { NewSessionModal } from './components/NewSessionModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
-import { PaneTree, getLeaves, findLeaf, splitLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
+import { PaneTree, getLeaves, findLeaf, splitLeaf, insertBesideLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
 import { StatusBar } from './components/StatusBar'
 import { Settings } from './components/Settings'
 import { HelpModal } from './components/HelpModal'
@@ -109,7 +109,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const [helpOpen, setHelpOpen] = useState(false)
   const [dragNewSessionOver, setDragNewSessionOver] = useState(false)
   const pendingSessionRef = useRef<string | null>(null)
-  const splitTargetRef = useRef<{ key: string; direction: 'h' | 'v' } | null>(null)
+  const splitTargetRef = useRef<{ key: string; direction: 'h' | 'v'; newFirst?: boolean } | null>(null)
   const activeKeyRef = useRef(activeKey)
   activeKeyRef.current = activeKey
   const { prefs } = usePreferences()
@@ -225,19 +225,22 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     setSingleView(sessKey)
   }, [])
 
-  const handleDropSession = useCallback((sessKey: string) => {
+  const handleDropSession = useCallback((sessKey: string, targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
     setSingleView(null)
     const currentActive = activeKeyRef.current
     setPaneTree(prev => {
       if (prev === null) return popOut(sessKey)
       // Already in the layout — just focus, don't duplicate
       if (findLeaf(prev, sessKey)) { setActiveKey(sessKey); return prev }
-      if (currentActive !== null && findLeaf(prev, currentActive)) {
-        return splitLeaf(prev, currentActive, 'h', sessKey)
-      }
-      const leaves = getLeaves(prev)
-      if (leaves.length > 0) return splitLeaf(prev, leaves[0], 'h', sessKey)
-      return popOut(sessKey)
+      const key = (targetKey && findLeaf(prev, targetKey)) ? targetKey
+        : currentActive !== null && findLeaf(prev, currentActive) ? currentActive
+        : getLeaves(prev)[0] ?? null
+      if (!key) return popOut(sessKey)
+      const direction: 'h' | 'v' = (edge === 'top' || edge === 'bottom') ? 'v' : 'h'
+      const newFirst = edge === 'left' || edge === 'top'
+      return newFirst
+        ? insertBesideLeaf(prev, key, direction, sessKey, true)
+        : splitLeaf(prev, key, direction, sessKey)
     })
     setActiveKey(sessKey)
   }, [])
@@ -577,7 +580,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
           setPaneTree(prev => {
             if (prev === null) return popOut(sessKey)
             if (findLeaf(prev, target.key)) {
-              return splitLeaf(prev, target.key, target.direction, sessKey)
+              return target.newFirst
+                ? insertBesideLeaf(prev, target.key, target.direction, sessKey, true)
+                : splitLeaf(prev, target.key, target.direction, sessKey)
             }
             return prev
           })
@@ -598,11 +603,14 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     }
   }, [selectSession, refresh, refocusTerminal])
 
-  const handleDropNewSession = useCallback(() => {
-    if (activeKey !== null) {
-      splitTargetRef.current = { key: activeKey, direction: 'h' }
+  const handleDropNewSession = useCallback((targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
+    const key = targetKey || activeKey
+    if (key) {
+      const direction: 'h' | 'v' = (edge === 'top' || edge === 'bottom') ? 'v' : 'h'
+      const newFirst = edge === 'left' || edge === 'top'
+      splitTargetRef.current = { key, direction, newFirst }
     }
-    const { host } = activeKey ? parseSessionKey(activeKey) : { host: undefined }
+    const { host } = key ? parseSessionKey(key) : { host: undefined }
     handleCreateSession('shell', '~', '', host || undefined)
   }, [activeKey, handleCreateSession])
 
@@ -734,7 +742,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
               onDrop={(e) => {
                 e.preventDefault()
                 setDragNewSessionOver(false)
-                handleDropNewSession()
+                handleDropNewSession('', 'center')
               }}
             >
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>

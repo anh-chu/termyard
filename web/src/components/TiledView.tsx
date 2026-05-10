@@ -15,8 +15,8 @@ interface TiledViewProps {
   fullscreen: boolean
   onToggleFullscreen: () => void
   terminalContainerRef?: React.RefObject<HTMLDivElement | null>
-  onDropSession?: (key: string) => void
-  onDropNewSession?: () => void
+  onDropSession?: (sessKey: string, targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => void
+  onDropNewSession?: (targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => void
   onSwapPanes?: (keyA: string, keyB: string) => void
   onMovePanes?: (sourceKey: string, targetKey: string, edge: 'left'|'right'|'top'|'bottom') => void
 }
@@ -41,6 +41,7 @@ export function TiledView({
 }: TiledViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [dragType, setDragType] = useState<'pane' | 'new-session' | 'sidebar' | null>(null)
   const [dropTarget, setDropTarget] = useState<{ key: string; zone: 'left'|'right'|'top'|'bottom'|'center' } | null>(null)
 
   const totalLeaves = tree ? getLeaves(tree).length : 0
@@ -124,6 +125,7 @@ export function TiledView({
     if (e.currentTarget.contains(e.relatedTarget as Node)) return
     e.preventDefault()
     setDragOver(false)
+    setDragType(null)
   }, [])
 
   const handleDrop = useCallback(
@@ -132,22 +134,22 @@ export function TiledView({
       e.stopPropagation()
       setDragOver(false)
       if (e.dataTransfer.types.includes('application/x-guppi-new-session')) {
-        onDropNewSession?.()
+        onDropNewSession?.(activeKey ?? '', 'center')
         return
       }
       // Only handle sidebar drops (text/plain), not pane swaps
       if (e.dataTransfer.types.includes('application/x-guppi-pane')) return
       const sessKey = e.dataTransfer.getData('text/plain')
       if (sessKey) {
-        onDropSession?.(sessKey)
+        onDropSession?.(sessKey, activeKey ?? '', 'center')
       }
     },
-    [onDropSession, onDropNewSession],
+    [onDropSession, onDropNewSession, activeKey],
   )
 
   // Safety net: clear overlay if drag is cancelled (Escape) or ends outside
   useEffect(() => {
-    const onDragEnd = () => { setDragOver(false); setDropTarget(null) }
+    const onDragEnd = () => { setDragOver(false); setDropTarget(null); setDragType(null) }
     document.addEventListener('dragend', onDragEnd)
     return () => document.removeEventListener('dragend', onDragEnd)
   }, [])
@@ -176,31 +178,44 @@ export function TiledView({
           if (sessionKey !== activeKey) onActivate(sessionKey)
         }}
         onDragOver={(e) => {
-          if (totalLeaves > 1) {
-            const dt = e.dataTransfer
-            if (dt.types.includes('application/x-guppi-pane')) {
-              const droppedKey = dt.getData('application/x-guppi-pane')
-              if (droppedKey !== sessionKey) {
-                e.preventDefault()
-                const rect = e.currentTarget.getBoundingClientRect()
-                const x = e.clientX - rect.left
-                const y = e.clientY - rect.top
-                const w = rect.width
-                const h = rect.height
-                let zone: 'left'|'right'|'top'|'bottom'|'center'
-                if (x < w * 0.25) zone = 'left'
-                else if (x > w * 0.75) zone = 'right'
-                else if (y < h * 0.25) zone = 'top'
-                else if (y > h * 0.75) zone = 'bottom'
-                else zone = 'center'
-                setDropTarget({ key: sessionKey, zone })
-              }
+          const dt = e.dataTransfer
+          const getZone = (): 'left'|'right'|'top'|'bottom'|'center' => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            const x = e.clientX - rect.left
+            const y = e.clientY - rect.top
+            const w = rect.width
+            const h = rect.height
+            if (x < w * 0.25) return 'left'
+            if (x > w * 0.75) return 'right'
+            if (y < h * 0.25) return 'top'
+            if (y > h * 0.75) return 'bottom'
+            return 'center'
+          }
+          if (dt.types.includes('application/x-guppi-new-session')) {
+            e.preventDefault()
+            setDragType('new-session')
+            setDropTarget({ key: sessionKey, zone: getZone() })
+            return
+          }
+          if (dt.types.includes('text/plain') && !dt.types.includes('application/x-guppi-pane')) {
+            e.preventDefault()
+            setDragType('sidebar')
+            setDropTarget({ key: sessionKey, zone: getZone() })
+            return
+          }
+          if (totalLeaves > 1 && dt.types.includes('application/x-guppi-pane')) {
+            const droppedKey = dt.getData('application/x-guppi-pane')
+            if (droppedKey !== sessionKey) {
+              e.preventDefault()
+              setDragType('pane')
+              setDropTarget({ key: sessionKey, zone: getZone() })
             }
           }
         }}
         onDragLeave={(e) => {
           if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) {
             setDropTarget(null)
+            setDragType(null)
           }
         }}
         onDrop={(e) => {
@@ -209,7 +224,8 @@ export function TiledView({
           const currentDropTarget = dropTarget
           setDropTarget(null)
           if (e.dataTransfer.types.includes('application/x-guppi-new-session')) {
-            onDropNewSession?.()
+            const zone = currentDropTarget?.key === sessionKey ? currentDropTarget.zone : 'center'
+            onDropNewSession?.(sessionKey, zone)
             return
           }
           // Pane-to-pane swap/move
@@ -225,11 +241,14 @@ export function TiledView({
           // Sidebar session drop
           setDragOver(false)
           const sidebarKey = e.dataTransfer.getData('text/plain')
-          if (sidebarKey) onDropSession?.(sidebarKey)
+          if (sidebarKey) {
+            const zone = currentDropTarget?.key === sessionKey ? currentDropTarget.zone : 'center'
+            onDropSession?.(sidebarKey, sessionKey, zone)
+          }
         }}
       >
         {/* Drop zone overlay */}
-        {isDropTarget && totalLeaves > 1 && (
+        {isDropTarget && (
           <div className="absolute inset-0 z-10 pointer-events-none">
             {/* Edge strip */}
             <div className={cn(
@@ -242,7 +261,9 @@ export function TiledView({
             {/* Overlay area */}
             {dropTarget!.zone === 'center' ? (
               <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center">
-                <span className="text-sm font-medium text-primary">⇄ Swap</span>
+                <span className="text-sm font-medium text-primary">
+                  {dragType === 'pane' ? '⇄ Swap' : '+ Split'}
+                </span>
               </div>
             ) : (
               <div className={cn(

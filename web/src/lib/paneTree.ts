@@ -145,7 +145,7 @@ export function popOut(key: string): PaneTree {
  * Swaps the sessionKey values of two matching leaves.
  * Returns a new tree with the keys swapped.
  */
-function insertBesideLeaf(
+export function insertBesideLeaf(
   tree: PaneTree,
   targetKey: string,
   direction: 'h' | 'v',
