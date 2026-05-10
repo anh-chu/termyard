@@ -19,6 +19,7 @@ interface SidebarProps {
   sessionNeedsAttention: (session: string) => boolean
   getSessionActivity: (session: string) => ActivitySnapshot | undefined
   splitPanes?: string[]
+  onPairSessions?: (keyA: string, keyB: string) => void
 }
 
 interface RenameState {
@@ -149,6 +150,7 @@ export function Sidebar({
   sessionNeedsAttention,
   getSessionActivity,
   splitPanes,
+  onPairSessions,
 }: SidebarProps) {
   const { prefs } = usePreferences()
   const [hiddenSet, setHiddenSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:hidden-sessions')))
@@ -162,6 +164,8 @@ export function Sidebar({
   const [filterOpen, setFilterOpen] = useState(false)
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null)
+  const [dragIntent, setDragIntent] = useState<'pair' | 'reorder' | null>(null)
+  const [pairTarget, setPairTarget] = useState<string | null>(null)
   const [, setUptimeTick] = useState(0)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLDivElement>(null)
@@ -411,18 +415,35 @@ export function Sidebar({
           onDragStart={(e) => {
             e.dataTransfer.setData('text/plain', sk)
             setDraggingKey(sk)
+            setDragIntent('pair')
           }}
           onDragEnd={() => {
             setDraggingKey(null)
             setDropTargetKey(null)
+            setDragIntent(null)
+            setPairTarget(null)
           }}
           onDragOver={(event) => {
             event.preventDefault()
-            if (draggingKey && draggingKey !== sk) setDropTargetKey(sk)
+            if (!draggingKey || draggingKey === sk) return
+            if (dragIntent === 'reorder') {
+              setDropTargetKey(sk)
+              setPairTarget(null)
+            } else {
+              setPairTarget(sk)
+              setDropTargetKey(null)
+            }
           }}
           onDrop={(event) => {
             event.preventDefault()
-            handleDrop(sk)
+            if (dragIntent === 'reorder') {
+              handleDrop(sk)
+            } else if (dragIntent === 'pair' && draggingKey && draggingKey !== sk) {
+              onPairSessions?.(draggingKey, sk)
+              setDraggingKey(null)
+              setDragIntent(null)
+              setPairTarget(null)
+            }
           }}
           onClick={() => !isRenaming && onSessionSelect(session)}
           onKeyDown={(e) => {
@@ -439,7 +460,7 @@ export function Sidebar({
           onTouchEnd={handleTouchEnd}
           onTouchMove={handleTouchEnd}
           className={cn(
-            'flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink',
+            'relative flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink',
             'hover:bg-surface',
             isSelected && 'bg-surface text-primary border border-hairline',
             needsAttention && !isSelected && 'border-l border-warning bg-warning/5',
@@ -450,6 +471,27 @@ export function Sidebar({
             dropTargetKey === sk && 'ring-1 ring-primary/60',
           )}
         >
+          {!collapsed && (
+            <span
+              className="shrink-0 text-mute/40 hover:text-mute cursor-grab active:cursor-grabbing px-0.5 select-none text-xs"
+              draggable
+              onDragStart={(e) => {
+                e.stopPropagation()
+                e.dataTransfer.setData('text/plain', sk)
+                setDraggingKey(sk)
+                setDragIntent('reorder')
+              }}
+              onDragEnd={() => {
+                setDraggingKey(null)
+                setDropTargetKey(null)
+                setDragIntent(null)
+                setPairTarget(null)
+              }}
+              title="Drag to reorder"
+            >
+              ⠿
+            </span>
+          )}
           <div className="flex items-center gap-2 w-full">
             {!collapsed && bracketChar && (
               <span className="text-[11px] font-mono text-mute/60 select-none w-3 shrink-0">
@@ -524,6 +566,11 @@ export function Sidebar({
                 .map((evt, i) => (
                   <ToolBadge key={`${evt.tool}-${evt.pane}-${i}`} event={evt} />
                 ))}
+            </div>
+          )}
+          {pairTarget === sk && dragIntent === 'pair' && (
+            <div className="absolute inset-0 rounded-sm bg-primary/10 border border-primary/60 flex items-center justify-center pointer-events-none z-10">
+              <span className="text-[10px] font-bold text-primary uppercase tracking-widest">⊞ Split</span>
             </div>
           )}
         </div>

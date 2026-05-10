@@ -484,6 +484,18 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     selectSession(sessionKey(session))
   }
 
+  const handlePairSessions = useCallback((keyA: string, keyB: string) => {
+    setSingleView(null)
+    setPaneTree({ type: 'split', direction: 'h', ratio: 0.5, first: { type: 'leaf', sessionKey: keyA }, second: { type: 'leaf', sessionKey: keyB } })
+    setActiveKey(keyA)
+    const { host, name } = parseSessionKey(keyA)
+    const path = host
+      ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
+      : `/session/${encodeURIComponent(name)}`
+    if (window.location.pathname !== path) window.history.pushState(null, '', path)
+    setCurrentView('session')
+  }, [])
+
   const refocusTerminal = useCallback(() => {
     requestAnimationFrame(() => {
       const textarea = terminalContainerRef.current?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null
@@ -669,6 +681,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             sessionNeedsAttention={sessionNeedsAttention}
             getSessionActivity={getSessionActivity}
             splitPanes={paneTree ? getLeaves(paneTree) : []}
+            onPairSessions={handlePairSessions}
           />
         )}
         <div className="flex-1 flex flex-col overflow-hidden">
