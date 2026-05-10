@@ -347,7 +347,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
           : -1
         const next = pending[(currentIdx + 1) % pending.length]
         const sessKey = next.host ? `${next.host}/${next.session}` : next.session
-        navigateTo(sessKey, 'session')
+        selectSession(sessKey)
         if (next.window !== undefined) {
           const { host, name } = parseSessionKey(sessKey)
           fetch('/api/session/select-window', {
