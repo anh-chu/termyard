@@ -15,8 +15,16 @@ type PTYSession struct {
 	closed bool
 }
 
-// NewPTYSession spawns `tmux attach-session -t <session>` in a PTY
+// NewPTYSession spawns `tmux attach-session -t <session>` in a PTY.
+// It resolves the session name to its numeric ID before attaching so that
+// special characters in the name (e.g. "~") are not mis-interpreted by tmux
+// as target selectors.
 func NewPTYSession(tmuxPath, sessionName string, cols, rows uint16) (*PTYSession, error) {
+	// Resolve name → ID to avoid tmux special-target interpretation.
+	client := &Client{tmuxPath: tmuxPath}
+	if id := client.SessionIDByName(sessionName); id != "" {
+		sessionName = id
+	}
 	cmd := exec.Command(tmuxPath, "attach-session", "-t", sessionName)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 

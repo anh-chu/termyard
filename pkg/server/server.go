@@ -299,6 +299,10 @@ func Run(ctx context.Context, opts *Options) error {
 					http.Error(w, "name or path is required", http.StatusBadRequest)
 					return
 				}
+				if err := tmux.ValidateSessionName(req.Name); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
 
 				// Remote host — forward via peer connection
 				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
@@ -350,6 +354,10 @@ func Run(ctx context.Context, opts *Options) error {
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.OldName == "" || req.NewName == "" {
 					http.Error(w, "old_name and new_name are required", http.StatusBadRequest)
+					return
+				}
+				if err := tmux.ValidateSessionName(req.NewName); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
 
