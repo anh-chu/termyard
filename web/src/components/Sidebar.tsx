@@ -164,6 +164,7 @@ export function Sidebar({
   const [filterOpen, setFilterOpen] = useState(false)
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const [pairTarget, setPairTarget] = useState<string | null>(null)
+  const [dropIndicator, setDropIndicator] = useState<{ key: string; position: 'above' | 'below' } | null>(null)
   const [, setUptimeTick] = useState(0)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLDivElement>(null)
@@ -383,18 +384,56 @@ export function Sidebar({
           onDragEnd={() => {
             setDraggingKey(null)
             setPairTarget(null)
+            setDropIndicator(null)
           }}
-          onDragOver={(event) => {
-            event.preventDefault()
-            if (draggingKey && draggingKey !== sk) setPairTarget(sk)
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (!draggingKey || draggingKey === sk) return
+            const rect = e.currentTarget.getBoundingClientRect()
+            const y = e.clientY - rect.top
+            const ratio = y / rect.height
+            if (ratio < 0.25) {
+              setDropIndicator({ key: sk, position: 'above' })
+              setPairTarget(null)
+            } else if (ratio > 0.75) {
+              setDropIndicator({ key: sk, position: 'below' })
+              setPairTarget(null)
+            } else {
+              setPairTarget(sk)
+              setDropIndicator(null)
+            }
           }}
-          onDrop={(event) => {
-            event.preventDefault()
-            if (draggingKey && draggingKey !== sk) {
-              onPairSessions?.(draggingKey, sk)
-              setDraggingKey(null)
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setDropIndicator(null)
               setPairTarget(null)
             }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            if (!draggingKey || draggingKey === sk) return
+            if (pairTarget === sk) {
+              onPairSessions?.(draggingKey, sk)
+            } else if (dropIndicator?.key === sk) {
+              // reorder: move draggingKey to before or after sk
+              const visibleKeys = visibleSessions.map(sessionKey)
+              const from = visibleKeys.indexOf(draggingKey)
+              let to = visibleKeys.indexOf(sk)
+              if (dropIndicator.position === 'below') to += 1
+              if (from === -1 || to === -1) return
+              const reordered = [...visibleKeys]
+              reordered.splice(from, 1)
+              const adjustedTo = dropIndicator.position === 'below' && to > from ? to - 1 : to
+              reordered.splice(Math.max(0, adjustedTo), 0, draggingKey)
+              const fullOrder = orderedSessions.map(sessionKey)
+              const visibleSet = new Set(reordered)
+              let vi = 0
+              const nextOrder = fullOrder.map(key => visibleSet.has(key) ? reordered[vi++] : key)
+              setManualOrder(nextOrder)
+            }
+            setDraggingKey(null)
+            setPairTarget(null)
+            setDropIndicator(null)
           }}
           onClick={() => !isRenaming && onSessionSelect(session)}
           onKeyDown={(e) => {
@@ -502,6 +541,12 @@ export function Sidebar({
             <div className="absolute inset-0 rounded-sm bg-primary/10 border border-primary/60 flex items-center justify-center pointer-events-none z-10">
               <span className="text-[10px] font-bold text-primary uppercase tracking-widest">⊞ Split</span>
             </div>
+          )}
+          {dropIndicator?.key === sk && dropIndicator.position === 'above' && (
+            <div className="absolute top-0 left-2 right-2 h-0.5 bg-primary rounded-full pointer-events-none z-10" />
+          )}
+          {dropIndicator?.key === sk && dropIndicator.position === 'below' && (
+            <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full pointer-events-none z-10" />
           )}
         </div>
       </li>
