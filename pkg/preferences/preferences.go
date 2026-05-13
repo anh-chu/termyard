@@ -14,9 +14,10 @@ type Terminal struct {
 }
 
 type Sidebar struct {
-	DefaultCollapsed bool     `json:"default_collapsed"`
-	HiddenSessions   []string `json:"hidden_sessions"`
-	CollapseMode     string   `json:"collapse_mode"`
+	DefaultCollapsed   bool     `json:"default_collapsed"`
+	HiddenSessions     []string `json:"hidden_sessions"`
+	BackgroundSessions []string `json:"background_sessions"`
+	CollapseMode       string   `json:"collapse_mode"`
 }
 
 type Notifications struct {
@@ -55,9 +56,10 @@ func Default() *Preferences {
 		Theme:        "raycast",
 		CustomTheme:  map[string]string{},
 		Sidebar: Sidebar{
-			DefaultCollapsed: false,
-			HiddenSessions:   []string{},
-			CollapseMode:     "small",
+			DefaultCollapsed:   false,
+			HiddenSessions:     []string{},
+			BackgroundSessions: []string{},
+			CollapseMode:       "small",
 		},
 		DefaultView: "overview",
 		Notifications: Notifications{
@@ -140,6 +142,7 @@ func (s *Store) Get() *Preferences {
 	// Return a copy
 	cp := *s.data
 	cp.Sidebar.HiddenSessions = append([]string{}, s.data.Sidebar.HiddenSessions...)
+	cp.Sidebar.BackgroundSessions = append([]string{}, s.data.Sidebar.BackgroundSessions...)
 	cp.Notifications.Statuses = append([]string{}, s.data.Notifications.Statuses...)
 	return &cp
 }

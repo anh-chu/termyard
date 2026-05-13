@@ -171,7 +171,7 @@ export function Sidebar({
   onPairSessions,
   onRemoveFromSplit,
 }: SidebarProps) {
-  const { prefs } = usePreferences()
+  const { prefs, updatePrefs } = usePreferences()
   const [hiddenSet, setHiddenSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:hidden-sessions')))
   const [backgroundSet, setBackgroundSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:background-sessions')))
   const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('guppi:session-order'))
@@ -225,6 +225,15 @@ export function Sidebar({
   useEffect(() => {
     writeStoredList('guppi:background-sessions', [...backgroundSet])
   }, [backgroundSet])
+
+  useEffect(() => {
+    if (!prefs.sidebar.background_sessions) return
+    const fromServer = new Set(prefs.sidebar.background_sessions)
+    if ([...fromServer].sort().join(',') !== [...backgroundSet].sort().join(',')) {
+      setBackgroundSet(fromServer)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.sidebar.background_sessions])
 
   useEffect(() => {
     writeStoredList('guppi:session-order', manualOrder)
@@ -299,6 +308,7 @@ export function Sidebar({
       }
     }
     setBackgroundSet(next)
+    updatePrefs({ sidebar: { ...prefs.sidebar, background_sessions: [...next] } })
     setContextMenu(null)
   }
 
@@ -357,14 +367,24 @@ export function Sidebar({
         }),
       })
       if (res.ok) {
+        let nextBackground = backgroundSet
         if (hiddenSet.has(oldKey)) {
           const nextHidden = new Set(hiddenSet)
           nextHidden.delete(oldKey)
           nextHidden.add(newKey)
           setHiddenSet(nextHidden)
         }
+        if (backgroundSet.has(oldKey)) {
+          nextBackground = new Set(backgroundSet)
+          nextBackground.delete(oldKey)
+          nextBackground.add(newKey)
+          setBackgroundSet(nextBackground)
+        }
         if (manualOrder.includes(oldKey)) {
           setManualOrder(current => current.map(key => key === oldKey ? newKey : key))
+        }
+        if (nextBackground !== backgroundSet) {
+          updatePrefs({ sidebar: { ...prefs.sidebar, background_sessions: [...nextBackground] } })
         }
         onSessionRenamed?.(oldKey, newKey)
       }

@@ -11,6 +11,7 @@ export interface Preferences {
   sidebar: {
     default_collapsed: boolean
     hidden_sessions: string[]
+    background_sessions: string[]
     collapse_mode: string
   }
   default_view: string
@@ -41,6 +42,7 @@ export const defaultPreferences: Preferences = {
   sidebar: {
     default_collapsed: false,
     hidden_sessions: [],
+    background_sessions: [],
     collapse_mode: 'small',
   },
   default_view: 'overview',
