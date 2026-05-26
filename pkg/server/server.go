@@ -11,6 +11,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/ekristen/guppi/pkg/activity"
 	"github.com/ekristen/guppi/pkg/git"
+	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/agentcheck"
 	"github.com/ekristen/guppi/pkg/auth"
 	"github.com/ekristen/guppi/pkg/common"
@@ -64,7 +67,8 @@ type Options struct {
 	PairingMgr      *identity.PairingManager
 	PTYRelay        *peer.PTYRelay
 	Detector        *toolevents.Detector
-	LocalOnly       bool
+	LocalOnly           bool
+	PortForwardStore    *portforward.Store
 }
 
 // handleRemoteSession handles a terminal session request for a remote peer.
@@ -136,6 +140,105 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	case <-time.After(15 * time.Second):
 		return
 	}
+}
+
+// handleProxy reverse-proxies a request to a locally-bound port on the guppi
+// host. WebSocket upgrade requests are tunnelled over raw TCP so that
+// localhost-only dev servers remain accessible through the guppi URL.
+//
+// Route pattern: /proxy/{port}/{rest...}
+func handleProxy(w http.ResponseWriter, r *http.Request, guppiPort int) {
+	// Extract port from chi URL params
+	portStr := chi.URLParam(r, "port")
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		http.Error(w, "invalid port", http.StatusBadRequest)
+		return
+	}
+	if port == guppiPort {
+		http.Error(w, "cannot proxy guppi's own port", http.StatusForbidden)
+		return
+	}
+
+	// Strip "/proxy/{port}" prefix to get the downstream path
+	rest := chi.URLParam(r, "*")
+	if !strings.HasPrefix(rest, "/") {
+		rest = "/" + rest
+	}
+
+	isWebSocket := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+	if isWebSocket {
+		proxyWebSocket(w, r, port, rest)
+		return
+	}
+
+	target := &url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("127.0.0.1:%d", port),
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	// Override director to rewrite the path correctly
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.URL.Path = rest
+		if r.URL.RawQuery != "" {
+			req.URL.RawQuery = r.URL.RawQuery
+		}
+		req.Host = fmt.Sprintf("127.0.0.1:%d", port)
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		logrus.WithError(err).WithField("port", port).Debug("port forward proxy error")
+		http.Error(w, "upstream unreachable", http.StatusBadGateway)
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+// proxyWebSocket tunnels a WebSocket upgrade through a raw TCP connection to
+// the downstream port, allowing WebSocket-based dev servers to work through
+// the guppi port-forward proxy.
+func proxyWebSocket(w http.ResponseWriter, r *http.Request, port int, path string) {
+	backend, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
+	if err != nil {
+		logrus.WithError(err).WithField("port", port).Debug("ws port forward: dial failed")
+		http.Error(w, "upstream unreachable", http.StatusBadGateway)
+		return
+	}
+	defer backend.Close()
+
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijack not supported", http.StatusInternalServerError)
+		return
+	}
+	conn, buf, err := hj.Hijack()
+	if err != nil {
+		http.Error(w, "hijack failed", http.StatusInternalServerError)
+		return
+	}
+	defer conn.Close()
+
+	// Forward the original WS upgrade request to the backend with the rewritten path
+	upgradeReq := r.Clone(r.Context())
+	upgradeReq.URL.Path = path
+	upgradeReq.URL.Host = fmt.Sprintf("127.0.0.1:%d", port)
+	upgradeReq.Host = fmt.Sprintf("127.0.0.1:%d", port)
+	if err := upgradeReq.Write(backend); err != nil {
+		return
+	}
+
+	// Flush any buffered data from the hijacked connection to the backend
+	if buf.Reader.Buffered() > 0 {
+		buffered := make([]byte, buf.Reader.Buffered())
+		_, _ = buf.Read(buffered)
+		_, _ = backend.Write(buffered)
+	}
+
+	// Tunnel bidirectionally
+	done := make(chan struct{}, 2)
+	go func() { io.Copy(backend, conn); done <- struct{}{} }()    //nolint:errcheck
+	go func() { io.Copy(conn, backend); done <- struct{}{} }()    //nolint:errcheck
+	<-done
 }
 
 func Run(ctx context.Context, opts *Options) error {
@@ -783,6 +886,54 @@ func Run(ctx context.Context, opts *Options) error {
 				json.NewEncoder(w).Encode(&prefs)
 			})
 
+			// Port forward registry
+			r.Get("/portforwards", func(w http.ResponseWriter, r *http.Request) {
+				if opts.PortForwardStore == nil {
+					http.Error(w, "port forwarding not available", http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(opts.PortForwardStore.List())
+			})
+			r.Post("/portforwards", func(w http.ResponseWriter, r *http.Request) {
+				if opts.PortForwardStore == nil {
+					http.Error(w, "port forwarding not available", http.StatusServiceUnavailable)
+					return
+				}
+				var req struct {
+					Port  int                  `json:"port"`
+					Label string               `json:"label"`
+					Mode  portforward.Mode     `json:"mode"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Port < 1 || req.Port > 65535 {
+					http.Error(w, "port (1-65535) required", http.StatusBadRequest)
+					return
+				}
+				if req.Mode == "" {
+					req.Mode = portforward.ModeProxy
+				}
+				if err := opts.PortForwardStore.Add(req.Port, req.Label, req.Mode); err != nil {
+					http.Error(w, err.Error(), http.StatusBadGateway)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(opts.PortForwardStore.List())
+			})
+			r.Delete("/portforward/{port}", func(w http.ResponseWriter, r *http.Request) {
+				if opts.PortForwardStore == nil {
+					http.Error(w, "port forwarding not available", http.StatusServiceUnavailable)
+					return
+				}
+				port, err := strconv.Atoi(chi.URLParam(r, "port"))
+				if err != nil {
+					http.Error(w, "invalid port", http.StatusBadRequest)
+					return
+				}
+				opts.PortForwardStore.Remove(port)
+				w.WriteHeader(http.StatusNoContent)
+			})
+
 			// Pairing code generation (for the hub to generate codes)
 			r.Post("/pair", func(w http.ResponseWriter, r *http.Request) {
 				if opts.PairingMgr == nil {
@@ -859,6 +1010,23 @@ func Run(ctx context.Context, opts *Options) error {
 	}
 	if opts.PTYRelay != nil {
 		r.Get("/ws/peer-pty", opts.PTYRelay.HandlePeerPTY)
+	}
+
+	// Port-forward proxy — exposes localhost-bound services through guppi's URL.
+	// Requires auth (same rule as other protected routes) so remote users can't
+	// reach internal services without a valid session.
+	if opts.PortForwardStore != nil {
+		proxyHandler := func(w http.ResponseWriter, r *http.Request) {
+			handleProxy(w, r, opts.Port)
+		}
+		if opts.AuthEnabled {
+			authMw := auth.Middleware(opts.SessionMgr)
+			r.With(authMw).Get("/proxy/{port}", proxyHandler)
+			r.With(authMw).Get("/proxy/{port}/*", proxyHandler)
+		} else {
+			r.Get("/proxy/{port}", proxyHandler)
+			r.Get("/proxy/{port}/*", proxyHandler)
+		}
 	}
 
 	// Serve embedded frontend
@@ -964,6 +1132,11 @@ func Run(ctx context.Context, opts *Options) error {
 	// Clean up socket file
 	if unixListener != nil {
 		_ = socket.Cleanup(socketPath)
+	}
+
+	// Stop any socat processes
+	if opts.PortForwardStore != nil {
+		opts.PortForwardStore.StopAll()
 	}
 
 	return nil

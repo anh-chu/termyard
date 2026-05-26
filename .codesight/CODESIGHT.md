@@ -2,9 +2,9 @@
 
 > **Stack:** chi | none | react | go
 
-> 72 routes | 0 models | 14 components | 57 lib files | 7 env vars | 1 middleware | 0% test coverage
-> **Token savings:** this file is ~5,500 tokens. Without it, AI exploration would cost ~67,100 tokens. **Saves ~61,600 tokens per conversation.**
-> **Last scanned:** 2026-05-13 18:28 — re-run after significant changes
+> 81 routes | 0 models | 15 components | 59 lib files | 7 env vars | 1 middleware | 0% test coverage
+> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~72,600 tokens. **Saves ~66,800 tokens per conversation.**
+> **Last scanned:** 2026-05-26 13:11 — re-run after significant changes
 
 ---
 
@@ -41,10 +41,14 @@
 - `POST` `/api/push/unsubscribe` params() [auth, db, queue, ai]
 - `GET` `/api/preferences` params() [auth, db, queue, ai]
 - `PUT` `/api/preferences` params() [auth, db, queue, ai]
+- `GET` `/api/portforwards` params() [auth, db, queue, ai]
+- `POST` `/api/portforwards` params() [auth, db, queue, ai]
+- `DELETE` `/api/portforward/{port}` params(port) [auth, db, queue, ai]
 - `POST` `/api/pair` params() [auth, db, queue, ai]
 - `GET` `name` params() [auth, db, queue, ai]
 - `GET` `cols` params() [auth, db, queue, ai]
 - `GET` `rows` params() [auth, db, queue, ai]
+- `GET` `Upgrade` params() [auth, db, queue, ai]
 - `GET` `/auth/status` params() [auth, db, queue, ai]
 - `POST` `/auth/setup` params() [auth, db, queue, ai]
 - `POST` `/auth/login` params() [auth, db, queue, ai]
@@ -73,6 +77,9 @@
 - `POST` `/push/unsubscribe` params() [auth, db, queue, ai]
 - `GET` `/preferences` params() [auth, db, queue, ai]
 - `PUT` `/preferences` params() [auth, db, queue, ai]
+- `GET` `/portforwards` params() [auth, db, queue, ai]
+- `POST` `/portforwards` params() [auth, db, queue, ai]
+- `DELETE` `/portforward/{port}` params(port) [auth, db, queue, ai]
 - `POST` `/pair` params() [auth, db, queue, ai]
 - `GET` `/ws/events` params() [auth, db, queue, ai]
 - `GET` `/ws/session` params() [auth, db, queue, ai]
@@ -80,6 +87,8 @@
 - `GET` `/ws/peer` params() [auth, db, queue, ai]
 - `POST` `/api/pair/complete` params() [auth, db, queue, ai]
 - `GET` `/ws/peer-pty` params() [auth, db, queue, ai]
+- `GET` `/proxy/{port}` params(port) [auth, db, queue, ai]
+- `GET` `/proxy/{port}/*` params(port) [auth, db, queue, ai]
 - `GET` `/*` params() [auth, db, queue, ai]
 - `GET` `Origin` params() [auth]
 
@@ -93,13 +102,14 @@
 - **Login** — props: mode, error, onSubmit, onTrustCert — `web/src/components/Login.tsx`
 - **NewSessionModal** — props: hosts, sessions, onCreateSession, onClose — `web/src/components/NewSessionModal.tsx`
 - **Overview** — props: sessions, hosts, onSessionSelect, getSessionEvents, getSessionActivity, pendingAlerts, onJumpToSession, onDismissAlert — `web/src/components/Overview.tsx`
+- **PortForwardModal** — props: onClose — `web/src/components/PortForwardModal.tsx`
 - **QuickSwitcher** — props: sessions, waitingEvents, onSelect, onOverview, onCreateSession, onClose — `web/src/components/QuickSwitcher.tsx`
 - **Settings** — props: pushState, onPushSubscribe, onPushUnsubscribe, onLogout — `web/src/components/Settings.tsx`
 - **AgentStatusList** — props: agents — `web/src/components/Setup.tsx`
 - **StatusBar** — props: sessionCount, connected, activeSession, waitingCount, pushState, version, updateAvailable, hosts, agentCount, onHelp — `web/src/components/StatusBar.tsx`
 - **Terminal** — props: sessionName, hostId, fullscreen, onToggleFullscreen — `web/src/components/Terminal.tsx`
 - **TiledView** — props: tree, activeKey, onActivate, onClose, onPopOut, onSplit, onRatioChange, fullscreen, onToggleFullscreen, terminalContainerRef — `web/src/components/TiledView.tsx`
-- **TopBar** — props: currentView, sidebarCollapsed, onToggleCollapse, onOverview, onSettings, onNewSession, events, connected, onJumpToSession, onDismiss — `web/src/components/TopBar.tsx`
+- **TopBar** — props: currentView, sidebarCollapsed, onToggleCollapse, onOverview, onSettings, onNewSession, onPortForwards, events, connected, onJumpToSession — `web/src/components/TopBar.tsx`
 - **TrustCertificate** — props: onBack — `web/src/components/TrustCertificate.tsx`
 
 ---
@@ -174,6 +184,10 @@
   - class PTYRelay
   - class PendingStream
   - class ActiveBridge
+- `pkg/portforward/store.go`
+  - function NewStore: () *Store
+  - class Forward
+  - class Store
 - `pkg/preferences/preferences.go`
   - function Default: () *Preferences
   - function NewStore: () (*Store, error)
@@ -269,6 +283,10 @@
 - `web/src/hooks/useAuth.ts` — function useAuth: () => AuthState
 - `web/src/hooks/useHosts.ts` — function useHosts: () => void, interface Host
 - `web/src/hooks/useNotifications.ts` — function useNotifications: (pushSubscribed) => void
+- `web/src/hooks/usePortForwards.ts`
+  - function usePortForwards: () => void
+  - interface PortForward
+  - type ForwardMode
 - `web/src/hooks/usePreferences.ts`
   - function usePreferencesProvider: () => void
   - function usePreferences: () => void
@@ -337,11 +355,11 @@
 
 - `path/filepath` — imported by **19** files
 - `encoding/json` — imported by **15** files
+- `web/src/lib/utils.ts` — imported by **10** files
+- `os/exec` — imported by **9** files
 - `crypto/rand` — imported by **9** files
 - `web/src/hooks/usePreferences.ts` — imported by **9** files
 - `web/src/theme.ts` — imported by **9** files
-- `web/src/lib/utils.ts` — imported by **9** files
-- `os/exec` — imported by **8** files
 - `net/http` — imported by **8** files
 - `crypto/x509` — imported by **8** files
 - `crypto/tls` — imported by **7** files
@@ -349,8 +367,8 @@
 - `web/src/hooks/useSessions.ts` — imported by **7** files
 - `encoding/hex` — imported by **6** files
 - `web/src/hooks/useToolEvents.ts` — imported by **6** files
+- `net/url` — imported by **5** files
 - `encoding/base64` — imported by **5** files
-- `net/url` — imported by **4** files
 - `web/src/hooks/useHosts.ts` — imported by **4** files
 - `crypto/sha256` — imported by **3** files
 - `crypto/ecdsa` — imported by **3** files
@@ -360,11 +378,11 @@
 
 - `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/git/worktree.go` +14 more
 - `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/commands/pair/pair.go`, `pkg/identity/identity.go` +10 more
+- `web/src/lib/utils.ts` ← `web/src/components/AgentMark.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/PortForwardModal.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +5 more
+- `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/git/worktree.go` +4 more
 - `crypto/rand` ← `pkg/auth/auth.go`, `pkg/identity/identity.go`, `pkg/identity/pairing.go`, `pkg/peer/client_cert_test.go`, `pkg/peer/handler.go` +4 more
 - `web/src/hooks/usePreferences.ts` ← `web/src/App.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/Overview.tsx`, `web/src/components/Settings.tsx`, `web/src/components/Setup.tsx` +4 more
 - `web/src/theme.ts` ← `web/src/App.tsx`, `web/src/components/AgentMark.tsx`, `web/src/components/Overview.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +4 more
-- `web/src/lib/utils.ts` ← `web/src/components/AgentMark.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx`, `web/src/components/Setup.tsx` +4 more
-- `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/git/worktree.go` +3 more
 - `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/commands/pair/pair.go`, `pkg/peer/handler.go`, `pkg/peer/pty_relay.go` +3 more
 - `crypto/x509` ← `pkg/commands/pair/pair.go`, `pkg/identity/peers.go`, `pkg/peer/client.go`, `pkg/peer/client_cert_test.go`, `pkg/tlscert/reloader.go` +3 more
 - `crypto/tls` ← `pkg/commands/pair/pair.go`, `pkg/identity/peers.go`, `pkg/peer/client.go`, `pkg/peer/client_cert_test.go`, `pkg/server/server.go` +2 more

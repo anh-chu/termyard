@@ -68,6 +68,10 @@
   - class PTYRelay
   - class PendingStream
   - class ActiveBridge
+- `pkg/portforward/store.go`
+  - function NewStore: () *Store
+  - class Forward
+  - class Store
 - `pkg/preferences/preferences.go`
   - function Default: () *Preferences
   - function NewStore: () (*Store, error)
@@ -163,6 +167,10 @@
 - `web/src/hooks/useAuth.ts` — function useAuth: () => AuthState
 - `web/src/hooks/useHosts.ts` — function useHosts: () => void, interface Host
 - `web/src/hooks/useNotifications.ts` — function useNotifications: (pushSubscribed) => void
+- `web/src/hooks/usePortForwards.ts`
+  - function usePortForwards: () => void
+  - interface PortForward
+  - type ForwardMode
 - `web/src/hooks/usePreferences.ts`
   - function usePreferencesProvider: () => void
   - function usePreferences: () => void

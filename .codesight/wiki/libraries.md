@@ -2,9 +2,9 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**57 library files** across 2 modules
+**59 library files** across 2 modules
 
-## Pkg (44 files)
+## Pkg (45 files)
 
 - `pkg/peer/protocol.go` — NewMessage, Message, AuthPayload, ChallengePayload, StateUpdatePayload, StateEventPayload, …
 - `pkg/auth/auth.go` — NewPasswordStore, NewSessionManager, Middleware, SetupHandler, LoginHandler, LogoutHandler, …
@@ -26,19 +26,20 @@
 - `pkg/identity/pairing.go` — NewPairingManager, PairingCode, PairingManager
 - `pkg/identity/peers.go` — NewPeerStore, Peer, PeerStore
 - `pkg/peer/pty_manager.go` — NewPTYManager, PTYManager, ActivePTY
+- `pkg/portforward/store.go` — NewStore, Forward, Store
 - `pkg/socket/socket.go` — DefaultPath, EnsureDir, Cleanup
 - `pkg/stats/stats.go` — SystemStats, ProcessCountsFromSessions, ProcessEntry
 - `pkg/tmux/client.go` — NewClient, ValidateSessionName, Client
 - `pkg/tmux/paste_image.go` — HandlePTYControlMessage, StorePastedImage, PTYControlMessage
-- `pkg/toolevents/silence.go` — NewSilenceMonitor, SilenceMonitor, TmuxClient
-- _…and 19 more files_
+- _…and 20 more files_
 
-## Web (13 files)
+## Web (14 files)
 
 - `web/src/lib/paneTree.ts` — getLeaves, findLeaf, splitLeaf, removeLeaf, replaceLeaf, updateRatio, …
 - `web/src/hooks/useSessions.ts` — sessionKey, parseSessionKey, useSessions, Pane, Window, Session
 - `web/src/theme.ts` — applyTheme, getXtermTheme, ThemePreset, toolColors, statusConfig, themePresets
 - `web/src/hooks/usePreferences.ts` — usePreferencesProvider, usePreferences, Preferences, defaultPreferences, PreferencesContext
+- `web/src/hooks/usePortForwards.ts` — usePortForwards, PortForward, ForwardMode
 - `web/src/hooks/useActivity.ts` — useActivity, ActivitySnapshot
 - `web/src/hooks/useHosts.ts` — useHosts, Host
 - `web/src/hooks/useToolEvents.ts` — useToolEvents, ToolEvent

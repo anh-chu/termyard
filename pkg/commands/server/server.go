@@ -14,6 +14,7 @@ import (
 	"github.com/ekristen/guppi/pkg/common"
 	"github.com/ekristen/guppi/pkg/identity"
 	"github.com/ekristen/guppi/pkg/peer"
+	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
 	"github.com/ekristen/guppi/pkg/server"
 	"github.com/ekristen/guppi/pkg/state"
@@ -200,24 +201,25 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	// Initialize TLS
 	opts := &server.Options{
-		Port:            int(c.Int("port")),
-		SocketPath:      c.String("socket"),
-		Client:          client,
-		StateMgr:        stateMgr,
-		Tracker:         tracker,
-		ActivityTracker: actTracker,
-		PushKeys:        pushKeys,
-		PushStore:       pushStore,
-		PrefStore:       prefStore,
-		AuthEnabled:     authEnabled,
-		PasswordStore:   passwordStore,
-		SessionMgr:      sessionMgr,
-		PeerMgr:         peerMgr,
-		PeerHandler:     peerHandler,
-		PairingMgr:      pairingMgr,
-		PTYRelay:        ptyRelay,
-		Detector:        detector,
-		LocalOnly:       localOnly,
+		Port:             int(c.Int("port")),
+		SocketPath:       c.String("socket"),
+		Client:           client,
+		StateMgr:         stateMgr,
+		Tracker:          tracker,
+		ActivityTracker:  actTracker,
+		PushKeys:         pushKeys,
+		PushStore:        pushStore,
+		PrefStore:        prefStore,
+		AuthEnabled:      authEnabled,
+		PasswordStore:    passwordStore,
+		SessionMgr:       sessionMgr,
+		PeerMgr:          peerMgr,
+		PeerHandler:      peerHandler,
+		PairingMgr:       pairingMgr,
+		PTYRelay:         ptyRelay,
+		Detector:         detector,
+		LocalOnly:        localOnly,
+		PortForwardStore: portforward.NewStore(),
 	}
 
 	if !c.Bool("no-tls") {

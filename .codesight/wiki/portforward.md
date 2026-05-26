@@ -1,0 +1,20 @@
+# Portforward
+
+> **Navigation aid.** Route list and file locations extracted via AST. Read the source files listed below before implementing or modifying this subsystem.
+
+The Portforward subsystem handles **2 routes** and touches: auth, db, queue, ai.
+
+## Routes
+
+- `DELETE` `/api/portforward/{port}` params(port) [auth, db, queue, ai]
+  `pkg/server/server.go`
+- `DELETE` `/portforward/{port}` params(port) [auth, db, queue, ai]
+  `pkg/server/server.go`
+
+## Source Files
+
+Read these before implementing or modifying this subsystem:
+- `pkg/server/server.go`
+
+---
+_Back to [overview.md](./overview.md)_

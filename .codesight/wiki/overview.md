@@ -6,13 +6,14 @@
 
 ## Scale
 
-72 API routes · 14 UI components · 57 library files · 1 middleware layers · 7 environment variables
+81 API routes · 15 UI components · 59 library files · 1 middleware layers · 7 environment variables
 
 ## Subsystems
 
 - **[Auth](./auth.md)** — 10 routes — touches: auth, db, queue, ai
 - **[Payments](./payments.md)** — 2 routes — touches: auth, db, queue, ai
 - **[*](./section.md)** — 1 routes — touches: auth, db, queue, ai
+- **[Upgrade](./upgrade.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Activity](./activity.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Agent-status](./agent-status.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Cols](./cols.md)** — 1 routes — touches: auth, db, queue, ai
@@ -22,7 +23,10 @@
 - **[Name](./name.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Notify](./notify.md)** — 1 routes — touches: auth, ai
 - **[Pair](./pair.md)** — 4 routes — touches: auth, db, queue, ai
+- **[Portforward](./portforward.md)** — 2 routes — touches: auth, db, queue, ai
+- **[Portforwards](./portforwards.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Preferences](./preferences.md)** — 4 routes — touches: auth, db, queue, ai
+- **[Proxy](./proxy.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Pty_relay](./pty_relay.md)** — 1 routes — touches: auth, db
 - **[Push](./push.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Rows](./rows.md)** — 1 routes — touches: auth, db, queue, ai
@@ -35,9 +39,9 @@
 - **[Version](./version.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Ws](./ws.md)** — 4 routes — touches: auth, db, queue, ai
 
-**UI:** 14 components (react) — see [ui.md](./ui.md)
+**UI:** 15 components (react) — see [ui.md](./ui.md)
 
-**Libraries:** 57 files — see [libraries.md](./libraries.md)
+**Libraries:** 59 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
@@ -45,10 +49,10 @@ Changes to these files have the widest blast radius across the codebase:
 
 - `path/filepath` — imported by **19** files
 - `encoding/json` — imported by **15** files
+- `web/src/lib/utils.ts` — imported by **10** files
+- `os/exec` — imported by **9** files
 - `crypto/rand` — imported by **9** files
 - `web/src/hooks/usePreferences.ts` — imported by **9** files
-- `web/src/theme.ts` — imported by **9** files
-- `web/src/lib/utils.ts` — imported by **9** files
 
 ## Required Environment Variables
 
@@ -61,4 +65,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `XDG_RUNTIME_DIR` — `pkg/socket/socket.go`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-05-13_
+_Back to [index.md](./index.md) · Generated 2026-05-26_

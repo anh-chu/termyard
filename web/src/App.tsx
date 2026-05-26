@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar'
 import { Terminal } from './components/Terminal'
 import { Overview } from './components/Overview'
 import { NewSessionModal } from './components/NewSessionModal'
+import { PortForwardModal } from './components/PortForwardModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
 import { PaneTree, getLeaves, findLeaf, splitLeaf, insertBesideLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
@@ -145,6 +146,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const [terminalFullscreen, setTerminalFullscreen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false)
+  const [portForwardsOpen, setPortForwardsOpen] = useState(false)
   const [dragNewSessionOver, setDragNewSessionOver] = useState(false)
   const pendingSessionRef = useRef<string | null>(null)
   const splitTargetRef = useRef<{ key: string; direction: 'h' | 'v'; newFirst?: boolean } | null>(null)
@@ -798,6 +800,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   return (
     <div className="flex flex-col h-full w-full bg-background text-foreground relative">
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      {portForwardsOpen && (
+        <PortForwardModal onClose={() => setPortForwardsOpen(false)} />
+      )}
       {quickSwitcherOpen && (
         <QuickSwitcher
           sessions={sessions}
@@ -842,6 +847,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
           onOverview={() => navigateTo(null)}
           onSettings={navigateToSettings}
           onNewSession={openNewSessionModal}
+          onPortForwards={() => setPortForwardsOpen(true)}
           events={allToolEvents}
           connected={connected}
           onJumpToSession={jumpToSession}
