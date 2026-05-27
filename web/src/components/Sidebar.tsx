@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Session, sessionKey } from '../hooks/useSessions'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
@@ -18,7 +18,7 @@ interface SidebarProps {
   getSessionEvents: (session: string) => ToolEvent[]
   sessionNeedsAttention: (session: string) => boolean
   getSessionActivity: (session: string) => ActivitySnapshot | undefined
-  layoutGroups?: { id: string; leaves: string[]; isActive: boolean }[]
+  layoutGroups?: { id: string; leaves: string[]; isActive: boolean; activeKey: string | null }[]
   onSwitchGroup?: (groupId: string, focusKey?: string) => void
   onPairSessions?: (keyA: string, keyB: string) => void
   onRemoveFromSplit?: (key: string) => void
@@ -187,6 +187,22 @@ export function Sidebar({
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const [pairTarget, setPairTarget] = useState<string | null>(null)
   const [dropIndicator, setDropIndicator] = useState<{ key: string; position: 'above' | 'below' } | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('guppi:collapsed-groups')
+      if (stored) return new Set(JSON.parse(stored))
+    } catch {}
+    return new Set()
+  })
+  const toggleGroupCollapsed = useCallback((id: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      try { localStorage.setItem('guppi:collapsed-groups', JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }, [])
   const [, setUptimeTick] = useState(0)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLDivElement>(null)
@@ -776,6 +792,7 @@ export function Sidebar({
             }
             const { group, sessions: groupSessions } = item
             const firstLeaf = group.leaves[0]
+            const isGroupCollapsed = !collapsed && collapsedGroups.has(group.id)
             return (
               <li key={group.id} className="flex items-stretch">
                 {/* Bracket drag handle */}
@@ -784,7 +801,7 @@ export function Sidebar({
                     draggable={!!firstLeaf}
                     title="Drag to reorder group"
                     className={cn(
-                      'w-4 shrink-0 flex justify-center py-0.5 rounded-l-sm cursor-grab active:cursor-grabbing transition-colors hover:bg-surface-elevated',
+                      'w-4 shrink-0 flex flex-col items-center py-0.5 rounded-l-sm cursor-grab active:cursor-grabbing transition-colors hover:bg-surface-elevated group/bracket',
                       !group.isActive && 'opacity-60'
                     )}
                     onDragStart={(e) => {
@@ -832,28 +849,70 @@ export function Sidebar({
                       setDraggingKey(null); setDropIndicator(null)
                     }}
                   >
+                    {/* Collapse toggle chevron — visible on hover */}
+                    <button
+                      draggable={false}
+                      onClick={(e) => { e.stopPropagation(); toggleGroupCollapsed(group.id) }}
+                      title={isGroupCollapsed ? 'Expand group' : 'Collapse group'}
+                      className="opacity-0 group-hover/bracket:opacity-100 transition-opacity text-mute/60 hover:text-ink leading-none mt-0.5 shrink-0 cursor-pointer"
+                      style={{ fontSize: '7px' }}
+                    >
+                      {isGroupCollapsed ? '▶' : '▼'}
+                    </button>
                     <div className={cn(
-                      'w-0.5 rounded-full h-full min-h-[1rem] transition-colors',
-                      group.isActive ? 'bg-primary/40 group-hover:bg-primary/70' : 'bg-primary/20'
+                      'w-0.5 rounded-full flex-1 min-h-[0.5rem] transition-colors mt-0.5',
+                      group.isActive ? 'bg-primary/40 group-hover/bracket:bg-primary/70' : 'bg-primary/20'
                     )} />
                   </div>
                 )}
-                {/* Sessions */}
+                {/* Sessions or collapsed summary */}
                 <div className={cn('flex-1 min-w-0', !group.isActive && 'opacity-70')}>
-                  <ul className="space-y-0.5">
-                    {groupSessions.map((session, idx, arr) => {
-                      const bc = !collapsed && arr.length > 1
-                        ? (idx === 0 ? '┬' : idx === arr.length - 1 ? '└' : '├')
-                        : null
-                      return (
-                        <div key={sessionKey(session)} onClick={() =>
-                          group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
-                        }>
-                          {renderSessionItem(session, false, bc)}
-                        </div>
-                      )
-                    })}
-                  </ul>
+                  {isGroupCollapsed ? (
+                    /* Collapsed: compact summary row — click always selects, chevron toggles */
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        if (group.isActive) {
+                          // Find the active session in this group and select it
+                          const activeSession = groupSessions.find(s => sessionKey(s) === group.activeKey) ?? groupSessions[0]
+                          if (activeSession) onSessionSelect(activeSession)
+                        } else {
+                          onSwitchGroup?.(group.id)
+                        }
+                      }}
+                      className={cn(
+                        'relative flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink cursor-pointer select-none',
+                        'hover:bg-surface',
+                        group.isActive ? 'bg-surface border border-hairline' : 'border border-transparent',
+                      )}
+                    >
+                      <div className="flex items-center gap-2 w-full">
+                        <span className="text-[10px] font-mono text-mute/50 shrink-0 w-3">{groupSessions.length}</span>
+                        <span className="flex-1 text-sm font-medium text-ink truncate">
+                          {groupSessions.map(s => s.name).join(' · ')}
+                        </span>
+                        {group.isActive && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <ul className="space-y-0.5">
+                      {groupSessions.map((session, idx, arr) => {
+                        const bc = !collapsed && arr.length > 1
+                          ? (idx === 0 ? '┬' : idx === arr.length - 1 ? '└' : '├')
+                          : null
+                        return (
+                          <div key={sessionKey(session)} onClick={() =>
+                            group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
+                          }>
+                            {renderSessionItem(session, false, bc)}
+                          </div>
+                        )
+                      })}
+                    </ul>
+                  )}
                 </div>
               </li>
             )

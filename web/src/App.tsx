@@ -892,12 +892,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             layoutGroups={groupOrder
               .map(id => {
                 if (id === activeGroupId && paneTree)
-                  return { id, leaves: getLeaves(paneTree), isActive: true }
+                  return { id, leaves: getLeaves(paneTree), isActive: true, activeKey }
                 const g = savedGroups.find(g => g.id === id)
-                if (g) return { id, leaves: getLeaves(g.tree), isActive: false }
+                if (g) return { id, leaves: getLeaves(g.tree), isActive: false, activeKey: g.activeKey }
                 return null
               })
-              .filter((g): g is { id: string; leaves: string[]; isActive: boolean } => g !== null)
+              .filter((g): g is { id: string; leaves: string[]; isActive: boolean; activeKey: string | null } => g !== null)
             }
             onSwitchGroup={switchToGroup}
             onPairSessions={handlePairSessions}
