@@ -894,13 +894,17 @@ export function Sidebar({
             const isGroupCollapsed = !collapsed && collapsedGroups.has(group.id)
             return (
               <li key={group.id} className="flex items-stretch">
-                {/* Bracket drag handle */}
+                {/* Bracket: drag to reorder, click to collapse/expand */}
                 {!collapsed && (
                   <div
                     draggable={!!firstLeaf}
-                    title="Drag to reorder group"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleGroupCollapsed(group.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroupCollapsed(group.id) } }}
+                    title={`${isGroupCollapsed ? 'Expand' : 'Collapse'} group — drag to reorder`}
                     className={cn(
-                      'w-4 shrink-0 flex flex-col items-center py-0.5 rounded-l-sm cursor-grab active:cursor-grabbing transition-colors hover:bg-surface-elevated group/bracket',
+                      'w-5 shrink-0 flex flex-col items-center py-0.5 rounded-l-sm cursor-pointer active:cursor-grabbing transition-colors hover:bg-surface-elevated group/bracket',
                       !group.isActive && 'opacity-60'
                     )}
                     onDragStart={(e) => {
@@ -948,16 +952,14 @@ export function Sidebar({
                       setDraggingKey(null); setDropIndicator(null)
                     }}
                   >
-                    {/* Collapse toggle chevron — visible on hover */}
-                    <button
-                      draggable={false}
-                      onClick={(e) => { e.stopPropagation(); toggleGroupCollapsed(group.id) }}
-                      title={isGroupCollapsed ? 'Expand group' : 'Collapse group'}
-                      className="opacity-0 group-hover/bracket:opacity-100 transition-opacity text-mute/60 hover:text-ink leading-none mt-0.5 shrink-0 cursor-pointer"
-                      style={{ fontSize: '7px' }}
+                    {/* Collapse indicator arrow */}
+                    <span
+                      aria-hidden
+                      className="text-mute/70 leading-none mt-0.5 shrink-0 select-none transition-transform duration-200"
+                      style={{ fontSize: '9px' }}
                     >
-                      {isGroupCollapsed ? '▶' : '▼'}
-                    </button>
+                      {isGroupCollapsed ? '▸' : '▾'}
+                    </span>
                     <div className={cn(
                       'w-0.5 rounded-full flex-1 min-h-[0.5rem] transition-colors mt-0.5',
                       group.isActive ? 'bg-primary/40 group-hover/bracket:bg-primary/70' : 'bg-primary/20'
