@@ -483,6 +483,10 @@ export function Sidebar({
     const promptPreview = session.prompt_preview?.trim()
     const projectName = pathLeaf(session.project_path)
     const agentType = session.agent_type || events[0]?.tool
+    const allPanes = !collapsed
+      ? (session.windows ?? []).flatMap(w => (w.panes ?? []).map(p => ({ ...p, windowIndex: w.index })))
+      : []
+    const showPanes = allPanes.length > 1
 
     const handleTouchStart = (e: React.TouchEvent) => {
       if (isRenaming) return
@@ -632,7 +636,7 @@ export function Sidebar({
           className={cn(
             'relative flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink',
             'hover:bg-surface',
-            isSelected && 'bg-surface text-primary border border-hairline',
+            isSelected && 'bg-white/[0.08] text-primary border border-white/20',
             needsAttention && !isSelected && 'border-l border-warning bg-warning/5',
             !isSelected && !needsAttention && 'border border-transparent',
             (isHiddenSection || isOffline) && 'opacity-60',
@@ -730,10 +734,43 @@ export function Sidebar({
           {dropIndicator?.key === sk && dropIndicator.position === 'above' && (
             <div className="absolute top-0 left-2 right-2 h-0.5 bg-primary rounded-full pointer-events-none z-10" />
           )}
+          {showPanes && (
+            <div className="mt-2 pt-1.5 border-t border-hairline">
+              <ul className="space-y-px">
+                {allPanes.map(pane => {
+                  const pathParts = pane.current_path?.split('/').filter(Boolean) ?? []
+                  const pathBase = pathParts[pathParts.length - 1] ?? ''
+                  return (
+                    <li key={pane.id}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onSessionSelect(session)
+                          fetch('/api/session/select-window', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ host: session.host || undefined, session: session.name, window: pane.windowIndex, pane: pane.id }),
+                          }).catch(err => console.error('Failed to select pane:', err))
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-1.5 px-1 py-0.5 rounded-xs text-[11px] font-mono text-left transition-colors',
+                          pane.active ? 'text-primary' : 'text-mute hover:text-ink hover:bg-surface-elevated',
+                        )}
+                      >
+                        <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', pane.active ? 'bg-primary' : 'bg-mute/30')} />
+                        <span className="truncate">{pane.current_command || 'shell'}</span>
+                        {pathBase && <span className="text-mute/50 ml-auto pl-2 shrink-0">{pathBase}</span>}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
           {dropIndicator?.key === sk && dropIndicator.position === 'below' && (
             <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full pointer-events-none z-10" />
           )}
-
         </div>
       </li>
     )
@@ -903,7 +940,7 @@ export function Sidebar({
                       className={cn(
                         'relative flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink cursor-pointer select-none',
                         'hover:bg-surface',
-                        group.isActive ? 'bg-surface border border-hairline' : 'border border-transparent',
+                        group.isActive ? 'bg-white/[0.08] border border-white/20' : 'border border-transparent',
                       )}
                     >
                       <div className="flex items-center gap-2 w-full group/collname">
@@ -1058,7 +1095,7 @@ export function Sidebar({
                     className={cn(
                       'relative flex items-center gap-2 w-full px-2.5 py-1 rounded-sm transition-all duration-200 min-w-0',
                       'hover:bg-surface cursor-pointer',
-                      isSelected && 'bg-surface text-primary border border-hairline',
+                      isSelected && 'bg-white/[0.08] text-primary border border-white/20',
                       !isSelected && 'border border-transparent',
                     )}
                   >
