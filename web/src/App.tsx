@@ -31,6 +31,7 @@ type LayoutGroup = {
   id: string
   tree: PaneTree
   activeKey: string | null
+  name?: string
 }
 
 function getViewFromPath(): { view: View; sessionKey: string | null } {
@@ -114,6 +115,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       if (stored) return stored
     } catch {}
     return Math.random().toString(36).slice(2)
+  })
+  const [activeGroupName, setActiveGroupName] = useState<string>(() => {
+    try { return localStorage.getItem('guppi:active-group-name') || '' } catch { return '' }
   })
   const [groupOrder, setGroupOrder] = useState<string[]>(() => {
     try {
@@ -220,9 +224,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     try {
       localStorage.setItem('guppi:saved-groups', JSON.stringify(savedGroups))
       localStorage.setItem('guppi:active-group-id', activeGroupId)
+      localStorage.setItem('guppi:active-group-name', activeGroupName)
       localStorage.setItem('guppi:group-order', JSON.stringify(groupOrder))
     } catch {}
-  }, [savedGroups, activeGroupId, groupOrder])
+  }, [savedGroups, activeGroupId, activeGroupName, groupOrder])
 
   // Sync URL -> state on popstate (back/forward)
   useEffect(() => {
@@ -352,6 +357,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         setPaneTree(next.tree)
         setActiveKey(next.activeKey)
         setActiveGroupId(nextId)
+        setActiveGroupName(next.name ?? '')
         const focusKey = next.activeKey ?? getLeaves(next.tree)[0] ?? null
         if (focusKey) {
           const { host, name } = parseSessionKey(focusKey)
@@ -615,11 +621,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         second: { type: 'leaf', sessionKey: targetKey } }
       // Save current group if it has a tree
       if (paneTree) {
-        setSavedGroups(prev => [...prev, { id: activeGroupId, tree: paneTree, activeKey }])
+        setSavedGroups(prev => [...prev, { id: activeGroupId, tree: paneTree, activeKey, name: activeGroupName || undefined }])
       }
       setPaneTree(newTree)
       setActiveKey(draggedKey)
       setActiveGroupId(newId)
+      setActiveGroupName('')
       setGroupOrder(prev => {
         // ensure current activeGroupId is in order, then append new group
         const withCurrent = prev.includes(activeGroupId) ? prev : [...prev, activeGroupId]
@@ -655,7 +662,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (paneTree) {
       setSavedGroups(prev => [
         ...prev.filter(g => g.id !== groupId),
-        { id: activeGroupId, tree: paneTree, activeKey }
+        { id: activeGroupId, tree: paneTree, activeKey, name: activeGroupName || undefined }
       ])
     } else {
       setSavedGroups(prev => prev.filter(g => g.id !== groupId))
@@ -666,6 +673,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     setPaneTree(targetGroup.tree)
     setActiveKey(targetKey)
     setActiveGroupId(groupId)
+    setActiveGroupName(targetGroup.name ?? '')
     setSingleView(null)
     setCurrentView('session')
     // Navigate URL to the target leaf
@@ -677,8 +685,16 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       if (window.location.pathname !== path) window.history.pushState(null, '', path)
     }
     setTimeout(refocusTerminal, 150)
-  }, [savedGroups, activeGroupId, paneTree, activeKey, refocusTerminal])
+  }, [savedGroups, activeGroupId, activeGroupName, paneTree, activeKey, refocusTerminal])
   switchToGroupRef.current = switchToGroup
+
+  const renameGroup = useCallback((groupId: string, name: string) => {
+    if (groupId === activeGroupId) {
+      setActiveGroupName(name)
+    } else {
+      setSavedGroups(prev => prev.map(g => g.id === groupId ? { ...g, name: name || undefined } : g))
+    }
+  }, [activeGroupId])
 
   // Safety-net refocus when activeKey changes via paths that don't call
   // selectSession (e.g. onActivate from clicking inside TiledView).
@@ -770,7 +786,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       key = singleView
       const newGroupId = Math.random().toString(36).slice(2)
       if (paneTree) {
-        setSavedGroups(prev => [...prev, { id: activeGroupId, tree: paneTree, activeKey }])
+        setSavedGroups(prev => [...prev, { id: activeGroupId, tree: paneTree, activeKey, name: activeGroupName || undefined }])
       }
       setGroupOrder(prev => {
         const withCurrent = paneTree && !prev.includes(activeGroupId) ? [...prev, activeGroupId] : prev
@@ -779,6 +795,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       setPaneTree(popOut(singleView))
       setActiveKey(singleView)
       setActiveGroupId(newGroupId)
+      setActiveGroupName('')
       setSingleView(null)
     }
 
@@ -907,14 +924,15 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             layoutGroups={groupOrder
               .map(id => {
                 if (id === activeGroupId && paneTree)
-                  return { id, leaves: getLeaves(paneTree), isActive: true, activeKey }
+                  return { id, leaves: getLeaves(paneTree), isActive: true, activeKey, name: activeGroupName || undefined }
                 const g = savedGroups.find(g => g.id === id)
-                if (g) return { id, leaves: getLeaves(g.tree), isActive: false, activeKey: g.activeKey }
+                if (g) return { id, leaves: getLeaves(g.tree), isActive: false, activeKey: g.activeKey, name: g.name }
                 return null
               })
-              .filter((g): g is { id: string; leaves: string[]; isActive: boolean; activeKey: string | null } => g !== null)
+              .filter((g): g is { id: string; leaves: string[]; isActive: boolean; activeKey: string | null; name: string | undefined } => g !== null)
             }
             onSwitchGroup={switchToGroup}
+            onRenameGroup={renameGroup}
             onPairSessions={handlePairSessions}
             onRemoveFromSplit={closePane}
           />

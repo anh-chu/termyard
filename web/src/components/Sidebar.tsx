@@ -18,8 +18,9 @@ interface SidebarProps {
   getSessionEvents: (session: string) => ToolEvent[]
   sessionNeedsAttention: (session: string) => boolean
   getSessionActivity: (session: string) => ActivitySnapshot | undefined
-  layoutGroups?: { id: string; leaves: string[]; isActive: boolean; activeKey: string | null }[]
+  layoutGroups?: { id: string; leaves: string[]; isActive: boolean; activeKey: string | null; name: string | undefined }[]
   onSwitchGroup?: (groupId: string, focusKey?: string) => void
+  onRenameGroup?: (groupId: string, name: string) => void
   onPairSessions?: (keyA: string, keyB: string) => void
   onRemoveFromSplit?: (key: string) => void
 }
@@ -168,6 +169,7 @@ export function Sidebar({
   getSessionActivity,
   layoutGroups,
   onSwitchGroup,
+  onRenameGroup,
   onPairSessions,
   onRemoveFromSplit,
 }: SidebarProps) {
@@ -204,7 +206,10 @@ export function Sidebar({
     })
   }, [])
   const [, setUptimeTick] = useState(0)
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null)
+  const [groupRenameValue, setGroupRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const groupRenameInputRef = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLDivElement>(null)
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -214,6 +219,13 @@ export function Sidebar({
       renameInputRef.current.select()
     }
   }, [renamingSession])
+
+  useEffect(() => {
+    if (renamingGroupId && groupRenameInputRef.current) {
+      groupRenameInputRef.current.focus()
+      groupRenameInputRef.current.select()
+    }
+  }, [renamingGroupId])
 
   useEffect(() => {
     const id = window.setInterval(() => setUptimeTick(value => value + 1), 60_000)
@@ -410,6 +422,12 @@ export function Sidebar({
     setRenamingSession(null)
   }
 
+  const submitGroupRename = () => {
+    if (renamingGroupId) {
+      onRenameGroup?.(renamingGroupId, groupRenameValue.trim())
+    }
+    setRenamingGroupId(null)
+  }
 
   const allGroupedKeys = useMemo(() =>
     new Set(layoutGroups?.flatMap(g => g.leaves) ?? []),
@@ -874,8 +892,8 @@ export function Sidebar({
                       role="button"
                       tabIndex={0}
                       onClick={() => {
+                        if (renamingGroupId === group.id) return
                         if (group.isActive) {
-                          // Find the active session in this group and select it
                           const activeSession = groupSessions.find(s => sessionKey(s) === group.activeKey) ?? groupSessions[0]
                           if (activeSession) onSessionSelect(activeSession)
                         } else {
@@ -888,31 +906,103 @@ export function Sidebar({
                         group.isActive ? 'bg-surface border border-hairline' : 'border border-transparent',
                       )}
                     >
-                      <div className="flex items-center gap-2 w-full">
+                      <div className="flex items-center gap-2 w-full group/collname">
                         <span className="text-[10px] font-mono text-mute/50 shrink-0 w-3">{groupSessions.length}</span>
-                        <span className="flex-1 text-sm font-medium text-ink truncate">
-                          {groupSessions.map(s => s.name).join(' · ')}
-                        </span>
-                        {group.isActive && (
+                        {renamingGroupId === group.id ? (
+                          <input
+                            ref={groupRenameInputRef}
+                            value={groupRenameValue}
+                            onChange={(e) => setGroupRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') submitGroupRename()
+                              if (e.key === 'Escape') setRenamingGroupId(null)
+                            }}
+                            onBlur={submitGroupRename}
+                            onClick={(e) => e.stopPropagation()}
+                            placeholder={groupSessions.map(s => s.name).join(' · ')}
+                            className="flex-1 text-sm text-ink bg-surface-elevated border border-primary rounded-xs px-1.5 py-0 outline-none font-sans font-medium"
+                          />
+                        ) : (
+                          <span className="flex-1 text-sm font-medium text-ink truncate">
+                            {group.name || groupSessions.map(s => s.name).join(' · ')}
+                          </span>
+                        )}
+                        {/* Rename pencil */}
+                        {!renamingGroupId && (
+                          <button
+                            type="button"
+                            title="Rename group"
+                            onClick={(e) => { e.stopPropagation(); setRenamingGroupId(group.id); setGroupRenameValue(group.name || '') }}
+                            className="opacity-0 group-hover/collname:opacity-100 transition-opacity text-mute/40 hover:text-ink shrink-0 flex items-center"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
+                          </button>
+                        )}
+                        {group.isActive && !renamingGroupId && (
                           <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
                         )}
                       </div>
                     </div>
                   ) : (
-                    <ul className="space-y-0.5">
-                      {groupSessions.map((session, idx, arr) => {
-                        const bc = !collapsed && arr.length > 1
-                          ? (idx === 0 ? '┬' : idx === arr.length - 1 ? '└' : '├')
-                          : null
-                        return (
-                          <div key={sessionKey(session)} onClick={() =>
-                            group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
-                          }>
-                            {renderSessionItem(session, false, bc)}
-                          </div>
-                        )
-                      })}
-                    </ul>
+                    <>
+                      {/* Group name label row (expanded) */}
+                      {!collapsed && (
+                        <div className="group/gname flex items-center gap-1.5 px-2 pt-1 pb-0.5 min-h-[20px]">
+                          {renamingGroupId === group.id ? (
+                            <input
+                              ref={groupRenameInputRef}
+                              value={groupRenameValue}
+                              onChange={(e) => setGroupRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') submitGroupRename()
+                                if (e.key === 'Escape') setRenamingGroupId(null)
+                              }}
+                              onBlur={submitGroupRename}
+                              onClick={(e) => e.stopPropagation()}
+                              placeholder="Group name…"
+                              className="flex-1 text-[11px] text-ink bg-surface-elevated border border-primary rounded-xs px-1.5 py-0 outline-none font-sans font-medium"
+                            />
+                          ) : (
+                            <>
+                              <span className={cn(
+                                'text-[10px] font-semibold tracking-wider uppercase truncate flex-1 select-none',
+                                group.name ? 'text-mute/70' : 'text-mute/25'
+                              )}>
+                                {group.name || 'unnamed'}
+                              </span>
+                              <button
+                                type="button"
+                                title="Rename group"
+                                onClick={(e) => { e.stopPropagation(); setRenamingGroupId(group.id); setGroupRenameValue(group.name || '') }}
+                                className="opacity-0 group-hover/gname:opacity-100 transition-opacity text-mute/40 hover:text-ink shrink-0 flex items-center"
+                              >
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      <ul className="space-y-0.5">
+                        {groupSessions.map((session, idx, arr) => {
+                          const bc = !collapsed && arr.length > 1
+                            ? (idx === 0 ? '┬' : idx === arr.length - 1 ? '└' : '├')
+                            : null
+                          return (
+                            <div key={sessionKey(session)} onClick={() =>
+                              group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
+                            }>
+                              {renderSessionItem(session, false, bc)}
+                            </div>
+                          )
+                        })}
+                      </ul>
+                    </>
                   )}
                 </div>
               </li>
