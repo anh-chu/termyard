@@ -3,11 +3,9 @@ name: GoReleaser
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
     tags:
       - "v*"
+      - "!v0.0.0-nightly.*"
 
 permissions:
   contents: write

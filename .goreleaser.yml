@@ -3,6 +3,9 @@ release:
   github:
     owner: anh-chu
     name: guppi
+  # Mark nightly-* tags as GitHub prereleases; v* tags become stable releases.
+  prerelease: auto
+  name_template: "{{ .Tag }}"
 before:
   hooks:
     - /usr/bin/make frontend
