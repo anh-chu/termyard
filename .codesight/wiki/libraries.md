@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**60 library files** across 2 modules
+**61 library files** across 2 modules
 
 ## Pkg (45 files)
 
@@ -33,7 +33,7 @@
 - `pkg/stats/stats.go` — SystemStats, ProcessCountsFromSessions, ProcessEntry
 - _…and 20 more files_
 
-## Web (15 files)
+## Web (16 files)
 
 - `web/src/lib/paneTree.ts` — getLeaves, findLeaf, splitLeaf, removeLeaf, replaceLeaf, updateRatio, …
 - `web/src/hooks/useSessions.ts` — sessionKey, parseSessionKey, useSessions, Pane, Window, Session
@@ -49,6 +49,7 @@
 - `web/src/hooks/usePushNotifications.ts` — usePushNotifications
 - `web/src/hooks/useTerminal.ts` — useTerminal
 - `web/src/hooks/useWebSocket.ts` — useWebSocket
+- `web/src/lib/hostColor.ts` — hostColor
 - `web/src/lib/utils.ts` — cn
 
 ---

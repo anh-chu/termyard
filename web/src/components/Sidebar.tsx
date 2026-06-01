@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Session, sessionKey } from '../hooks/useSessions'
+import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
 import { usePreferences } from '../hooks/usePreferences'
 import { statusConfig, toolColors } from '../theme'
 import { cn } from '../lib/utils'
+import { hostColor } from '../lib/hostColor'
 import { AgentMark } from './AgentMark'
 
 interface SidebarProps {
@@ -13,6 +15,8 @@ interface SidebarProps {
   collapsed: boolean
   collapseMode: 'small' | 'hidden'
   hasMultipleHosts?: boolean
+  localHostId?: string
+  hosts?: Host[]
   onSessionSelect: (session: Session) => void
   onSessionRenamed?: (oldName: string, newName: string) => void
   getSessionEvents: (session: string) => ToolEvent[]
@@ -162,6 +166,8 @@ export function Sidebar({
   collapsed,
   collapseMode,
   hasMultipleHosts,
+  localHostId,
+  hosts,
   onSessionSelect,
   onSessionRenamed,
   getSessionEvents,
@@ -480,6 +486,10 @@ export function Sidebar({
     const active = isSessionActive(session)
     const isRenaming = renamingSession?.key === sk
     const isOffline = session.host && session.host_online === false
+    const stripeColor = hasMultipleHosts ? hostColor(session.host, localHostId) : null
+    const hostLabel = stripeColor
+      ? (hosts?.find(h => h.id === session.host)?.name ?? session.host_name ?? session.host ?? 'remote')
+      : null
     const promptPreview = session.prompt_preview?.trim()
     const projectName = pathLeaf(session.project_path)
     const agentType = session.agent_type || events[0]?.tool
@@ -644,6 +654,14 @@ export function Sidebar({
             draggingKey === sk && 'opacity-75 cursor-grab',
           )}
         >
+          {stripeColor && (
+            <span
+              className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-sm pointer-events-none"
+              style={{ backgroundColor: stripeColor }}
+              title={hostLabel ? `Host: ${hostLabel}` : undefined}
+              aria-label={hostLabel ? `Host: ${hostLabel}` : 'remote host'}
+            />
+          )}
 
           <div className="flex items-center gap-2 w-full">
             {!collapsed && bracketChar && (

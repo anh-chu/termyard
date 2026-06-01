@@ -139,6 +139,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   })
   const selectedSession = singleView ?? activeKey
   const hasMultipleHosts = hosts.length > 1
+  const localHostId = hosts.find(h => h.local)?.id
   const [serverVersion, setServerVersion] = useState<string | null>(null)
   const loadedVersionRef = useRef<string | null>(null)
   const updateAvailable = loadedVersionRef.current !== null && serverVersion !== null && serverVersion !== loadedVersionRef.current
@@ -975,6 +976,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             collapsed={sidebarCollapsed}
             collapseMode={(prefs.sidebar.collapse_mode || 'small') as 'small' | 'hidden'}
             hasMultipleHosts={hasMultipleHosts}
+            localHostId={localHostId}
+            hosts={hosts}
             onSessionSelect={handleSessionSelect}
             onSessionRenamed={(oldKey, newKey) => {
               setPaneTree(prev => {

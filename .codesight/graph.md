@@ -13,9 +13,9 @@
 - `web/src/hooks/useSessions.ts` — imported by **7** files
 - `web/src/hooks/useToolEvents.ts` — imported by **6** files
 - `crypto/rand` — imported by **5** files
+- `web/src/hooks/useHosts.ts` — imported by **5** files
 - `encoding/hex` — imported by **4** files
 - `net/url` — imported by **4** files
-- `web/src/hooks/useHosts.ts` — imported by **4** files
 - `web/src/hooks/useActivity.ts` — imported by **3** files
 - `web/src/hooks/usePushNotifications.ts` — imported by **3** files
 - `compress/gzip` — imported by **2** files

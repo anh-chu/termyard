@@ -192,6 +192,7 @@
 - `web/src/hooks/useTerminal.ts` — function useTerminal: (sessionName, hostId?) => void
 - `web/src/hooks/useToolEvents.ts` — function useToolEvents: () => void, interface ToolEvent
 - `web/src/hooks/useWebSocket.ts` — function useWebSocket: (path, onMessage) => void
+- `web/src/lib/hostColor.ts` — function hostColor: (hostId, localId) => string | null
 - `web/src/lib/paneTree.ts`
   - function getLeaves: (tree) => string[]
   - function findLeaf: (tree, key) => boolean
