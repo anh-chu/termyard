@@ -6,7 +6,7 @@
 
 ## Scale
 
-85 API routes · 15 UI components · 58 library files · 1 middleware layers · 7 environment variables
+83 API routes · 15 UI components · 58 library files · 1 middleware layers · 7 environment variables
 
 ## Subsystems
 
@@ -30,7 +30,6 @@
 - **[Portforwards](./portforwards.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Preferences](./preferences.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Proxy](./proxy.md)** — 2 routes — touches: auth, db, queue, ai
-- **[Pty_relay](./pty_relay.md)** — 1 routes — touches: auth, db
 - **[Push](./push.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Rows](./rows.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Session](./session.md)** — 10 routes — touches: auth, db, queue, ai
@@ -39,7 +38,7 @@
 - **[Tool-event](./tool-event.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Tool-events](./tool-events.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Version](./version.md)** — 2 routes — touches: auth, db, queue, ai
-- **[Ws](./ws.md)** — 4 routes — touches: auth, db, queue, ai
+- **[Ws](./ws.md)** — 3 routes — touches: auth, db, queue, ai
 
 **UI:** 15 components (react) — see [ui.md](./ui.md)
 
@@ -51,7 +50,7 @@ Changes to these files have the widest blast radius across the codebase:
 
 - `encoding/json` — imported by **20** files
 - `path/filepath` — imported by **19** files
-- `net/http` — imported by **11** files
+- `net/http` — imported by **10** files
 - `web/src/lib/utils.ts` — imported by **10** files
 - `os/exec` — imported by **9** files
 - `web/src/hooks/usePreferences.ts` — imported by **9** files

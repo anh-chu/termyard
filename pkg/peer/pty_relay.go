@@ -2,168 +2,126 @@ package peer
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
-	"net/http"
 	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 )
 
-// PTYRelay bridges browser WebSocket connections to peer PTY WebSocket connections
+// PTYRelay sits on the dialer side. For each remote-session terminal opened
+// in the browser, it tracks a stream_id -> browser WebSocket mapping. PTY
+// bytes arriving from the peer (as MsgPTYOutput) are routed to the right
+// browser WS; browser keystrokes are sent back to the peer as MsgPTYInput
+// over the control channel.
 type PTYRelay struct {
 	mu      sync.RWMutex
-	pending map[string]*PendingStream // stream_id -> waiting for peer to connect
-	active  map[string]*ActiveBridge  // stream_id -> both sides connected
+	streams map[string]*streamBinding
 }
 
-// PendingStream is a browser waiting for a peer to open a PTY WebSocket
-type PendingStream struct {
-	StreamID  string
-	HostID    string
-	BrowserWS *websocket.Conn
-	Ready     chan *websocket.Conn // peer sends its WS connection here
+type streamBinding struct {
+	browserWS *websocket.Conn
+	hostID    string
+	writeMu   sync.Mutex // serialize writes to browserWS
 }
 
-// ActiveBridge is an active PTY relay between browser and peer
-type ActiveBridge struct {
-	StreamID  string
-	BrowserWS *websocket.Conn
-	PeerWS    *websocket.Conn
-}
-
-// NewPTYRelay creates a new PTY relay
+// NewPTYRelay creates a new PTY relay.
 func NewPTYRelay() *PTYRelay {
-	return &PTYRelay{
-		pending: make(map[string]*PendingStream),
-		active:  make(map[string]*ActiveBridge),
-	}
+	return &PTYRelay{streams: make(map[string]*streamBinding)}
 }
 
-// GenerateStreamID creates a random stream ID
+// GenerateStreamID creates a random stream ID.
 func GenerateStreamID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-// RegisterPending registers a browser connection waiting for a peer PTY
-func (r *PTYRelay) RegisterPending(streamID, hostID string, browserWS *websocket.Conn) *PendingStream {
-	ps := &PendingStream{
-		StreamID:  streamID,
-		HostID:    hostID,
-		BrowserWS: browserWS,
-		Ready:     make(chan *websocket.Conn, 1),
-	}
-
+// Register binds a stream_id to a browser WS connection. The dialer keeps the
+// connection here for the lifetime of the terminal.
+func (r *PTYRelay) Register(streamID, hostID string, browserWS *websocket.Conn) {
 	r.mu.Lock()
-	r.pending[streamID] = ps
+	r.streams[streamID] = &streamBinding{browserWS: browserWS, hostID: hostID}
 	r.mu.Unlock()
-
-	return ps
 }
 
-// CompletePending is called when a peer connects its PTY WebSocket for a stream
-func (r *PTYRelay) CompletePending(streamID string, peerWS *websocket.Conn) bool {
-	r.mu.Lock()
-	ps, ok := r.pending[streamID]
-	if ok {
-		delete(r.pending, streamID)
-		r.active[streamID] = &ActiveBridge{
-			StreamID:  streamID,
-			BrowserWS: ps.BrowserWS,
-			PeerWS:    peerWS,
-		}
-	}
-	r.mu.Unlock()
-
-	if ok {
-		ps.Ready <- peerWS
-		return true
-	}
-	return false
-}
-
-// Remove removes a stream from tracking
+// Remove drops a stream binding.
 func (r *PTYRelay) Remove(streamID string) {
 	r.mu.Lock()
-	delete(r.pending, streamID)
-	delete(r.active, streamID)
+	delete(r.streams, streamID)
 	r.mu.Unlock()
 }
 
-// HandlePeerPTY handles the /ws/peer-pty endpoint where peers connect their PTY WebSocket
-func (r *PTYRelay) HandlePeerPTY(w http.ResponseWriter, req *http.Request) {
-	streamID := req.URL.Query().Get("stream")
-	if streamID == "" {
-		http.Error(w, "missing stream ID", http.StatusBadRequest)
-		return
+// HostFor returns the remote host ID bound to a stream, or "" if unknown.
+func (r *PTYRelay) HostFor(streamID string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if s, ok := r.streams[streamID]; ok {
+		return s.hostID
 	}
-
-	conn, err := wsUpgrader.Upgrade(w, req, nil)
-	if err != nil {
-		logrus.WithError(err).Warn("peer-pty ws upgrade failed")
-		return
-	}
-
-	log := logrus.WithField("stream", streamID)
-
-	if !r.CompletePending(streamID, conn) {
-		log.Warn("no pending stream for peer PTY connection")
-		conn.Close()
-		return
-	}
-
-	log.Debug("peer PTY connection established, relay is handled by the session handler")
-	// The actual relay is driven by HandleRemoteSession — this handler just
-	// registers the peer WS. The conn stays open; the relay goroutines in
-	// HandleRemoteSession read/write it.
+	return ""
 }
 
-// Bridge runs the bidirectional relay between browser and peer WebSocket connections.
-// This blocks until one side disconnects.
-func Bridge(browserWS, peerWS *websocket.Conn, streamID string) {
+// DeliverOutput writes PTY output bytes received from the peer to the
+// matching browser WebSocket. Returns true if a stream binding existed.
+func (r *PTYRelay) DeliverOutput(streamID string, data []byte) bool {
+	r.mu.RLock()
+	s, ok := r.streams[streamID]
+	r.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.browserWS.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		logrus.WithField("stream", streamID).WithError(err).Debug("browser write failed")
+		return false
+	}
+	return true
+}
+
+// PumpBrowserToPeer reads from a browser WS and forwards keystrokes/control
+// messages to the peer as MsgPTYInput / MsgPTYResize / MsgPTYClose over the
+// shared control channel. Blocks until the browser side closes.
+func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn, pc *PeerConnection) {
 	log := logrus.WithField("stream", streamID)
-
-	done := make(chan struct{}, 2)
-
-	// Peer → Browser (PTY output)
-	go func() {
-		defer func() { done <- struct{}{} }()
-		for {
-			msgType, data, err := peerWS.ReadMessage()
-			if err != nil {
-				return
+	for {
+		msgType, data, err := browserWS.ReadMessage()
+		if err != nil {
+			return
+		}
+		switch msgType {
+		case websocket.BinaryMessage:
+			payload := PTYDataPayload{
+				StreamID: streamID,
+				Data:     base64.StdEncoding.EncodeToString(data),
 			}
-			if err := browserWS.WriteMessage(msgType, data); err != nil {
-				return
+			msg, err := NewMessage(MsgPTYInput, payload)
+			if err != nil {
+				continue
+			}
+			if !pc.Enqueue(msg) {
+				log.Debug("pty-input queue full, dropping")
+			}
+		case websocket.TextMessage:
+			// Forward as a resize/control message. The remote side uses
+			// HandlePTYControlMessage which parses JSON, so wrap it in a
+			// MsgPTYInput envelope tagged as control via a magic prefix is
+			// overkill — easier: parse the resize JSON locally and forward
+			// MsgPTYResize. To keep the wire small, just send the raw text
+			// as MsgPTYInput with a separate Control flag.
+			payload := PTYControlPayload{
+				StreamID: streamID,
+				Control:  string(data),
+			}
+			msg, err := NewMessage(MsgPTYControl, payload)
+			if err != nil {
+				continue
+			}
+			if !pc.Enqueue(msg) {
+				log.Debug("pty-control queue full, dropping")
 			}
 		}
-	}()
-
-	// Browser → Peer (keyboard input + resize)
-	go func() {
-		defer func() { done <- struct{}{} }()
-		for {
-			msgType, data, err := browserWS.ReadMessage()
-			if err != nil {
-				return
-			}
-			if err := peerWS.WriteMessage(msgType, data); err != nil {
-				return
-			}
-		}
-	}()
-
-	// Wait for either side to finish
-	<-done
-
-	// Close both sides
-	browserWS.Close()
-	peerWS.Close()
-
-	// Wait for the other goroutine
-	<-done
-
-	log.Debug("PTY relay bridge closed")
+	}
 }

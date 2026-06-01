@@ -8,7 +8,6 @@
 ## Other Routes
 
 - `POST` `http://localhost/api/tool-event` params() [auth, ai]
-- `GET` `stream` params() [auth, db]
 - `GET` `/api/auth/status` params() [auth, db, queue, ai]
 - `POST` `/api/auth/setup` params() [auth, db, queue, ai]
 - `POST` `/api/auth/login` params() [auth, db, queue, ai]
@@ -79,7 +78,6 @@
 - `GET` `/ws/session` params() [auth, db, queue, ai]
 - `GET` `host` params() [auth, db, queue, ai]
 - `GET` `/ws/peer` params() [auth, db, queue, ai]
-- `GET` `/ws/peer-pty` params() [auth, db, queue, ai]
 - `GET` `/proxy/{port}` params(port) [auth, db, queue, ai]
 - `GET` `/proxy/{port}/*` params(port) [auth, db, queue, ai]
 - `GET` `/*` params() [auth, db, queue, ai]

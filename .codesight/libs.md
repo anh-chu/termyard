@@ -58,7 +58,7 @@
   - class ChallengePayload
   - class StateUpdatePayload
   - class StateEventPayload
-  - _...10 more_
+  - _...12 more_
 - `pkg/peer/pty_manager.go`
   - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
@@ -66,10 +66,7 @@
 - `pkg/peer/pty_relay.go`
   - function NewPTYRelay: () *PTYRelay
   - function GenerateStreamID: () string
-  - function Bridge: (browserWS, peerWS *websocket.Conn, streamID string)
   - class PTYRelay
-  - class PendingStream
-  - class ActiveBridge
 - `pkg/peer/session.go` — class SessionDeps
 - `pkg/peer/supervisor.go`
   - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor

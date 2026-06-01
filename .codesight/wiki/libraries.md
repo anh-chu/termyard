@@ -10,7 +10,6 @@
 - `pkg/auth/auth.go` — NewPasswordStore, NewSessionManager, Middleware, SetupHandler, LoginHandler, LogoutHandler, …
 - `pkg/preferences/preferences.go` — Default, NewStore, Terminal, Sidebar, Notifications, AgentBanner, …
 - `pkg/tmux/controlmode.go` — ControlSessionName, WithRefreshDelay, WithOnConnect, WithOnDisconnect, WithOnOutput, NewControlMode, …
-- `pkg/peer/pty_relay.go` — NewPTYRelay, GenerateStreamID, Bridge, PTYRelay, PendingStream, ActiveBridge
 - `pkg/tmux/sessionmeta.go` — NormalizeAgentType, IsShellCommand, PrimaryPane, InferAgentType, ResolveProjectPath, ExtractPromptPreview
 - `pkg/identity/identity.go` — Generate, Verify, LoadOrCreate, Load, Identity
 - `pkg/peer/bootstrap.go` — NormalizeAddress, SendBootstrap, BootstrapRequest, BootstrapResponse, BootstrapError
@@ -25,6 +24,7 @@
 - `pkg/agentcheck/agentcheck.go` — CheckAgents, AgentStatus, StatusResult
 - `pkg/identity/peers.go` — NewPeerStore, Peer, PeerStore
 - `pkg/peer/pty_manager.go` — NewPTYManager, PTYManager, ActivePTY
+- `pkg/peer/pty_relay.go` — NewPTYRelay, GenerateStreamID, PTYRelay
 - `pkg/peer/supervisor.go` — NewLinkSupervisor, LinkSnapshot, LinkSupervisor
 - `pkg/portforward/store.go` — NewStore, Forward, Store
 - `pkg/socket/socket.go` — DefaultPath, EnsureDir, Cleanup

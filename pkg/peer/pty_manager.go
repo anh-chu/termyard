@@ -1,17 +1,19 @@
 package peer
 
 import (
-	"net/url"
+	"encoding/base64"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
 	"github.com/ekristen/guppi/pkg/activity"
 	"github.com/ekristen/guppi/pkg/tmux"
 )
 
-// PTYManager manages local PTY sessions spawned on behalf of remote browsers.
+// PTYManager owns local PTYs spawned on behalf of a remote browser. Output
+// bytes are pushed back over the peer's control WebSocket as MsgPTYOutput
+// (multiplexed by stream_id), so no inbound TCP connection from the listener
+// to the dialer is ever required.
 type PTYManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*ActivePTY
@@ -23,7 +25,8 @@ type PTYManager struct {
 type ActivePTY struct {
 	StreamID string
 	PTY      *tmux.PTYSession
-	HubWS    *websocket.Conn
+	cancel   chan struct{}
+	once     sync.Once
 }
 
 // NewPTYManager creates a new PTY manager.
@@ -35,9 +38,10 @@ func NewPTYManager(tmuxPath string, actTracker *activity.Tracker) *PTYManager {
 	}
 }
 
-// Open spawns a local PTY and connects it to the peer via /ws/peer-pty.
-// peerAddr is the remote node's reachable host:port for back-dial.
-func (pm *PTYManager) Open(req PTYOpenPayload, peerAddr string) {
+// Open spawns a local PTY and starts streaming output back over pc as
+// MsgPTYOutput. Browser keystrokes arrive as MsgPTYInput via the session
+// dispatcher and are written through Write.
+func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 	log := logrus.WithFields(logrus.Fields{
 		"stream":  req.StreamID,
 		"session": req.Session,
@@ -49,31 +53,30 @@ func (pm *PTYManager) Open(req PTYOpenPayload, peerAddr string) {
 		return
 	}
 
-	hubWS, err := pm.connectPTYWebSocket(req.StreamID, peerAddr)
-	if err != nil {
-		log.WithError(err).Error("failed to connect PTY WebSocket to peer")
-		ptySess.Close()
-		return
-	}
-
 	active := &ActivePTY{
 		StreamID: req.StreamID,
 		PTY:      ptySess,
-		HubWS:    hubWS,
+		cancel:   make(chan struct{}),
 	}
 
 	pm.mu.Lock()
 	pm.sessions[req.StreamID] = active
 	pm.mu.Unlock()
 
-	log.Info("PTY relay started")
+	log.Info("PTY relay started (control-multiplexed)")
 
-	done := make(chan struct{}, 2)
-
+	// Reader: PTY -> control WS as MsgPTYOutput.
 	go func() {
-		defer func() { done <- struct{}{} }()
 		buf := make([]byte, 32*1024)
+		defer func() {
+			pm.cleanup(req.StreamID)
+		}()
 		for {
+			select {
+			case <-active.cancel:
+				return
+			default:
+			}
 			n, err := ptySess.Read(buf)
 			if err != nil {
 				return
@@ -81,36 +84,45 @@ func (pm *PTYManager) Open(req PTYOpenPayload, peerAddr string) {
 			if pm.activity != nil {
 				pm.activity.Record(req.Session, n)
 			}
-			if err := hubWS.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-				return
+			payload := PTYDataPayload{
+				StreamID: req.StreamID,
+				Data:     base64.StdEncoding.EncodeToString(buf[:n]),
 			}
-		}
-	}()
-
-	go func() {
-		defer func() { done <- struct{}{} }()
-		for {
-			msgType, data, err := hubWS.ReadMessage()
+			msg, err := NewMessage(MsgPTYOutput, payload)
 			if err != nil {
 				return
 			}
-			switch msgType {
-			case websocket.BinaryMessage:
-				if _, err := ptySess.Write(data); err != nil {
-					return
-				}
-			case websocket.TextMessage:
-				if err := tmux.HandlePTYControlMessage(ptySess, data); err != nil {
-					log.WithError(err).Debug("control message failed")
-				}
+			if !pc.Enqueue(msg) {
+				return
 			}
 		}
 	}()
+}
 
-	<-done
-	pm.cleanup(req.StreamID)
-	<-done
-	log.Info("PTY relay stopped")
+// Write delivers input bytes from the remote browser to the local PTY.
+func (pm *PTYManager) Write(streamID string, data []byte) {
+	pm.mu.RLock()
+	active, ok := pm.sessions[streamID]
+	pm.mu.RUnlock()
+	if !ok {
+		return
+	}
+	if _, err := active.PTY.Write(data); err != nil {
+		logrus.WithField("stream", streamID).WithError(err).Debug("pty write failed")
+	}
+}
+
+// HandleControl applies a JSON text control message (e.g. resize) to a PTY.
+func (pm *PTYManager) HandleControl(streamID string, data []byte) {
+	pm.mu.RLock()
+	active, ok := pm.sessions[streamID]
+	pm.mu.RUnlock()
+	if !ok {
+		return
+	}
+	if err := tmux.HandlePTYControlMessage(active.PTY, data); err != nil {
+		logrus.WithField("stream", streamID).WithError(err).Debug("control message failed")
+	}
 }
 
 // Close closes a PTY session by stream ID.
@@ -123,7 +135,6 @@ func (pm *PTYManager) Resize(streamID string, cols, rows uint16) {
 	pm.mu.RLock()
 	active, ok := pm.sessions[streamID]
 	pm.mu.RUnlock()
-
 	if ok {
 		if err := active.PTY.Resize(cols, rows); err != nil {
 			logrus.WithField("stream", streamID).WithError(err).Debug("resize failed")
@@ -140,31 +151,7 @@ func (pm *PTYManager) cleanup(streamID string) {
 	pm.mu.Unlock()
 
 	if ok {
+		active.once.Do(func() { close(active.cancel) })
 		active.PTY.Close()
-		active.HubWS.Close()
 	}
 }
-
-func (pm *PTYManager) connectPTYWebSocket(streamID, peerAddr string) (*websocket.Conn, error) {
-	if peerAddr == "" {
-		return nil, fmtErrNoPeerAddr
-	}
-	u := &url.URL{Scheme: "ws", Host: peerAddr, Path: "/ws/peer-pty"}
-	q := u.Query()
-	q.Set("stream", streamID)
-	u.RawQuery = q.Encode()
-
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	return conn, nil
-}
-
-// fmtErrNoPeerAddr is the sentinel error when we can't determine a peer
-// address for PTY relay back-dial.
-var fmtErrNoPeerAddr = &peerAddrErr{msg: "no peer address available for PTY back-dial"}
-
-type peerAddrErr struct{ msg string }
-
-func (e *peerAddrErr) Error() string { return e.msg }

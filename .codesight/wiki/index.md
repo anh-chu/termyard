@@ -29,7 +29,6 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 - [Portforwards](./portforwards.md)
 - [Preferences](./preferences.md)
 - [Proxy](./proxy.md)
-- [Pty_relay](./pty_relay.md)
 - [Push](./push.md)
 - [Rows](./rows.md)
 - [Session](./session.md)
@@ -44,7 +43,7 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 
 ## Quick Stats
 
-- Routes: **85**
+- Routes: **83**
 - Models: **0**
 - Components: **15**
 - Env vars: **7** required, **0** with defaults
@@ -73,4 +72,4 @@ These exist in your codebase but are **not** reflected in wiki articles:
 When in doubt, search the source. The wiki is a starting point, not a complete inventory.
 
 ---
-_Last compiled: 2026-06-01 · 34 articles · [codesight](https://github.com/Houseofmvps/codesight)_
+_Last compiled: 2026-06-01 · 33 articles · [codesight](https://github.com/Houseofmvps/codesight)_

@@ -2,9 +2,9 @@
 
 > **Stack:** chi | none | react | go
 
-> 85 routes | 0 models | 15 components | 58 lib files | 7 env vars | 1 middleware | 7% test coverage
-> **Token savings:** this file is ~5,700 tokens. Without it, AI exploration would cost ~74,400 tokens. **Saves ~68,800 tokens per conversation.**
-> **Last scanned:** 2026-06-01 06:38 — re-run after significant changes
+> 83 routes | 0 models | 15 components | 58 lib files | 7 env vars | 1 middleware | 7% test coverage
+> **Token savings:** this file is ~5,600 tokens. Without it, AI exploration would cost ~73,400 tokens. **Saves ~67,800 tokens per conversation.**
+> **Last scanned:** 2026-06-01 08:01 — re-run after significant changes
 
 ---
 
@@ -18,7 +18,6 @@
 ## Other Routes
 
 - `POST` `http://localhost/api/tool-event` params() [auth, ai]
-- `GET` `stream` params() [auth, db]
 - `GET` `/api/auth/status` params() [auth, db, queue, ai]
 - `POST` `/api/auth/setup` params() [auth, db, queue, ai]
 - `POST` `/api/auth/login` params() [auth, db, queue, ai]
@@ -89,7 +88,6 @@
 - `GET` `/ws/session` params() [auth, db, queue, ai]
 - `GET` `host` params() [auth, db, queue, ai]
 - `GET` `/ws/peer` params() [auth, db, queue, ai]
-- `GET` `/ws/peer-pty` params() [auth, db, queue, ai]
 - `GET` `/proxy/{port}` params(port) [auth, db, queue, ai]
 - `GET` `/proxy/{port}/*` params(port) [auth, db, queue, ai]
 - `GET` `/*` params() [auth, db, queue, ai]
@@ -177,7 +175,7 @@
   - class ChallengePayload
   - class StateUpdatePayload
   - class StateEventPayload
-  - _...10 more_
+  - _...12 more_
 - `pkg/peer/pty_manager.go`
   - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
@@ -185,10 +183,7 @@
 - `pkg/peer/pty_relay.go`
   - function NewPTYRelay: () *PTYRelay
   - function GenerateStreamID: () string
-  - function Bridge: (browserWS, peerWS *websocket.Conn, streamID string)
   - class PTYRelay
-  - class PendingStream
-  - class ActiveBridge
 - `pkg/peer/session.go` — class SessionDeps
 - `pkg/peer/supervisor.go`
   - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor
@@ -356,16 +351,16 @@
 
 - `encoding/json` — imported by **20** files
 - `path/filepath` — imported by **19** files
-- `net/http` — imported by **11** files
+- `net/http` — imported by **10** files
 - `web/src/lib/utils.ts` — imported by **10** files
 - `os/exec` — imported by **9** files
 - `web/src/hooks/usePreferences.ts` — imported by **9** files
 - `web/src/theme.ts` — imported by **9** files
+- `encoding/base64` — imported by **8** files
 - `web/src/hooks/useSessions.ts` — imported by **7** files
 - `web/src/hooks/useToolEvents.ts` — imported by **6** files
 - `crypto/rand` — imported by **5** files
-- `encoding/base64` — imported by **5** files
-- `net/url` — imported by **5** files
+- `net/url` — imported by **4** files
 - `web/src/hooks/useHosts.ts` — imported by **4** files
 - `encoding/hex` — imported by **3** files
 - `web/src/hooks/useActivity.ts` — imported by **3** files
@@ -379,14 +374,14 @@
 
 - `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/identity/identity.go`, `pkg/identity/peers.go` +15 more
 - `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/git/worktree.go` +14 more
-- `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/peer/bootstrap.go`, `pkg/peer/bootstrap_test.go`, `pkg/peer/handler.go` +6 more
+- `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/peer/bootstrap.go`, `pkg/peer/bootstrap_test.go`, `pkg/peer/handler.go` +5 more
 - `web/src/lib/utils.ts` ← `web/src/components/AgentMark.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/PortForwardModal.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +5 more
 - `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/git/worktree.go` +4 more
 - `web/src/hooks/usePreferences.ts` ← `web/src/App.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/Overview.tsx`, `web/src/components/Settings.tsx`, `web/src/components/Setup.tsx` +4 more
 - `web/src/theme.ts` ← `web/src/App.tsx`, `web/src/components/AgentMark.tsx`, `web/src/components/Overview.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +4 more
+- `encoding/base64` ← `pkg/identity/identity.go`, `pkg/peer/handler.go`, `pkg/peer/pty_manager.go`, `pkg/peer/pty_relay.go`, `pkg/peer/session.go` +3 more
 - `web/src/hooks/useSessions.ts` ← `web/src/App.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/Overview.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Sidebar.tsx` +2 more
 - `web/src/hooks/useToolEvents.ts` ← `web/src/App.tsx`, `web/src/components/Overview.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Sidebar.tsx`, `web/src/components/TopBar.tsx` +1 more
-- `crypto/rand` ← `pkg/auth/auth.go`, `pkg/identity/identity.go`, `pkg/peer/handler.go`, `pkg/peer/pty_relay.go`, `pkg/tmux/paste_image.go`
 
 ---
 

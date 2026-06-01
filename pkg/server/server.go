@@ -109,12 +109,13 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	}
 	defer browserWS.Close()
 
-	// Generate stream ID and register pending relay
+	// Generate stream ID and register the browser binding so MsgPTYOutput
+	// from the peer can be routed back to this WebSocket.
 	streamID := peer.GenerateStreamID()
-	pending := opts.PTYRelay.RegisterPending(streamID, hostID, browserWS)
+	opts.PTYRelay.Register(streamID, hostID, browserWS)
 	defer opts.PTYRelay.Remove(streamID)
 
-	// Tell the peer to open a PTY
+	// Tell the peer to open a PTY.
 	msg, _ := peer.NewMessage(peer.MsgPTYOpen, peer.PTYOpenPayload{
 		StreamID: streamID,
 		Session:  sessionName,
@@ -125,17 +126,13 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		return
 	}
 
-	// Wait for the peer to connect its PTY WebSocket
-	select {
-	case peerWS := <-pending.Ready:
-		if peerWS == nil {
-			return
-		}
-		// Bridge the two WebSocket connections
-		peer.Bridge(browserWS, peerWS, streamID)
-	case <-time.After(15 * time.Second):
-		return
-	}
+	// Pump keystrokes/control frames from browser to peer; output flows the
+	// other way via MsgPTYOutput dispatched in handleSessionMessage.
+	opts.PTYRelay.PumpBrowserToPeer(streamID, browserWS, peerConn)
+
+	// Tell the peer to close the PTY.
+	closeMsg, _ := peer.NewMessage(peer.MsgPTYClose, peer.PTYClosePayload{StreamID: streamID})
+	peerConn.Enqueue(closeMsg)
 }
 
 // absPathRe matches HTML attribute values that begin with a single /
@@ -1040,9 +1037,7 @@ func Run(ctx context.Context, opts *Options) error {
 	if opts.PeerHandler != nil {
 		r.Get("/ws/peer", opts.PeerHandler.HandlePeer)
 	}
-	if opts.PTYRelay != nil {
-		r.Get("/ws/peer-pty", opts.PTYRelay.HandlePeerPTY)
-	}
+
 
 	// Port-forward proxy — exposes localhost-bound services through guppi's URL.
 	// Requires auth (same rule as other protected routes) so remote users can't

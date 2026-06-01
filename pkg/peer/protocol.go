@@ -52,6 +52,15 @@ const (
 	// MsgForget notifies the receiver that the sender is forgetting them.
 	// Receiver should remove sender from its peer store and close the link.
 	MsgForget = "forget"
+	// MsgPTYOutput carries PTY output bytes from the listener (where the
+	// session lives) back to the dialer (where the browser is). Multiplexed
+	// over the control WS so we never need a back-dial.
+	MsgPTYOutput = "pty-output"
+	// MsgPTYInput carries keystroke/input bytes from the dialer (browser) to
+	// the listener (PTY).
+	MsgPTYInput = "pty-input"
+	// MsgPTYControl carries a JSON control frame (e.g. resize) for a PTY.
+	MsgPTYControl = "pty-control"
 )
 
 // Message is the envelope for all control WebSocket messages
@@ -141,6 +150,20 @@ type PTYResizePayload struct {
 	StreamID string `json:"stream_id"`
 	Cols     uint16 `json:"cols"`
 	Rows     uint16 `json:"rows"`
+}
+
+// PTYDataPayload carries opaque bytes for one PTY stream over the control WS.
+// Used both directions: MsgPTYOutput (listener→dialer) and MsgPTYInput
+// (dialer→listener). Data is base64-encoded so it fits in the JSON envelope.
+type PTYDataPayload struct {
+	StreamID string `json:"stream_id"`
+	Data     string `json:"data"`
+}
+
+// PTYControlPayload carries a JSON control frame (e.g. resize) for a PTY.
+type PTYControlPayload struct {
+	StreamID string `json:"stream_id"`
+	Control  string `json:"control"`
 }
 
 // SessionActionPayload forwards a session API action to a peer

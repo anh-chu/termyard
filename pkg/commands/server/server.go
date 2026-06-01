@@ -164,6 +164,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PeerStore:   peerStore,
 		TmuxClient:  client,
 		PTYManager:  ptyManager,
+		PTYRelay:    ptyRelay,
 	}
 
 	peerHandler := peer.NewHandler(deps)

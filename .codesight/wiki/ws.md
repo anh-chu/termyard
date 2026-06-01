@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Route list and file locations extracted via AST. Read the source files listed below before implementing or modifying this subsystem.
 
-The Ws subsystem handles **4 routes** and touches: auth, db, queue, ai.
+The Ws subsystem handles **3 routes** and touches: auth, db, queue, ai.
 
 ## Routes
 
@@ -11,8 +11,6 @@ The Ws subsystem handles **4 routes** and touches: auth, db, queue, ai.
 - `GET` `/ws/session` [auth, db, queue, ai]
   `pkg/server/server.go`
 - `GET` `/ws/peer` [auth, db, queue, ai]
-  `pkg/server/server.go`
-- `GET` `/ws/peer-pty` [auth, db, queue, ai]
   `pkg/server/server.go`
 
 ## Source Files

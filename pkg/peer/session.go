@@ -2,6 +2,7 @@ package peer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -38,12 +39,7 @@ type SessionDeps struct {
 	PeerStore   *identity.PeerStore
 	TmuxClient  *tmux.Client
 	PTYManager  *PTYManager
-
-	// peerAddr is the network address of the currently-running session's
-	// remote peer, used for PTY back-dial. Set by runSession; treat as
-	// per-call scratch — multiple concurrent sessions get their own SessionDeps
-	// copies via value semantics.
-	peerAddr string
+	PTYRelay    *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
 }
 
 // connWriter serializes WebSocket writes from multiple goroutines.
@@ -83,9 +79,6 @@ func runSession(
 	if !deps.Manager.TryRegisterPeer(peerID, peerInfo.Name, peerInfo.PublicKey, address, pc) {
 		return fmt.Errorf("peer already connected")
 	}
-
-	// PTY back-dial address used by this session.
-	deps.peerAddr = address
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 
@@ -415,7 +408,40 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 			return
 		}
 		if deps.PTYManager != nil {
-			go deps.PTYManager.Open(p, deps.peerAddr)
+			go deps.PTYManager.Open(p, pc)
+		}
+
+	case MsgPTYInput:
+		var p PTYDataPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if deps.PTYManager != nil {
+			data, derr := base64.StdEncoding.DecodeString(p.Data)
+			if derr == nil {
+				deps.PTYManager.Write(p.StreamID, data)
+			}
+		}
+
+	case MsgPTYControl:
+		var p PTYControlPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if deps.PTYManager != nil {
+			deps.PTYManager.HandleControl(p.StreamID, []byte(p.Control))
+		}
+
+	case MsgPTYOutput:
+		var p PTYDataPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if deps.PTYRelay != nil {
+			data, derr := base64.StdEncoding.DecodeString(p.Data)
+			if derr == nil {
+				deps.PTYRelay.DeliverOutput(p.StreamID, data)
+			}
 		}
 
 	case MsgPTYClose:
