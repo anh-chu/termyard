@@ -49,8 +49,8 @@
 
 Changes to these files have the widest blast radius across the codebase:
 
+- `path/filepath` — imported by **22** files
 - `encoding/json` — imported by **22** files
-- `path/filepath` — imported by **21** files
 - `net/http` — imported by **11** files
 - `os/exec` — imported by **10** files
 - `web/src/lib/utils.ts` — imported by **10** files

@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 
 	"github.com/ekristen/guppi/pkg/activity"
 	"github.com/ekristen/guppi/pkg/common"
+	"github.com/ekristen/guppi/pkg/git"
 	"github.com/ekristen/guppi/pkg/identity"
 	"github.com/ekristen/guppi/pkg/state"
 	"github.com/ekristen/guppi/pkg/stats"
@@ -564,12 +568,40 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 	switch payload.Action {
 	case "new":
 		var params struct {
-			Name    string `json:"name"`
-			Path    string `json:"path,omitempty"`
-			Command string `json:"command,omitempty"`
+			Name            string `json:"name"`
+			Path            string `json:"path,omitempty"`
+			Command         string `json:"command,omitempty"`
+			WorktreeBranch  string `json:"worktree_branch,omitempty"`
 		}
 		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Name == "" {
 			return
+		}
+		// Create worktree locally if requested. Same logic as the local
+		// session create path in pkg/server.
+		if params.WorktreeBranch != "" && params.Path != "" {
+			expanded := params.Path
+			if strings.HasPrefix(expanded, "~") {
+				if home, err := os.UserHomeDir(); err == nil && home != "" {
+					expanded = home + expanded[1:]
+				}
+			}
+			if !filepath.IsAbs(expanded) {
+				if home, err := os.UserHomeDir(); err == nil {
+					expanded = filepath.Join(home, expanded)
+				}
+			}
+			sanitized := strings.ReplaceAll(params.WorktreeBranch, "/", "-")
+			worktreesDir := filepath.Join(expanded, ".worktrees")
+			if err := os.MkdirAll(worktreesDir, 0755); err != nil {
+				log.WithError(err).Warn("mkdir .worktrees failed on peer")
+				return
+			}
+			destPath := filepath.Join(worktreesDir, sanitized)
+			if err := git.CreateWorktree(expanded, params.WorktreeBranch, destPath); err != nil {
+				log.WithError(err).Warn("git worktree add failed on peer")
+				return
+			}
+			params.Path = destPath
 		}
 		if err := deps.TmuxClient.NewSession(params.Name, params.Path, params.Command); err != nil {
 			log.WithError(err).Warn("new session via peer failed")

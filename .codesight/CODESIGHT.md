@@ -4,7 +4,7 @@
 
 > 87 routes | 0 models | 15 components | 61 lib files | 7 env vars | 1 middleware | 7% test coverage
 > **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~76,200 tokens. **Saves ~70,500 tokens per conversation.**
-> **Last scanned:** 2026-06-01 11:11 — re-run after significant changes
+> **Last scanned:** 2026-06-01 14:02 — re-run after significant changes
 
 ---
 
@@ -363,8 +363,8 @@
 
 ## Most Imported Files (change these carefully)
 
+- `path/filepath` — imported by **22** files
 - `encoding/json` — imported by **22** files
-- `path/filepath` — imported by **21** files
 - `net/http` — imported by **11** files
 - `os/exec` — imported by **10** files
 - `web/src/lib/utils.ts` — imported by **10** files
@@ -386,8 +386,8 @@
 
 ## Import Map (who imports what)
 
+- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/update/update.go` +17 more
 - `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go`, `pkg/identity/identity.go` +17 more
-- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/update/update.go` +16 more
 - `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go`, `pkg/peer/bootstrap.go`, `pkg/peer/bootstrap_test.go` +6 more
 - `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go` +5 more
 - `web/src/lib/utils.ts` ← `web/src/components/AgentMark.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/PortForwardModal.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +5 more

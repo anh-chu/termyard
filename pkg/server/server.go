@@ -527,7 +527,9 @@ func Run(ctx context.Context, opts *Options) error {
 					return
 				}
 
-				// Remote host — forward via peer connection
+				// Remote host — forward via peer connection. The peer handles
+				// worktree creation locally so the worktree lands on the peer's
+				// filesystem, not ours.
 				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
 					peerConn := opts.PeerMgr.GetPeerConnection(req.Host)
 					if peerConn == nil {
@@ -535,9 +537,10 @@ func Run(ctx context.Context, opts *Options) error {
 						return
 					}
 					params, _ := json.Marshal(map[string]string{
-						"name":    req.Name,
-						"path":    req.Path,
-						"command": req.Command,
+						"name":            req.Name,
+						"path":            req.Path,
+						"command":         req.Command,
+						"worktree_branch": req.WorktreeBranch,
 					})
 					msg, _ := peer.NewMessage(peer.MsgSessionAction, peer.SessionActionPayload{
 						Action: "new",
