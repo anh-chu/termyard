@@ -888,7 +888,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   // Keep the browser title stable unless user attention is needed.
   useEffect(() => {
     const needsAttention = allToolEvents.some(
-      evt => evt.status === 'waiting' || evt.status === 'error',
+      evt => evt.status === 'waiting' || evt.status === 'error' || evt.status === 'stuck',
     )
     document.title = needsAttention ? 'Guppi - Attention needed' : 'Guppi'
   }, [allToolEvents])
@@ -1141,7 +1141,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
               onSessionSelect={handleSessionSelect}
               getSessionEvents={getSessionEvents}
               getSessionActivity={getSessionActivity}
-              pendingAlerts={allToolEvents.filter(e => e.status === 'waiting' || e.status === 'error')}
+              pendingAlerts={allToolEvents.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck')}
               onJumpToSession={jumpToSession}
               onDismissAlert={dismissEvent}
             />
@@ -1153,12 +1153,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         sessionCount={sessions.length}
         connected={connected}
         activeSession={selectedSession ? sessions.find(s => sessionKey(s) === selectedSession) ?? null : null}
-        waitingCount={allToolEvents.filter(e => e.status === 'waiting').length}
+        waitingCount={allToolEvents.filter(e => e.status === 'waiting' || e.status === 'stuck').length}
         pushState={pushState}
         version={serverVersion}
         updateAvailable={updateAvailable}
         hosts={hosts}
-        agentCount={allToolEvents.filter(e => e.auto_detected || e.status === 'waiting' || e.status === 'error').length}
+        agentCount={allToolEvents.filter(e => e.auto_detected || e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length}
         onHelp={() => setHelpOpen(true)}
       />
     </div>

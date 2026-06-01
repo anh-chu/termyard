@@ -867,12 +867,15 @@ func Run(ctx context.Context, opts *Options) error {
 				}
 				waitingAgents := 0
 				errorAgents := 0
+				stuckAgents := 0
 				for _, evt := range toolEvents {
 					switch evt.Status {
 					case "waiting":
 						waitingAgents++
 					case "error":
 						errorAgents++
+					case "stuck":
+						stuckAgents++
 					}
 				}
 
@@ -888,6 +891,7 @@ func Run(ctx context.Context, opts *Options) error {
 					"agents": map[string]int{
 						"active":  agentPanes,
 						"waiting": waitingAgents,
+						"stuck":   stuckAgents,
 						"error":   errorAgents,
 					},
 					"processes": stats.ProcessCountsFromSessions(sessions),

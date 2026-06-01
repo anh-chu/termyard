@@ -11,6 +11,7 @@ export const statusConfig: Record<string, { color: string; label: string; icon?:
     active: { color: 'var(--success)', label: 'Running', bg: 'color-mix(in oklch, var(--success) 8%, transparent)' },
     waiting: { color: 'var(--warning)', label: 'Waiting', icon: '●', bg: 'color-mix(in oklch, var(--warning) 8%, transparent)' },
     error: { color: 'var(--destructive)', label: 'Error', icon: '!', bg: 'color-mix(in oklch, var(--destructive) 8%, transparent)' },
+    stuck: { color: 'oklch(0.70 0.18 50)', label: 'Stuck', icon: '◴', bg: 'color-mix(in oklch, oklch(0.70 0.18 50) 10%, transparent)' },
     completed: { color: 'var(--success)', label: 'Completed', icon: '✓', bg: 'color-mix(in oklch, var(--success) 8%, transparent)' },
 }
 

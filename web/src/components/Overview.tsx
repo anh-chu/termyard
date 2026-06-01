@@ -35,7 +35,7 @@ interface Stats {
   windows: number
   panes: number
   agent_panes: number
-  agents: { active: number; waiting: number; error: number }
+  agents: { active: number; waiting: number; stuck: number; error: number }
   processes: { name: string; count: number }[]
   system?: SystemStats
 }
@@ -325,7 +325,7 @@ export function Overview({
                   onClick={() => onJumpToSession(evt.host ? `${evt.host}/${evt.session}` : evt.session, evt.window, evt.pane)}
                 >
                   <span
-                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${evt.status === 'waiting' ? 'animate-[pulse_1.5s_ease-in-out_infinite]' : ''}`}
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${evt.status === 'waiting' || evt.status === 'stuck' ? 'animate-[pulse_1.5s_ease-in-out_infinite]' : ''}`}
                     style={{ background: cfg.color }}
                   />
                   <span className="font-bold text-[13px] tracking-tight" style={{ color: tc }}>{evt.tool.toUpperCase()}</span>
@@ -379,7 +379,7 @@ export function Overview({
               {groupSessions.map((session) => {
                 const sk = sessionKey(session)
                 const events = getSessionEvents(sk)
-                const hasWaiting = events.some(e => e.status === 'waiting')
+                const hasWaiting = events.some(e => e.status === 'waiting' || e.status === 'stuck')
                 const act = getSessionActivity(sk)
                 const active = isSessionActive(session)
                 const isOffline = session.host && session.host_online === false

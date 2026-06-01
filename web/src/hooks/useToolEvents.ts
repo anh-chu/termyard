@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface ToolEvent {
   tool: string
-  status: 'active' | 'waiting' | 'completed' | 'error'
+  status: 'active' | 'waiting' | 'completed' | 'error' | 'stuck'
   host?: string
   host_name?: string
   session: string
@@ -87,12 +87,13 @@ export function useToolEvents() {
   // Check if a session has any "waiting" events (accepts composite key)
   const sessionNeedsAttention = useCallback((key: string) => {
     const idx = key.indexOf('/')
+    const needsAttn = (e: ToolEvent) => e.status === 'waiting' || e.status === 'stuck'
     if (idx === -1) {
-      return events.some(e => e.session === key && !e.host && e.status === 'waiting')
+      return events.some(e => e.session === key && !e.host && needsAttn(e))
     }
     const host = key.substring(0, idx)
     const name = key.substring(idx + 1)
-    return events.some(e => e.session === name && e.host === host && e.status === 'waiting')
+    return events.some(e => e.session === name && e.host === host && needsAttn(e))
   }, [events])
 
   // Dismiss a specific event (clear from server and local state)

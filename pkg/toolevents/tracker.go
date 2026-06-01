@@ -28,6 +28,7 @@ const (
 	StatusWaiting   Status = "waiting"   // agent needs user attention/approval
 	StatusCompleted Status = "completed" // agent finished its task
 	StatusError     Status = "error"     // agent encountered an error
+	StatusStuck     Status = "stuck"     // agent claims active but made no observable progress
 )
 
 // Event is a single notification from an agent hook
@@ -79,6 +80,13 @@ type Tracker struct {
 	// that lack native waiting detection. Used by the inactivity promoter.
 	lastActive map[PaneKey]*Event
 
+	// activePanes tracks local panes whose latest hook status is "active",
+	// including native-waiting tools (Claude/Pi/OpenCode). Used by the stuck
+	// monitor to detect agents that claim to be working but make no
+	// observable progress (no tool events and no pane output). Keyed by
+	// pane ID so the %output handler can refresh progress cheaply.
+	activePanes map[string]*activeState
+
 	// Subscribers
 	subMu       sync.RWMutex
 	subscribers []chan *Event
@@ -87,10 +95,18 @@ type Tracker struct {
 }
 
 // NewTracker creates a new tool event tracker
+// activeState tracks an actively-working local pane for stuck detection.
+type activeState struct {
+	evt          *Event    // the originating active event (session/window/pane context)
+	lastProgress time.Time // last tool event or pane output for this pane
+	flagged      bool      // true once we've emitted a stuck event (avoid repeats)
+}
+
 func NewTracker() *Tracker {
 	return &Tracker{
 		events:      make(map[PaneKey]*Event),
 		lastActive:  make(map[PaneKey]*Event),
+		activePanes: make(map[string]*activeState),
 		sessionMeta: make(map[string]SessionMeta),
 	}
 }
@@ -150,6 +166,27 @@ func (t *Tracker) Record(evt *Event) {
 		}
 	} else if evt.AutoDetected {
 		log.Trace("tracker: skipping lastActive (auto-detected)")
+	}
+
+	// Maintain activePanes for stuck detection. Only local panes (Host=="")
+	// with a pane ID, driven by hook events (not auto-detected). Unlike
+	// lastActive, this includes native-waiting tools (Claude/Pi/OpenCode):
+	// those tools clear their tracked event on "active", so a hung agent
+	// mid-tool would otherwise be invisible. A "stuck" event itself does not
+	// clear activePanes (the agent still claims to be working); any output
+	// or new tool event refreshes lastProgress and unflags it.
+	if evt.Host == "" && evt.Pane != "" && !evt.AutoDetected {
+		switch evt.Status {
+		case StatusActive:
+			t.activePanes[evt.Pane] = &activeState{evt: evt, lastProgress: evt.Timestamp}
+			log.Trace("tracker: tracking active pane for stuck detection")
+		case StatusStuck:
+			// keep the entry; the monitor sets flagged itself
+		default:
+			// waiting/error/completed mean the agent no longer claims to be working
+			delete(t.activePanes, evt.Pane)
+			log.Trace("tracker: cleared active pane (non-active status)")
+		}
 	}
 	meta := t.sessionMeta[sessionKey]
 	if evt.Tool != "" {
@@ -329,6 +366,137 @@ func (t *Tracker) promoteInactive(timeout time.Duration, log *logrus.Entry) {
 			Window:  evt.Window,
 			Pane:    evt.Pane,
 			Message: "May need attention",
+		})
+	}
+}
+
+// RecordProgress refreshes the progress timestamp for an active pane. Called
+// from the control-mode %output handler so that an agent producing terminal
+// output (e.g. a long but healthy build) is not flagged as stuck. Also clears
+// any prior stuck flag so the pane can be re-evaluated and the alert dismissed.
+func (t *Tracker) RecordProgress(paneID string) {
+	t.mu.Lock()
+	as, ok := t.activePanes[paneID]
+	if !ok {
+		t.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	as.lastProgress = now
+	wasFlagged := as.flagged
+	as.flagged = false
+	evt := as.evt
+	t.mu.Unlock()
+
+	// If we'd previously flagged this pane as stuck, output means it's alive
+	// again. Emit an active event to clear the stuck alert.
+	if wasFlagged {
+		t.Record(&Event{
+			Tool:    evt.Tool,
+			Status:  StatusActive,
+			Host:    evt.Host,
+			Session: evt.Session,
+			Window:  evt.Window,
+			Pane:    evt.Pane,
+		})
+	}
+}
+
+// DefaultStuckTimeout is how long a pane claiming "active" can go without any
+// tool event or terminal output before the stuck monitor flags it. A genuinely
+// busy agent emits tool events or output well within this window; silence this
+// long usually means a hang, infinite loop, or a tool waiting on something that
+// never arrives.
+const DefaultStuckTimeout = 5 * time.Minute
+
+// promptChecker reports whether captured pane content shows an input prompt.
+// Used by the stuck monitor to avoid flagging a pane as stuck when it is
+// actually waiting for user input (that's the silence monitor's job).
+type promptChecker func(paneID string) (isPrompt bool, ok bool)
+
+// RunStuckMonitor starts a background goroutine that flags local panes which
+// claim to be "active" but have produced no tool events and no terminal output
+// for longer than timeout, and are not sitting at an input prompt. When found,
+// it records a synthetic "stuck" event. Pass a nil checkPrompt to skip the
+// input-prompt guard (everything quiet is treated as stuck).
+func (t *Tracker) RunStuckMonitor(ctx context.Context, timeout time.Duration, checkPrompt promptChecker) {
+	log := logrus.WithField("component", "stuck-monitor")
+	log.WithField("timeout", timeout).Info("starting stuck monitor")
+
+	interval := timeout / 4
+	if interval < 15*time.Second {
+		interval = 15 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("stopping stuck monitor")
+			return
+		case <-ticker.C:
+			t.checkStuck(timeout, checkPrompt, log)
+		}
+	}
+}
+
+// checkStuck scans activePanes for entries quiet longer than timeout and
+// records stuck events for them.
+func (t *Tracker) checkStuck(timeout time.Duration, checkPrompt promptChecker, log *logrus.Entry) {
+	now := time.Now()
+
+	type candidate struct {
+		paneID string
+		evt    *Event
+	}
+	var candidates []candidate
+
+	t.mu.Lock()
+	for paneID, as := range t.activePanes {
+		if as.flagged {
+			continue
+		}
+		if now.Sub(as.lastProgress) > timeout {
+			candidates = append(candidates, candidate{paneID: paneID, evt: as.evt})
+		}
+	}
+	t.mu.Unlock()
+
+	for _, c := range candidates {
+		// Skip panes sitting at an input prompt: that's "waiting", not stuck.
+		if checkPrompt != nil {
+			if isPrompt, ok := checkPrompt(c.paneID); ok && isPrompt {
+				log.WithField("pane", c.paneID).Trace("quiet pane is at an input prompt, not stuck")
+				continue
+			}
+		}
+
+		t.mu.Lock()
+		as, ok := t.activePanes[c.paneID]
+		if !ok || as.flagged {
+			t.mu.Unlock()
+			continue
+		}
+		as.flagged = true
+		t.mu.Unlock()
+
+		log.WithFields(logrus.Fields{
+			"tool":    c.evt.Tool,
+			"session": c.evt.Session,
+			"window":  c.evt.Window,
+			"pane":    c.paneID,
+		}).Debug("flagging pane as stuck")
+
+		t.Record(&Event{
+			Tool:    c.evt.Tool,
+			Status:  StatusStuck,
+			Host:    c.evt.Host,
+			Session: c.evt.Session,
+			Window:  c.evt.Window,
+			Pane:    c.paneID,
+			Message: "No progress for a while, may be stuck",
 		})
 	}
 }

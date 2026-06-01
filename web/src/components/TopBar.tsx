@@ -42,7 +42,7 @@ export function TopBar({
   panesCount,
   onSplitPane,
 }: TopBarProps) {
-  const actionable = events.filter(e => e.status === 'waiting' || e.status === 'error')
+  const actionable = events.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck')
   const [expanded, setExpanded] = useState<string | null>(null)
   const { prefs } = usePreferences()
   const dismissTimers = useRef<Map<string, number>>(new Map())
@@ -53,7 +53,7 @@ export function TopBar({
     if (seconds <= 0) return
 
     events.forEach((evt, i) => {
-      if (evt.status !== 'waiting' && evt.status !== 'error') return
+      if (evt.status !== 'waiting' && evt.status !== 'error' && evt.status !== 'stuck') return
       const key = `${evt.tool}-${evt.session}-${evt.pane}-${i}`
       if (dismissTimers.current.has(key)) return
       const timer = window.setTimeout(() => {

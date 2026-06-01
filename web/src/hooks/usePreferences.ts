@@ -47,7 +47,7 @@ export const defaultPreferences: Preferences = {
   },
   default_view: 'overview',
   notifications: {
-    statuses: ['waiting', 'error', 'completed'],
+    statuses: ['waiting', 'stuck', 'error', 'completed'],
   },
   agent_banner: {
     auto_dismiss_seconds: 0,

@@ -75,7 +75,7 @@ function ToolBadge({ event }: { event: ToolEvent }) {
       }}
     >
       <span
-        className={cn('w-[5px] h-[5px] rounded-full inline-block', event.status === 'waiting' && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
+        className={cn('w-[5px] h-[5px] rounded-full inline-block', (event.status === 'waiting' || event.status === 'stuck') && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
         style={{ background: indicator.color }}
       />
       {event.tool}
@@ -730,15 +730,15 @@ export function Sidebar({
           )}
 
           {!collapsed && prefs.sparklines_visible && act?.sparkline && (
-            <div className={cn('mt-1.5 w-full', events.filter(e => e.status === 'waiting' || e.status === 'error').length > 0 && 'mb-1')}>
+            <div className={cn('mt-1.5 w-full', events.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length > 0 && 'mb-1')}>
               <Sparkline data={act.sparkline} height={14} />
             </div>
           )}
 
-          {!collapsed && events.filter(e => e.status === 'waiting' || e.status === 'error').length > 0 && (
+          {!collapsed && events.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length > 0 && (
             <div className="flex gap-1 flex-wrap mt-1">
               {events
-                .filter(e => e.status === 'waiting' || e.status === 'error')
+                .filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck')
                 .map((evt, i) => (
                   <ToolBadge key={`${evt.tool}-${evt.pane}-${i}`} event={evt} />
                 ))}

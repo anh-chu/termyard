@@ -92,12 +92,24 @@ func Execute(ctx context.Context, c *cli.Command) error {
 					actTracker.Record(session, dataLen)
 				}
 				silenceMonitor.RecordOutput(paneID)
+				tracker.RecordProgress(paneID)
 			}),
 		)
 		go ctrlMode.Run(ctx)
 	}
 
 	go tracker.RunInactivityPromoter(ctx, toolevents.DefaultInactivityTimeout)
+
+	// Stuck monitor: flag agents that claim "active" but show no progress
+	// (no tool events, no terminal output) and aren't at an input prompt.
+	checkPrompt := func(paneID string) (bool, bool) {
+		content, err := client.CapturePaneContent(paneID)
+		if err != nil {
+			return false, false
+		}
+		return toolevents.DetectPrompt(content).IsPrompt, true
+	}
+	go tracker.RunStuckMonitor(ctx, toolevents.DefaultStuckTimeout, checkPrompt)
 
 	prefStore, err := preferences.NewStore()
 	if err != nil {

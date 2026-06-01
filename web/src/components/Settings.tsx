@@ -43,6 +43,7 @@ const timestampFormats = [
 
 const notifStatuses = [
   { value: 'waiting', label: 'Waiting' },
+  { value: 'stuck', label: 'Stuck' },
   { value: 'error', label: 'Error' },
   { value: 'completed', label: 'Completed' },
 ]
