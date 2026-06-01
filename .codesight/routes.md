@@ -1,16 +1,20 @@
 # Routes
 
+## CRUD Resources
+
+- **`/api/peers`** GET | POST | GET/:id | PATCH/:id | DELETE/:id → Peer
+- **`/peers`** GET | POST | GET/:id | PATCH/:id | DELETE/:id → Peer
+
+## Other Routes
+
 - `POST` `http://localhost/api/tool-event` params() [auth, ai]
-- `POST` `http://localhost/api/pair` params()
 - `GET` `stream` params() [auth, db]
 - `GET` `/api/auth/status` params() [auth, db, queue, ai]
 - `POST` `/api/auth/setup` params() [auth, db, queue, ai]
 - `POST` `/api/auth/login` params() [auth, db, queue, ai]
 - `POST` `/api/auth/logout` params() [auth, db, queue, ai]
 - `GET` `/api/auth/check` params() [auth, db, queue, ai]
-- `GET` `/api/tls/status` params() [auth, db, queue, ai]
-- `GET` `/api/tls/ca.crt` params() [auth, db, queue, ai]
-- `GET` `/api/tls/ca.mobileconfig` params() [auth, db, queue, ai]
+- `POST` `/api/peers/bootstrap` params() [auth, db, queue, ai] ✓
 - `GET` `/api/version` params() [auth, db, queue, ai]
 - `POST` `/api/tool-event` params() [auth, db, queue, ai]
 - `GET` `/api/agent-status` params() [auth, db, queue, ai]
@@ -34,8 +38,8 @@
 - `GET` `/api/portforwards` params() [auth, db, queue, ai]
 - `POST` `/api/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/api/portforward/{port}` params(port) [auth, db, queue, ai]
-- `POST` `/api/pair` params() [auth, db, queue, ai]
-- `GET` `name` params() [auth, db, queue, ai]
+- `POST` `/api/peers/{fp}/reconnect` params(fp) [auth, db, queue, ai]
+- `GET` `name` params() [auth, db, queue, ai] ✓
 - `GET` `cols` params() [auth, db, queue, ai]
 - `GET` `rows` params() [auth, db, queue, ai]
 - `GET` `Upgrade` params() [auth, db, queue, ai]
@@ -46,9 +50,7 @@
 - `POST` `/auth/login` params() [auth, db, queue, ai]
 - `POST` `/auth/logout` params() [auth, db, queue, ai]
 - `GET` `/auth/check` params() [auth, db, queue, ai]
-- `GET` `/tls/status` params() [auth, db, queue, ai]
-- `GET` `/tls/ca.crt` params() [auth, db, queue, ai]
-- `GET` `/tls/ca.mobileconfig` params() [auth, db, queue, ai]
+- `POST` `/peers/bootstrap` params() [auth, db, queue, ai]
 - `GET` `/version` params() [auth, db, queue, ai]
 - `POST` `/tool-event` params() [auth, db, queue, ai]
 - `GET` `/agent-status` params() [auth, db, queue, ai]
@@ -72,12 +74,11 @@
 - `GET` `/portforwards` params() [auth, db, queue, ai]
 - `POST` `/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/portforward/{port}` params(port) [auth, db, queue, ai]
-- `POST` `/pair` params() [auth, db, queue, ai]
+- `POST` `/peers/{fp}/reconnect` params(fp) [auth, db, queue, ai]
 - `GET` `/ws/events` params() [auth, db, queue, ai]
 - `GET` `/ws/session` params() [auth, db, queue, ai]
 - `GET` `host` params() [auth, db, queue, ai]
 - `GET` `/ws/peer` params() [auth, db, queue, ai]
-- `POST` `/api/pair/complete` params() [auth, db, queue, ai]
 - `GET` `/ws/peer-pty` params() [auth, db, queue, ai]
 - `GET` `/proxy/{port}` params(port) [auth, db, queue, ai]
 - `GET` `/proxy/{port}/*` params(port) [auth, db, queue, ai]

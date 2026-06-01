@@ -34,17 +34,19 @@
   - function LoadOrCreate: (defaultName string) (*Identity, error)
   - function Load: () (*Identity, error)
   - class Identity
-- `pkg/identity/pairing.go`
-  - function NewPairingManager: () *PairingManager
-  - class PairingCode
-  - class PairingManager
 - `pkg/identity/peers.go`
   - function NewPeerStore: () (*PeerStore, error)
   - class Peer
   - class PeerStore
-- `pkg/peer/client.go` — function NewClient: (hubURL string, id *identity.Identity, peerStore *identity.PeerStore, localMgr *state.Manager, peerMgr *Manager, actTracker *activity.Tracker, toolTracker *toolevents.Tracker, tmuxPath string, insecure bool) *Client, class Client
-- `pkg/peer/handler.go` — function NewHandler: (manager *Manager, peerStore *identity.PeerStore, tracker *toolevents.Tracker, pairing *identity.PairingManager, ptyRelay *PTYRelay) *Handler, class Handler
+- `pkg/peer/bootstrap.go`
+  - function NormalizeAddress: (addr string) (string, error)
+  - function SendBootstrap: (ctx context.Context, addr string, req BootstrapRequest) (*BootstrapResponse, error)
+  - class BootstrapRequest
+  - class BootstrapResponse
+  - class BootstrapError
+- `pkg/peer/handler.go` — function NewHandler: (deps SessionDeps) *Handler, class Handler
 - `pkg/peer/manager.go`
+  - function NewPeerConnection: (hostID string, bufSize int) *PeerConnection
   - function NewManager: (id *identity.Identity, peerStore *identity.PeerStore, localMgr *state.Manager) *Manager
   - class HostState
   - class PeerConnection
@@ -58,7 +60,7 @@
   - class StateEventPayload
   - _...10 more_
 - `pkg/peer/pty_manager.go`
-  - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker, client *Client) *PTYManager
+  - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
   - class ActivePTY
 - `pkg/peer/pty_relay.go`
@@ -68,6 +70,11 @@
   - class PTYRelay
   - class PendingStream
   - class ActiveBridge
+- `pkg/peer/session.go` — class SessionDeps
+- `pkg/peer/supervisor.go`
+  - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor
+  - class LinkSnapshot
+  - class LinkSupervisor
 - `pkg/portforward/store.go`
   - function NewStore: () *Store
   - class Forward
@@ -94,15 +101,6 @@
   - function SystemStats: () map[string]interface
   - function ProcessCountsFromSessions: (sessions []*tmux.Session) []ProcessEntry
   - class ProcessEntry
-- `pkg/tlscert/reloader.go` — function NewCertReloader: (certPath, keyPath string) (*CertReloader, error), class CertReloader
-- `pkg/tlscert/tlscert.go`
-  - function ParseSANs: (sans []string) (dnsNames []string, ips []net.IP)
-  - function LoadOrGenerateCA: () (caCertPath, caKeyPath string, err error)
-  - function LoadCACertPEM: (caCertPath string) (string, error)
-  - function LoadOrGenerate: (extraSANs []string) (certPath, keyPath, caCertPEM string, err error)
-  - function LoadTLSConfig: (certPath, keyPath string) (*tls.Config, error)
-  - function LoadTLSConfigWithReloader: (certPath, keyPath string) (*tls.Config, *CertReloader, error)
-  - _...1 more_
 - `pkg/tmux/client.go`
   - function NewClient: () (*Client, error)
   - function ValidateSessionName: (name string) error

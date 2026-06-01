@@ -2,8 +2,9 @@
 
 - **App** — `web/src/App.tsx`
 - **AgentMark** — props: agentType, className — `web/src/components/AgentMark.tsx`
+- **ConnectPeerModal** — props: onClose, onConnected — `web/src/components/ConnectPeerModal.tsx`
 - **HelpModal** — props: onClose — `web/src/components/HelpModal.tsx`
-- **Login** — props: mode, error, onSubmit, onTrustCert — `web/src/components/Login.tsx`
+- **Login** — props: mode, error, onSubmit — `web/src/components/Login.tsx`
 - **NewSessionModal** — props: hosts, sessions, onCreateSession, onClose — `web/src/components/NewSessionModal.tsx`
 - **Overview** — props: sessions, hosts, onSessionSelect, getSessionEvents, getSessionActivity, pendingAlerts, onJumpToSession, onDismissAlert — `web/src/components/Overview.tsx`
 - **PortForwardModal** — props: onClose — `web/src/components/PortForwardModal.tsx`
@@ -14,4 +15,3 @@
 - **Terminal** — props: sessionName, hostId, fullscreen, onToggleFullscreen — `web/src/components/Terminal.tsx`
 - **TiledView** — props: tree, activeKey, onActivate, onClose, onKill, onPopOut, onSplit, onRatioChange, fullscreen, onToggleFullscreen — `web/src/components/TiledView.tsx`
 - **TopBar** — props: currentView, sidebarCollapsed, onToggleCollapse, onOverview, onSettings, onNewSession, onPortForwards, events, connected, onJumpToSession — `web/src/components/TopBar.tsx`
-- **TrustCertificate** — props: onBack — `web/src/components/TrustCertificate.tsx`

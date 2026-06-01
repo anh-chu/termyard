@@ -18,37 +18,27 @@ import (
 	"github.com/ekristen/guppi/pkg/preferences"
 	"github.com/ekristen/guppi/pkg/server"
 	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/tlscert"
 	"github.com/ekristen/guppi/pkg/tmux"
 	"github.com/ekristen/guppi/pkg/toolevents"
 	"github.com/ekristen/guppi/pkg/webpush"
 )
 
 func Execute(ctx context.Context, c *cli.Command) error {
-	// Initialize tmux client
 	client, err := tmux.NewClient()
 	if err != nil {
 		return err
 	}
 
-	// Initialize state manager
 	stateMgr := state.NewManager(client)
-
-	// Initialize tool event tracker
 	tracker := toolevents.NewTracker()
-
-	// Initialize activity tracker
 	actTracker := activity.NewTracker()
 
-	// Start session discovery in background
 	interval := time.Duration(c.Int("discovery-interval")) * time.Second
 	discovery := tmux.NewDiscovery(client, interval, func(sessions []*tmux.Session) {
 		stateMgr.UpdateSessions(sessions)
 	})
 	go discovery.Run(ctx)
 
-	// Start tool event reconciler — clears stale notifications when the
-	// agent process is no longer running in the pane
 	reconciler := toolevents.NewReconciler(tracker, func(paneID string) toolevents.PaneState {
 		panes, err := client.ListAllPanes()
 		if err != nil {
@@ -63,8 +53,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}, 3*time.Second)
 	go reconciler.Run(ctx)
 
-	// Start agent detector — scans pane process trees for known agents
-	// and records synthetic events for panes without hook-based tracking
 	detector := toolevents.NewDetector(tracker, func() []toolevents.PaneInfo {
 		panes, err := client.ListAllPanesDetailed()
 		if err != nil {
@@ -83,12 +71,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}, 5*time.Second)
 	go detector.Run(ctx)
 
-	// Start silence monitor — detects when non-Claude agents go quiet and
-	// inspects pane content for input prompts
 	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, client)
 	go silenceMonitor.Run(ctx)
 
-	// Start control mode for event-driven state updates
 	if !c.Bool("no-control-mode") {
 		fallbackInterval := 30 * time.Second
 		ctrlMode := tmux.NewControlMode(client, func(sessions []*tmux.Session) {
@@ -111,19 +96,14 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		go ctrlMode.Run(ctx)
 	}
 
-	// Start inactivity promoter — generates synthetic "waiting" events for
-	// tools that lack native waiting detection (copilot, codex, opencode)
 	go tracker.RunInactivityPromoter(ctx, toolevents.DefaultInactivityTimeout)
 
-	// Initialize preferences store
 	prefStore, err := preferences.NewStore()
 	if err != nil {
 		logrus.WithError(err).Warn("failed to load preferences, using defaults")
-		// Create a fallback in-memory store with defaults
 		prefStore = nil
 	}
 
-	// Initialize web push notifications
 	var pushKeys *webpush.VAPIDKeys
 	var pushStore *webpush.Store
 	vapidKeys, err := webpush.LoadOrCreateKeys()
@@ -136,7 +116,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		go pushSender.Run(ctx)
 	}
 
-	// Initialize authentication
 	var (
 		authEnabled   bool
 		passwordStore *auth.PasswordStore
@@ -155,7 +134,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		}
 	}
 
-	// Initialize identity for peer system
 	hostname, _ := os.Hostname()
 	nodeIdentity, err := identity.LoadOrCreate(hostname)
 	if err != nil {
@@ -168,38 +146,31 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("failed to load peer store: %w", err)
 	}
 
-	// Initialize peer manager
 	peerMgr := peer.NewManager(nodeIdentity, peerStore, stateMgr)
 	go peerMgr.Run()
 
-	// Stamp local host identity on detector and silence monitor so
-	// auto-detected events include the host info for multi-host navigation
 	detector.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 	silenceMonitor.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 
-	// Initialize pairing manager
-	pairingMgr := identity.NewPairingManager()
-
-	// Initialize PTY relay for remote sessions
 	ptyRelay := peer.NewPTYRelay()
+	ptyManager := peer.NewPTYManager(client.TmuxPath(), actTracker)
 
-	// Initialize peer handler (accepts incoming peer connections)
-	peerHandler := peer.NewHandler(peerMgr, peerStore, tracker, pairingMgr, ptyRelay)
-
-	// If --hub is set, connect to the hub as a peer
-	hubURL := c.String("hub")
-	localOnly := c.Bool("local-only")
-	if hubURL != "" {
-		peerClient := peer.NewClient(
-			hubURL, nodeIdentity, peerStore,
-			stateMgr, peerMgr, actTracker, tracker,
-			client.TmuxPath(), c.Bool("insecure"),
-		)
-		go peerClient.Run(ctx)
-		logrus.WithField("hub", hubURL).Info("connecting to hub as peer")
+	deps := peer.SessionDeps{
+		Manager:     peerMgr,
+		LocalMgr:    stateMgr,
+		Identity:    nodeIdentity,
+		ActTracker:  actTracker,
+		ToolTracker: tracker,
+		PeerStore:   peerStore,
+		TmuxClient:  client,
+		PTYManager:  ptyManager,
 	}
 
-	// Initialize TLS
+	peerHandler := peer.NewHandler(deps)
+
+	supervisor := peer.NewLinkSupervisor(deps)
+	supervisor.Start(ctx)
+
 	opts := &server.Options{
 		Port:             int(c.Int("port")),
 		SocketPath:       c.String("socket"),
@@ -213,46 +184,16 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		AuthEnabled:      authEnabled,
 		PasswordStore:    passwordStore,
 		SessionMgr:       sessionMgr,
+		Identity:         nodeIdentity,
+		PeerStore:        peerStore,
 		PeerMgr:          peerMgr,
 		PeerHandler:      peerHandler,
-		PairingMgr:       pairingMgr,
 		PTYRelay:         ptyRelay,
+		LinkSupervisor:   supervisor,
 		Detector:         detector,
-		LocalOnly:        localOnly,
 		PortForwardStore: portforward.NewStore(),
 	}
 
-	if !c.Bool("no-tls") {
-		certPath := c.String("tls-cert")
-		keyPath := c.String("tls-key")
-
-		// If custom cert/key provided, use those; otherwise auto-generate
-		if certPath == "" || keyPath == "" {
-			var caCertPEM string
-			certPath, keyPath, caCertPEM, err = tlscert.LoadOrGenerate(c.StringSlice("tls-san"))
-			if err != nil {
-				return fmt.Errorf("failed to setup TLS: %w", err)
-			}
-			opts.CACertPEM = caCertPEM
-		}
-
-		tlsConfig, reloader, err := tlscert.LoadTLSConfigWithReloader(certPath, keyPath)
-		if err != nil {
-			return fmt.Errorf("failed to load TLS config: %w", err)
-		}
-		opts.TLSConfig = tlsConfig
-		opts.TLSFingerprint = reloader.Fingerprint()
-		opts.CertReloader = reloader
-
-		// Start cert file watcher for hot-reload
-		reloadInterval := c.Duration("tls-reload-interval")
-		go reloader.Watch(ctx, reloadInterval)
-	}
-
-	// Pass CA cert to peer handler for pairing responses
-	peerHandler.CACertPEM = opts.CACertPEM
-
-	// Start the HTTP server (blocks until ctx is cancelled)
 	return server.Run(ctx, opts)
 }
 
@@ -285,47 +226,6 @@ func init() {
 			Name:    "no-auth",
 			Usage:   "Disable authentication (not recommended for remote access)",
 			Sources: cli.EnvVars("GUPPI_NO_AUTH"),
-		},
-		&cli.BoolFlag{
-			Name:    "no-tls",
-			Usage:   "Disable TLS (serve plain HTTP)",
-			Sources: cli.EnvVars("GUPPI_NO_TLS"),
-		},
-		&cli.StringFlag{
-			Name:    "tls-cert",
-			Usage:   "Path to TLS certificate file (auto-generated if omitted)",
-			Sources: cli.EnvVars("GUPPI_TLS_CERT"),
-		},
-		&cli.StringFlag{
-			Name:    "tls-key",
-			Usage:   "Path to TLS private key file (auto-generated if omitted)",
-			Sources: cli.EnvVars("GUPPI_TLS_KEY"),
-		},
-		&cli.StringSliceFlag{
-			Name:    "tls-san",
-			Usage:   "Additional TLS SANs for the auto-generated certificate (IPs or hostnames)",
-			Sources: cli.EnvVars("GUPPI_TLS_SAN"),
-		},
-		&cli.StringFlag{
-			Name:    "hub",
-			Usage:   "Hub address to connect to as a peer (e.g. https://desktop.ts.net:7654)",
-			Sources: cli.EnvVars("GUPPI_HUB"),
-		},
-		&cli.BoolFlag{
-			Name:    "local-only",
-			Usage:   "Only show local sessions in the web UI (still shares state with hub)",
-			Sources: cli.EnvVars("GUPPI_LOCAL_ONLY"),
-		},
-		&cli.BoolFlag{
-			Name:    "insecure",
-			Usage:   "Skip TLS certificate verification when connecting to hub",
-			Sources: cli.EnvVars("GUPPI_INSECURE"),
-		},
-		&cli.DurationFlag{
-			Name:    "tls-reload-interval",
-			Usage:   "Interval between TLS cert file change checks",
-			Sources: cli.EnvVars("GUPPI_TLS_RELOAD_INTERVAL"),
-			Value:   60 * time.Second,
 		},
 	}
 

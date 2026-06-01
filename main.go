@@ -13,8 +13,6 @@ import (
 	_ "github.com/ekristen/guppi/pkg/commands/agent-setup"
 	_ "github.com/ekristen/guppi/pkg/commands/install"
 	_ "github.com/ekristen/guppi/pkg/commands/notify"
-	_ "github.com/ekristen/guppi/pkg/commands/pair"
-	_ "github.com/ekristen/guppi/pkg/commands/peers"
 	_ "github.com/ekristen/guppi/pkg/commands/server"
 )
 

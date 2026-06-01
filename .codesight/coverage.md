@@ -1,4 +1,13 @@
 # Test Coverage
 
-> **0%** of routes and models are covered by tests
-> 9 test files found
+> **7%** of routes and models are covered by tests
+> 10 test files found
+
+## Covered Routes
+
+- DELETE:/api/peers/{fp}
+- POST:/api/peers/bootstrap
+- GET:/api/peers
+- POST:/api/peers
+- PATCH:/api/peers/{fp}
+- GET:name

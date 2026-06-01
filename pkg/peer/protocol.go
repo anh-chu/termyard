@@ -49,6 +49,9 @@ const (
 	MsgSessionAction = "session-action"
 	// MsgRequestState asks the peer for a full state refresh
 	MsgRequestState = "request-state"
+	// MsgForget notifies the receiver that the sender is forgetting them.
+	// Receiver should remove sender from its peer store and close the link.
+	MsgForget = "forget"
 )
 
 // Message is the envelope for all control WebSocket messages
@@ -102,15 +105,16 @@ type PeerStatePayload struct {
 
 // HostInfo represents a peer's state as seen by the hub
 type HostInfo struct {
-	ID        string             `json:"id"`         // public key fingerprint
-	Name      string             `json:"name"`
-	Version   string             `json:"version,omitempty"`
-	Local     bool               `json:"local,omitempty"`
-	Online    bool               `json:"online"`
-	Sessions  []*tmux.Session    `json:"sessions"`
-	Activity  []*activity.Snapshot `json:"activity,omitempty"`
+	ID        string                 `json:"id"` // public key fingerprint
+	Name      string                 `json:"name"`
+	Version   string                 `json:"version,omitempty"`
+	Local     bool                   `json:"local,omitempty"`
+	Online    bool                   `json:"online"`
+	Address   string                 `json:"address,omitempty"`
+	Sessions  []*tmux.Session        `json:"sessions"`
+	Activity  []*activity.Snapshot   `json:"activity,omitempty"`
 	Stats     map[string]interface{} `json:"stats,omitempty"`
-	LastSeen  time.Time          `json:"last_seen"`
+	LastSeen  time.Time              `json:"last_seen"`
 }
 
 // PeerNotifyPayload is sent when a peer connects or disconnects

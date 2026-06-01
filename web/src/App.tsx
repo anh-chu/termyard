@@ -13,7 +13,6 @@ import { HelpModal } from './components/HelpModal'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { Login } from './components/Login'
 import { Setup } from './components/Setup'
-import { TrustCertificate } from './components/TrustCertificate'
 import { useSessions, Session, sessionKey, parseSessionKey } from './hooks/useSessions'
 import { useHosts } from './hooks/useHosts'
 import { useToolEvents } from './hooks/useToolEvents'
@@ -1118,7 +1117,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 export default function App() {
   const prefsProvider = usePreferencesProvider()
   const { loading, authRequired, needsSetup, authenticated, error: authError, setup, login, logout } = useAuth()
-  const [showTrust, setShowTrust] = useState(() => window.location.pathname === '/trust')
   const [showOnboarding, setShowOnboarding] = useState(false)
 
   useEffect(() => {
@@ -1175,21 +1173,17 @@ export default function App() {
     return <div className="flex items-center justify-center h-full w-full bg-background" />
   }
 
-  if (showTrust || window.location.pathname === '/trust') {
-    return <TrustCertificate onBack={() => { setShowTrust(false); window.history.pushState(null, '', '/') }} />
-  }
-
   if (authRequired && needsSetup) {
     const handleSetup = async (password: string) => {
       const ok = await setup(password)
       if (ok) setShowOnboarding(true)
       return ok
     }
-    return <Login mode="setup" error={authError} onSubmit={handleSetup} onTrustCert={() => { setShowTrust(true); window.history.pushState(null, '', '/trust') }} />
+    return <Login mode="setup" error={authError} onSubmit={handleSetup} />
   }
 
   if (authRequired && !authenticated) {
-    return <Login mode="login" error={authError} onSubmit={login} onTrustCert={() => { setShowTrust(true); window.history.pushState(null, '', '/trust') }} />
+    return <Login mode="login" error={authError} onSubmit={login} />
   }
 
   if (authenticated && showOnboarding) {

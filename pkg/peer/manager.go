@@ -26,6 +26,7 @@ type HostState struct {
 	Name       string
 	Version    string
 	PublicKey  string
+	Address    string // network address (empty for local)
 	Sessions   []*tmux.Session
 	Stats      map[string]interface{}
 	Activity   []*activity.Snapshot
@@ -35,10 +36,56 @@ type HostState struct {
 	Conn       *PeerConnection // nil for local host
 }
 
-// PeerConnection wraps a control WebSocket to a peer
+// PeerConnection wraps a control WebSocket to a peer. Send is gated behind
+// Enqueue/Close so concurrent producers cannot race the channel-close.
 type PeerConnection struct {
 	HostID string
-	Send   chan *Message // messages queued for sending to this peer
+
+	mu     sync.Mutex
+	send   chan *Message
+	closed bool
+}
+
+// NewPeerConnection constructs a PeerConnection with a buffered send queue.
+func NewPeerConnection(hostID string, bufSize int) *PeerConnection {
+	return &PeerConnection{
+		HostID: hostID,
+		send:   make(chan *Message, bufSize),
+	}
+}
+
+// Enqueue best-effort queues a message. Returns true if accepted; false if
+// the connection was closed or the queue is full.
+func (pc *PeerConnection) Enqueue(msg *Message) bool {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.closed {
+		return false
+	}
+	select {
+	case pc.send <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+// Recv returns the underlying receive channel for the writer goroutine. The
+// writer must stop iterating when the channel closes.
+func (pc *PeerConnection) Recv() <-chan *Message {
+	return pc.send
+}
+
+// Close marks the connection closed and closes the channel. Idempotent.
+// Producers using Enqueue will see false after Close.
+func (pc *PeerConnection) Close() {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.closed {
+		return
+	}
+	pc.closed = true
+	close(pc.send)
 }
 
 // Manager aggregates state from local tmux and remote peers
@@ -203,6 +250,7 @@ func (m *Manager) GetHosts() []HostInfo {
 			Version:  h.Version,
 			Local:    h.ID == m.localID,
 			Online:   h.Connected,
+			Address:  h.Address,
 			Sessions: h.Sessions,
 			Activity: h.Activity,
 			Stats:    h.Stats,
@@ -210,6 +258,30 @@ func (m *Manager) GetHosts() []HostInfo {
 		})
 	}
 	return hosts
+}
+
+// GetHostsForPeer returns only the local host info, used to push to a connected
+// peer without leaking other peers (no transitivity in phase 1).
+func (m *Manager) GetHostsForPeer(remotePeerID string) []HostInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	h, ok := m.hosts[m.localID]
+	if !ok {
+		return nil
+	}
+	return []HostInfo{{
+		ID:       h.ID,
+		Name:     h.Name,
+		Version:  h.Version,
+		Local:    true,
+		Online:   h.Connected,
+		Address:  h.Address,
+		Sessions: h.Sessions,
+		Activity: h.Activity,
+		Stats:    h.Stats,
+		LastSeen: h.LastSeen,
+	}}
 }
 
 // LocalID returns this node's fingerprint
@@ -222,13 +294,34 @@ func (m *Manager) LocalName() string {
 	return m.localName
 }
 
+// Identity returns this node's identity (for protocol/auth).
+func (m *Manager) Identity() *identity.Identity {
+	return m.identity
+}
+
+// PeerStore returns this manager's peer store.
+func (m *Manager) PeerStore() *identity.PeerStore {
+	return m.peerStore
+}
+
+// LocalManager returns the local tmux state manager.
+func (m *Manager) LocalManager() *state.Manager {
+	return m.localMgr
+}
+
 // RegisterPeer registers a newly connected peer
 func (m *Manager) RegisterPeer(id, name, publicKey string, conn *PeerConnection) {
+	m.RegisterPeerWithAddress(id, name, publicKey, "", conn)
+}
+
+// RegisterPeerWithAddress registers a newly connected peer with its address.
+func (m *Manager) RegisterPeerWithAddress(id, name, publicKey, address string, conn *PeerConnection) {
 	m.mu.Lock()
 	m.hosts[id] = &HostState{
 		ID:        id,
 		Name:      name,
 		PublicKey: publicKey,
+		Address:   address,
 		Connected: true,
 		LastSeen:  time.Now(),
 		Conn:      conn,
@@ -245,6 +338,39 @@ func (m *Manager) RegisterPeer(id, name, publicKey string, conn *PeerConnection)
 		"peer": name,
 		"id":   id,
 	}).Info("peer connected")
+}
+
+// TryRegisterPeer atomically registers a peer iff no live connection exists
+// for the same fingerprint. Returns true on success. Used by session.runSession
+// to close the simultaneous-initiate race window.
+func (m *Manager) TryRegisterPeer(id, name, publicKey, address string, conn *PeerConnection) bool {
+	m.mu.Lock()
+	if h, ok := m.hosts[id]; ok && h.Conn != nil {
+		m.mu.Unlock()
+		return false
+	}
+	m.hosts[id] = &HostState{
+		ID:        id,
+		Name:      name,
+		PublicKey: publicKey,
+		Address:   address,
+		Connected: true,
+		LastSeen:  time.Now(),
+		Conn:      conn,
+	}
+	m.mu.Unlock()
+
+	m.broadcast(state.StateEvent{
+		Type:     "peer-connected",
+		Host:     id,
+		HostName: name,
+	})
+
+	logrus.WithFields(logrus.Fields{
+		"peer": name,
+		"id":   id,
+	}).Info("peer connected")
+	return true
 }
 
 // UnregisterPeer marks a peer as disconnected
@@ -318,6 +444,16 @@ func (m *Manager) UpdatePeerStats(id string, stats map[string]interface{}) {
 		h.LastSeen = time.Now()
 	}
 	m.mu.Unlock()
+}
+
+// HasLiveConnection reports whether a connected peer connection exists for id.
+func (m *Manager) HasLiveConnection(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if h, ok := m.hosts[id]; ok {
+		return h.Conn != nil
+	}
+	return false
 }
 
 // GetPeerConnection returns the connection for a specific peer

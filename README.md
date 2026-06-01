@@ -98,19 +98,20 @@ Once hooks are configured, agent status shows up automatically:
 - The **Overview** page shows all sessions and any agents that need attention.
 - The **sidebar** badges sessions with active/waiting/errored agents.
 - **Push notifications** alert you when an agent needs input, even with the tab closed (enable in Settings > Notifications).
+
 ### Keyboard shortcuts
 
 Press `Ctrl+/` (or `Cmd+/` on macOS) to see all shortcuts, or click the `?` in the status bar.
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+K` | Quick switcher — jump between sessions and windows |
+| Shortcut | Action                                                   |
+| -------- | -------------------------------------------------------- |
+| `Ctrl+K` | Quick switcher — jump between sessions and windows       |
 | `Ctrl+J` | Jump to next alert (cycles through waiting/error agents) |
-| `Ctrl+H` | Overview |
-| `Ctrl+,` | Settings |
-| `Ctrl+\` | Toggle sidebar |
-| `Ctrl+L` | Lock / sign out |
-| `Ctrl+/` | Keyboard shortcuts help |
+| `Ctrl+H` | Overview                                                 |
+| `Ctrl+,` | Settings                                                 |
+| `Ctrl+\` | Toggle sidebar                                           |
+| `Ctrl+L` | Lock / sign out                                          |
+| `Ctrl+/` | Keyboard shortcuts help                                  |
 
 ### Manual notifications
 
@@ -176,22 +177,14 @@ Push alerts (via the Web Push API) work independently of the browser tab, includ
 
 ### Environment variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GUPPI_PORT` | `7654` | HTTP server port |
-| `GUPPI_SOCKET` | auto | Unix socket path for local CLI |
-| `GUPPI_DISCOVERY_INTERVAL` | `2` | Session polling interval (seconds) |
-| `GUPPI_NO_CONTROL_MODE` | `false` | Disable tmux control mode |
-| `GUPPI_URL` | `https://localhost:7654` | Server URL for notify/agent-setup |
-| `GUPPI_NO_AUTH` | `false` | Disable authentication |
-| `GUPPI_NO_TLS` | `false` | Disable TLS (serve plain HTTP) |
-| `GUPPI_TLS_CERT` | auto | Path to TLS certificate file |
-| `GUPPI_TLS_KEY` | auto | Path to TLS private key file |
-| `GUPPI_TLS_SAN` | | Additional TLS SANs (IPs or hostnames) |
-| `GUPPI_HUB` | | Hub address for peer mode |
-| `GUPPI_LOCAL_ONLY` | `false` | Only show local sessions in the web UI |
-| `GUPPI_INSECURE` | `false` | Skip TLS verification when connecting to hub |
-| `GUPPI_TLS_RELOAD_INTERVAL` | `60s` | Interval between TLS cert file change checks |
+| Variable                   | Default                 | Description                        |
+| -------------------------- | ----------------------- | ---------------------------------- |
+| `GUPPI_PORT`               | `7654`                  | HTTP server port                   |
+| `GUPPI_SOCKET`             | auto                    | Unix socket path for local CLI     |
+| `GUPPI_DISCOVERY_INTERVAL` | `2`                     | Session polling interval (seconds) |
+| `GUPPI_NO_CONTROL_MODE`    | `false`                 | Disable tmux control mode          |
+| `GUPPI_URL`                | `http://localhost:7654` | Server URL for notify/agent-setup  |
+| `GUPPI_NO_AUTH`            | `false`                 | Disable authentication             |
 
 ### CLI flags
 
@@ -202,15 +195,11 @@ guppi server [flags]
       --no-control-mode           Disable tmux control mode (use polling only)
       --socket string             Unix socket path (auto-detected if omitted)
       --no-auth                   Disable authentication (not recommended for remote access)
-      --no-tls                    Disable TLS (serve plain HTTP)
-      --tls-cert string           Path to TLS certificate file (auto-generated if omitted)
-      --tls-key string            Path to TLS private key file (auto-generated if omitted)
-      --tls-san strings           Additional TLS SANs (IPs or hostnames, repeatable)
-      --hub string                Hub address for peer mode (e.g. https://desktop.ts.net:7654)
-      --local-only                Only show local sessions in the web UI
-      --insecure                  Skip TLS verification when connecting to hub
-      --tls-reload-interval duration  Interval between TLS cert file change checks (default 60s)
 ```
+
+Multi-host peering is configured through the dashboard (Settings → Machines).
+There is no `--hub` / `--tls-*` / `guppi pair` / `guppi peers` anymore. See
+[`docs/multi-host.md`](docs/multi-host.md) for details.
 
 ## FAQ
 
@@ -218,10 +207,10 @@ guppi server [flags]
 
 The terminal captures mouse events, so normal click-and-drag selects text inside tmux rather than copying to your clipboard. Hold a modifier key while selecting to override this and copy to the system clipboard:
 
-| Platform | Select to copy |
-|----------|---------------|
-| **macOS** | Hold `Option` and drag to select, then `Cmd+C` to copy |
-| **Linux** | Hold `Shift` and drag to select, then `Ctrl+Shift+C` to copy |
+| Platform         | Select to copy                                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **macOS**        | Hold `Option` and drag to select, then `Cmd+C` to copy                                                                        |
+| **Linux**        | Hold `Shift` and drag to select, then `Ctrl+Shift+C` to copy                                                                  |
 | **iOS (Safari)** | Touch-select doesn't work in the terminal. Connect a mouse or trackpad and use `Option`+drag, then copy from the context menu |
 
 This is standard xterm.js behavior — the modifier key tells the browser to handle the selection instead of sending the mouse events to tmux.

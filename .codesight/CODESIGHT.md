@@ -2,25 +2,29 @@
 
 > **Stack:** chi | none | react | go
 
-> 83 routes | 0 models | 15 components | 59 lib files | 7 env vars | 1 middleware | 0% test coverage
-> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~73,600 tokens. **Saves ~67,900 tokens per conversation.**
-> **Last scanned:** 2026-05-27 08:11 — re-run after significant changes
+> 85 routes | 0 models | 15 components | 58 lib files | 7 env vars | 1 middleware | 7% test coverage
+> **Token savings:** this file is ~5,700 tokens. Without it, AI exploration would cost ~74,400 tokens. **Saves ~68,800 tokens per conversation.**
+> **Last scanned:** 2026-06-01 04:48 — re-run after significant changes
 
 ---
 
 # Routes
 
+## CRUD Resources
+
+- **`/api/peers`** GET | POST | GET/:id | PATCH/:id | DELETE/:id → Peer
+- **`/peers`** GET | POST | GET/:id | PATCH/:id | DELETE/:id → Peer
+
+## Other Routes
+
 - `POST` `http://localhost/api/tool-event` params() [auth, ai]
-- `POST` `http://localhost/api/pair` params()
 - `GET` `stream` params() [auth, db]
 - `GET` `/api/auth/status` params() [auth, db, queue, ai]
 - `POST` `/api/auth/setup` params() [auth, db, queue, ai]
 - `POST` `/api/auth/login` params() [auth, db, queue, ai]
 - `POST` `/api/auth/logout` params() [auth, db, queue, ai]
 - `GET` `/api/auth/check` params() [auth, db, queue, ai]
-- `GET` `/api/tls/status` params() [auth, db, queue, ai]
-- `GET` `/api/tls/ca.crt` params() [auth, db, queue, ai]
-- `GET` `/api/tls/ca.mobileconfig` params() [auth, db, queue, ai]
+- `POST` `/api/peers/bootstrap` params() [auth, db, queue, ai] ✓
 - `GET` `/api/version` params() [auth, db, queue, ai]
 - `POST` `/api/tool-event` params() [auth, db, queue, ai]
 - `GET` `/api/agent-status` params() [auth, db, queue, ai]
@@ -44,8 +48,8 @@
 - `GET` `/api/portforwards` params() [auth, db, queue, ai]
 - `POST` `/api/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/api/portforward/{port}` params(port) [auth, db, queue, ai]
-- `POST` `/api/pair` params() [auth, db, queue, ai]
-- `GET` `name` params() [auth, db, queue, ai]
+- `POST` `/api/peers/{fp}/reconnect` params(fp) [auth, db, queue, ai]
+- `GET` `name` params() [auth, db, queue, ai] ✓
 - `GET` `cols` params() [auth, db, queue, ai]
 - `GET` `rows` params() [auth, db, queue, ai]
 - `GET` `Upgrade` params() [auth, db, queue, ai]
@@ -56,9 +60,7 @@
 - `POST` `/auth/login` params() [auth, db, queue, ai]
 - `POST` `/auth/logout` params() [auth, db, queue, ai]
 - `GET` `/auth/check` params() [auth, db, queue, ai]
-- `GET` `/tls/status` params() [auth, db, queue, ai]
-- `GET` `/tls/ca.crt` params() [auth, db, queue, ai]
-- `GET` `/tls/ca.mobileconfig` params() [auth, db, queue, ai]
+- `POST` `/peers/bootstrap` params() [auth, db, queue, ai]
 - `GET` `/version` params() [auth, db, queue, ai]
 - `POST` `/tool-event` params() [auth, db, queue, ai]
 - `GET` `/agent-status` params() [auth, db, queue, ai]
@@ -82,12 +84,11 @@
 - `GET` `/portforwards` params() [auth, db, queue, ai]
 - `POST` `/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/portforward/{port}` params(port) [auth, db, queue, ai]
-- `POST` `/pair` params() [auth, db, queue, ai]
+- `POST` `/peers/{fp}/reconnect` params(fp) [auth, db, queue, ai]
 - `GET` `/ws/events` params() [auth, db, queue, ai]
 - `GET` `/ws/session` params() [auth, db, queue, ai]
 - `GET` `host` params() [auth, db, queue, ai]
 - `GET` `/ws/peer` params() [auth, db, queue, ai]
-- `POST` `/api/pair/complete` params() [auth, db, queue, ai]
 - `GET` `/ws/peer-pty` params() [auth, db, queue, ai]
 - `GET` `/proxy/{port}` params(port) [auth, db, queue, ai]
 - `GET` `/proxy/{port}/*` params(port) [auth, db, queue, ai]
@@ -100,8 +101,9 @@
 
 - **App** — `web/src/App.tsx`
 - **AgentMark** — props: agentType, className — `web/src/components/AgentMark.tsx`
+- **ConnectPeerModal** — props: onClose, onConnected — `web/src/components/ConnectPeerModal.tsx`
 - **HelpModal** — props: onClose — `web/src/components/HelpModal.tsx`
-- **Login** — props: mode, error, onSubmit, onTrustCert — `web/src/components/Login.tsx`
+- **Login** — props: mode, error, onSubmit — `web/src/components/Login.tsx`
 - **NewSessionModal** — props: hosts, sessions, onCreateSession, onClose — `web/src/components/NewSessionModal.tsx`
 - **Overview** — props: sessions, hosts, onSessionSelect, getSessionEvents, getSessionActivity, pendingAlerts, onJumpToSession, onDismissAlert — `web/src/components/Overview.tsx`
 - **PortForwardModal** — props: onClose — `web/src/components/PortForwardModal.tsx`
@@ -112,7 +114,6 @@
 - **Terminal** — props: sessionName, hostId, fullscreen, onToggleFullscreen — `web/src/components/Terminal.tsx`
 - **TiledView** — props: tree, activeKey, onActivate, onClose, onKill, onPopOut, onSplit, onRatioChange, fullscreen, onToggleFullscreen — `web/src/components/TiledView.tsx`
 - **TopBar** — props: currentView, sidebarCollapsed, onToggleCollapse, onOverview, onSettings, onNewSession, onPortForwards, events, connected, onJumpToSession — `web/src/components/TopBar.tsx`
-- **TrustCertificate** — props: onBack — `web/src/components/TrustCertificate.tsx`
 
 ---
 
@@ -152,17 +153,19 @@
   - function LoadOrCreate: (defaultName string) (*Identity, error)
   - function Load: () (*Identity, error)
   - class Identity
-- `pkg/identity/pairing.go`
-  - function NewPairingManager: () *PairingManager
-  - class PairingCode
-  - class PairingManager
 - `pkg/identity/peers.go`
   - function NewPeerStore: () (*PeerStore, error)
   - class Peer
   - class PeerStore
-- `pkg/peer/client.go` — function NewClient: (hubURL string, id *identity.Identity, peerStore *identity.PeerStore, localMgr *state.Manager, peerMgr *Manager, actTracker *activity.Tracker, toolTracker *toolevents.Tracker, tmuxPath string, insecure bool) *Client, class Client
-- `pkg/peer/handler.go` — function NewHandler: (manager *Manager, peerStore *identity.PeerStore, tracker *toolevents.Tracker, pairing *identity.PairingManager, ptyRelay *PTYRelay) *Handler, class Handler
+- `pkg/peer/bootstrap.go`
+  - function NormalizeAddress: (addr string) (string, error)
+  - function SendBootstrap: (ctx context.Context, addr string, req BootstrapRequest) (*BootstrapResponse, error)
+  - class BootstrapRequest
+  - class BootstrapResponse
+  - class BootstrapError
+- `pkg/peer/handler.go` — function NewHandler: (deps SessionDeps) *Handler, class Handler
 - `pkg/peer/manager.go`
+  - function NewPeerConnection: (hostID string, bufSize int) *PeerConnection
   - function NewManager: (id *identity.Identity, peerStore *identity.PeerStore, localMgr *state.Manager) *Manager
   - class HostState
   - class PeerConnection
@@ -176,7 +179,7 @@
   - class StateEventPayload
   - _...10 more_
 - `pkg/peer/pty_manager.go`
-  - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker, client *Client) *PTYManager
+  - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
   - class ActivePTY
 - `pkg/peer/pty_relay.go`
@@ -186,6 +189,11 @@
   - class PTYRelay
   - class PendingStream
   - class ActiveBridge
+- `pkg/peer/session.go` — class SessionDeps
+- `pkg/peer/supervisor.go`
+  - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor
+  - class LinkSnapshot
+  - class LinkSupervisor
 - `pkg/portforward/store.go`
   - function NewStore: () *Store
   - class Forward
@@ -212,15 +220,6 @@
   - function SystemStats: () map[string]interface
   - function ProcessCountsFromSessions: (sessions []*tmux.Session) []ProcessEntry
   - class ProcessEntry
-- `pkg/tlscert/reloader.go` — function NewCertReloader: (certPath, keyPath string) (*CertReloader, error), class CertReloader
-- `pkg/tlscert/tlscert.go`
-  - function ParseSANs: (sans []string) (dnsNames []string, ips []net.IP)
-  - function LoadOrGenerateCA: () (caCertPath, caKeyPath string, err error)
-  - function LoadCACertPEM: (caCertPath string) (string, error)
-  - function LoadOrGenerate: (extraSANs []string) (certPath, keyPath, caCertPEM string, err error)
-  - function LoadTLSConfig: (certPath, keyPath string) (*tls.Config, error)
-  - function LoadTLSConfigWithReloader: (certPath, keyPath string) (*tls.Config, *CertReloader, error)
-  - _...1 more_
 - `pkg/tmux/client.go`
   - function NewClient: () (*Client, error)
   - function ValidateSessionName: (name string) error
@@ -355,46 +354,55 @@
 
 ## Most Imported Files (change these carefully)
 
+- `encoding/json` — imported by **20** files
 - `path/filepath` — imported by **19** files
-- `encoding/json` — imported by **15** files
+- `net/http` — imported by **11** files
 - `web/src/lib/utils.ts` — imported by **10** files
 - `os/exec` — imported by **9** files
-- `crypto/rand` — imported by **9** files
 - `web/src/hooks/usePreferences.ts` — imported by **9** files
 - `web/src/theme.ts` — imported by **9** files
-- `net/http` — imported by **8** files
-- `crypto/x509` — imported by **8** files
-- `crypto/tls` — imported by **7** files
-- `encoding/pem` — imported by **7** files
 - `web/src/hooks/useSessions.ts` — imported by **7** files
-- `encoding/hex` — imported by **6** files
 - `web/src/hooks/useToolEvents.ts` — imported by **6** files
-- `net/url` — imported by **5** files
+- `crypto/rand` — imported by **5** files
 - `encoding/base64` — imported by **5** files
+- `net/url` — imported by **5** files
 - `web/src/hooks/useHosts.ts` — imported by **4** files
-- `crypto/sha256` — imported by **3** files
-- `crypto/ecdsa` — imported by **3** files
-- `crypto/elliptic` — imported by **3** files
+- `encoding/hex` — imported by **3** files
+- `web/src/hooks/useActivity.ts` — imported by **3** files
+- `web/src/hooks/usePushNotifications.ts` — imported by **3** files
+- `net/http/httptest` — imported by **2** files
+- `web/src/components/Terminal.tsx` — imported by **2** files
+- `web/src/lib/paneTree.ts` — imported by **2** files
+- `web/src/components/Setup.tsx` — imported by **2** files
 
 ## Import Map (who imports what)
 
+- `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/identity/identity.go`, `pkg/identity/peers.go` +15 more
 - `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/git/worktree.go` +14 more
-- `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/commands/pair/pair.go`, `pkg/identity/identity.go` +10 more
+- `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/peer/bootstrap.go`, `pkg/peer/bootstrap_test.go`, `pkg/peer/handler.go` +6 more
 - `web/src/lib/utils.ts` ← `web/src/components/AgentMark.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/PortForwardModal.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +5 more
 - `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/git/worktree.go` +4 more
-- `crypto/rand` ← `pkg/auth/auth.go`, `pkg/identity/identity.go`, `pkg/identity/pairing.go`, `pkg/peer/client_cert_test.go`, `pkg/peer/handler.go` +4 more
 - `web/src/hooks/usePreferences.ts` ← `web/src/App.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/Overview.tsx`, `web/src/components/Settings.tsx`, `web/src/components/Setup.tsx` +4 more
 - `web/src/theme.ts` ← `web/src/App.tsx`, `web/src/components/AgentMark.tsx`, `web/src/components/Overview.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +4 more
-- `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/commands/pair/pair.go`, `pkg/peer/handler.go`, `pkg/peer/pty_relay.go` +3 more
-- `crypto/x509` ← `pkg/commands/pair/pair.go`, `pkg/identity/peers.go`, `pkg/peer/client.go`, `pkg/peer/client_cert_test.go`, `pkg/tlscert/reloader.go` +3 more
-- `crypto/tls` ← `pkg/commands/pair/pair.go`, `pkg/identity/peers.go`, `pkg/peer/client.go`, `pkg/peer/client_cert_test.go`, `pkg/server/server.go` +2 more
+- `web/src/hooks/useSessions.ts` ← `web/src/App.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/Overview.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Sidebar.tsx` +2 more
+- `web/src/hooks/useToolEvents.ts` ← `web/src/App.tsx`, `web/src/components/Overview.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Sidebar.tsx`, `web/src/components/TopBar.tsx` +1 more
+- `crypto/rand` ← `pkg/auth/auth.go`, `pkg/identity/identity.go`, `pkg/peer/handler.go`, `pkg/peer/pty_relay.go`, `pkg/tmux/paste_image.go`
 
 ---
 
 # Test Coverage
 
-> **0%** of routes and models are covered by tests
-> 9 test files found
+> **7%** of routes and models are covered by tests
+> 10 test files found
+
+## Covered Routes
+
+- DELETE:/api/peers/{fp}
+- POST:/api/peers/bootstrap
+- GET:/api/peers
+- POST:/api/peers
+- PATCH:/api/peers/{fp}
+- GET:name
 
 ---
 

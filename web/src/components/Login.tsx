@@ -4,10 +4,9 @@ interface LoginProps {
   mode: 'setup' | 'login'
   error: string | null
   onSubmit: (password: string) => Promise<boolean>
-  onTrustCert?: () => void
 }
 
-export function Login({ mode, error, onSubmit, onTrustCert }: LoginProps) {
+export function Login({ mode, error, onSubmit }: LoginProps) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
@@ -96,17 +95,6 @@ export function Login({ mode, error, onSubmit, onTrustCert }: LoginProps) {
             }
           </button>
         </form>
-        {onTrustCert && (
-          <div className="mt-8 text-center">
-            <button
-              type="button"
-              onClick={onTrustCert}
-              className="text-xs font-bold text-mute/40 hover:text-ink transition-colors uppercase tracking-widest"
-            >
-              Need to trust SSL certificate?
-            </button>
-          </div>
-        )}
       </div>
     </div>
   )

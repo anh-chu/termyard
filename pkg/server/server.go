@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,7 +40,6 @@ import (
 	"github.com/ekristen/guppi/pkg/socket"
 	"github.com/ekristen/guppi/pkg/state"
 	"github.com/ekristen/guppi/pkg/stats"
-	"github.com/ekristen/guppi/pkg/tlscert"
 	"github.com/ekristen/guppi/pkg/tmux"
 	"github.com/ekristen/guppi/pkg/toolevents"
 	"github.com/ekristen/guppi/pkg/webpush"
@@ -49,29 +47,26 @@ import (
 )
 
 type Options struct {
-	Port            int
-	SocketPath      string
-	Client          *tmux.Client
-	StateMgr        *state.Manager
-	Tracker         *toolevents.Tracker
-	ActivityTracker *activity.Tracker
-	PushKeys        *webpush.VAPIDKeys
-	PushStore       *webpush.Store
-	PrefStore       *preferences.Store
-	AuthEnabled     bool
-	PasswordStore   *auth.PasswordStore
-	SessionMgr      *auth.SessionManager
-	TLSConfig       *tls.Config
-	TLSFingerprint  string // hex SHA256 of leaf TLS cert (set automatically)
-	CertReloader    *tlscert.CertReloader
-	CACertPEM       string // CA certificate PEM for pairing (empty when using external certs)
-	PeerMgr         *peer.Manager
-	PeerHandler     *peer.Handler
-	PairingMgr      *identity.PairingManager
-	PTYRelay        *peer.PTYRelay
-	Detector        *toolevents.Detector
-	LocalOnly           bool
-	PortForwardStore    *portforward.Store
+	Port             int
+	SocketPath       string
+	Client           *tmux.Client
+	StateMgr         *state.Manager
+	Tracker          *toolevents.Tracker
+	ActivityTracker  *activity.Tracker
+	PushKeys         *webpush.VAPIDKeys
+	PushStore        *webpush.Store
+	PrefStore        *preferences.Store
+	AuthEnabled      bool
+	PasswordStore    *auth.PasswordStore
+	SessionMgr       *auth.SessionManager
+	Identity         *identity.Identity
+	PeerStore        *identity.PeerStore
+	PeerMgr          *peer.Manager
+	PeerHandler      *peer.Handler
+	PTYRelay         *peer.PTYRelay
+	LinkSupervisor   *peer.LinkSupervisor
+	Detector         *toolevents.Detector
+	PortForwardStore *portforward.Store
 }
 
 // handleRemoteSession handles a terminal session request for a remote peer.
@@ -126,9 +121,7 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		Cols:     cols,
 		Rows:     rows,
 	})
-	select {
-	case peerConn.Send <- msg:
-	default:
+	if !peerConn.Enqueue(msg) {
 		return
 	}
 
@@ -327,8 +320,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, port int, path strin
 func Run(ctx context.Context, opts *Options) error {
 	logger := logrus.WithField("component", "server")
 
-	tlsEnabled := opts.TLSConfig != nil
-	secureCookies := tlsEnabled
+	secureCookies := false
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Recoverer)
@@ -346,35 +338,10 @@ func Run(ctx context.Context, opts *Options) error {
 			r.Get("/auth/check", auth.CheckHandler(opts.SessionMgr))
 		}
 
-		// TLS status — tells frontend whether CA cert is available for trust
-		r.Get("/tls/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]bool{
-				"ca_available": opts.CACertPEM != "",
-			})
-		})
-
-		// TLS CA certificate download — public, no auth required
-		r.Get("/tls/ca.crt", func(w http.ResponseWriter, r *http.Request) {
-			if opts.CACertPEM == "" {
-				http.Error(w, "no CA certificate available", http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-			w.Header().Set("Content-Disposition", `attachment; filename="guppi-ca.crt"`)
-			w.Write([]byte(opts.CACertPEM))
-		})
-
-		// Apple mobileconfig profile for CA trust — public, no auth required
-		r.Get("/tls/ca.mobileconfig", func(w http.ResponseWriter, r *http.Request) {
-			if opts.CACertPEM == "" {
-				http.Error(w, "no CA certificate available", http.StatusNotFound)
-				return
-			}
-			profile := buildMobileConfig(opts.CACertPEM)
-			w.Header().Set("Content-Type", "application/x-apple-aspen-config")
-			w.Header().Set("Content-Disposition", `attachment; filename="guppi-ca.mobileconfig"`)
-			w.Write(profile)
+		// Peer bootstrap endpoint — password-authenticated (no session cookie).
+		// Lets two nodes establish mutual trust via the dashboard password.
+		r.Post("/peers/bootstrap", func(w http.ResponseWriter, r *http.Request) {
+			handlePeersBootstrap(w, r, opts)
 		})
 
 		// Version endpoint — public, no auth required
@@ -448,7 +415,7 @@ func Run(ctx context.Context, opts *Options) error {
 
 			r.Get("/sessions", func(w http.ResponseWriter, r *http.Request) {
 				var sessions []*tmux.Session
-				if opts.PeerMgr != nil && !opts.LocalOnly {
+				if opts.PeerMgr != nil {
 					sessions = opts.PeerMgr.GetAllSessions()
 				} else {
 					sessions = opts.StateMgr.GetSessions()
@@ -510,11 +477,10 @@ func Run(ctx context.Context, opts *Options) error {
 						Action: "new",
 						Params: params,
 					})
-					select {
-					case peerConn.Send <- msg:
+					if peerConn.Enqueue(msg) {
 						w.Header().Set("Content-Type", "application/json")
 						json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
-					default:
+					} else {
 						http.Error(w, "peer send queue full", http.StatusBadGateway)
 					}
 					return
@@ -595,10 +561,9 @@ func Run(ctx context.Context, opts *Options) error {
 						Action: "rename",
 						Params: params,
 					})
-					select {
-					case peerConn.Send <- msg:
+					if peerConn.Enqueue(msg) {
 						w.WriteHeader(http.StatusNoContent)
-					default:
+					} else {
 						http.Error(w, "peer send queue full", http.StatusBadGateway)
 					}
 					return
@@ -642,10 +607,9 @@ func Run(ctx context.Context, opts *Options) error {
 						Action: "select-window",
 						Params: params,
 					})
-					select {
-					case peerConn.Send <- msg:
+					if peerConn.Enqueue(msg) {
 						w.WriteHeader(http.StatusNoContent)
-					default:
+					} else {
 						http.Error(w, "peer send queue full", http.StatusBadGateway)
 					}
 					return
@@ -688,10 +652,9 @@ func Run(ctx context.Context, opts *Options) error {
 						Action: "kill",
 						Params: params,
 					})
-					select {
-					case peerConn.Send <- msg:
+					if peerConn.Enqueue(msg) {
 						w.WriteHeader(http.StatusNoContent)
-					default:
+					} else {
 						http.Error(w, "peer send queue full", http.StatusBadGateway)
 					}
 					return
@@ -887,11 +850,8 @@ func Run(ctx context.Context, opts *Options) error {
 								s.Host = localID
 							}
 						}
-						// Merge in peer activity if not local-only
-						if !opts.LocalOnly {
-							peerActivity := opts.PeerMgr.GetAllActivity()
-							snapshots = append(snapshots, peerActivity...)
-						}
+						peerActivity := opts.PeerMgr.GetAllActivity()
+						snapshots = append(snapshots, peerActivity...)
 					}
 					json.NewEncoder(w).Encode(snapshots)
 				}
@@ -1018,31 +978,21 @@ func Run(ctx context.Context, opts *Options) error {
 				w.WriteHeader(http.StatusNoContent)
 			})
 
-			// Pairing code generation (for the hub to generate codes)
-			r.Post("/pair", func(w http.ResponseWriter, r *http.Request) {
-				if opts.PairingMgr == nil {
-					http.Error(w, "pairing not available", http.StatusServiceUnavailable)
-					return
-				}
-				code, err := opts.PairingMgr.Generate()
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				// Append TLS fingerprint to code so peers can verify the cert
-				displayCode := code.Code
-				fp := opts.TLSFingerprint
-				if opts.CertReloader != nil {
-					fp = opts.CertReloader.Fingerprint()
-				}
-				if fp != "" {
-					displayCode = code.Code + ":" + fp[:16]
-				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"code":       displayCode,
-					"expires_at": code.ExpiresAt,
-				})
+			// Peers management endpoints (auth-protected)
+			r.Get("/peers", func(w http.ResponseWriter, r *http.Request) {
+				handleGetPeers(w, r, opts)
+			})
+			r.Post("/peers", func(w http.ResponseWriter, r *http.Request) {
+				handlePostPeers(w, r, opts)
+			})
+			r.Patch("/peers/{fp}", func(w http.ResponseWriter, r *http.Request) {
+				handlePatchPeer(w, r, opts)
+			})
+			r.Post("/peers/{fp}/reconnect", func(w http.ResponseWriter, r *http.Request) {
+				handleReconnectPeer(w, r, opts)
+			})
+			r.Delete("/peers/{fp}", func(w http.ResponseWriter, r *http.Request) {
+				handleDeletePeer(w, r, opts)
 			})
 		})
 	})
@@ -1052,12 +1002,11 @@ func Run(ctx context.Context, opts *Options) error {
 	if opts.ActivityTracker != nil {
 		var peerActivity ws.ActivitySource
 		localHostID := ""
-		localOnly := opts.LocalOnly
 		if opts.PeerMgr != nil {
 			peerActivity = opts.PeerMgr
 			localHostID = opts.PeerMgr.LocalID()
 		}
-		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, localOnly)
+		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
 	}
 	go hub.Run()
 
@@ -1090,7 +1039,6 @@ func Run(ctx context.Context, opts *Options) error {
 	// Peer WebSocket routes (no browser auth — peers use their own challenge-response)
 	if opts.PeerHandler != nil {
 		r.Get("/ws/peer", opts.PeerHandler.HandlePeer)
-		r.Post("/api/pair/complete", opts.PeerHandler.HandlePairing)
 	}
 	if opts.PTYRelay != nil {
 		r.Get("/ws/peer-pty", opts.PTYRelay.HandlePeerPTY)
@@ -1149,25 +1097,15 @@ func Run(ctx context.Context, opts *Options) error {
 	}
 
 	go func() {
-		var serveErr error
-		if tlsEnabled {
-			tlsListener := tls.NewListener(tcpListener, opts.TLSConfig)
-			serveErr = srv.Serve(tlsListener)
-		} else {
-			serveErr = srv.Serve(tcpListener)
-		}
+		serveErr := srv.Serve(tcpListener)
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			logger.WithError(serveErr).Error("tcp listen error")
 			serverErr <- serveErr
 		}
 	}()
 
-	scheme := "http"
-	if tlsEnabled {
-		scheme = "https"
-	}
 	logger.WithField("port", opts.Port).Info("starting guppi server")
-	logger.Infof("open %s://localhost:%d in your browser", scheme, opts.Port)
+	logger.Infof("open http://localhost:%d in your browser", opts.Port)
 	if opts.AuthEnabled {
 		logger.Info("authentication is enabled")
 	}
@@ -1224,69 +1162,6 @@ func Run(ctx context.Context, opts *Options) error {
 	}
 
 	return nil
-}
-
-// buildMobileConfig creates an Apple configuration profile that installs the
-// guppi CA certificate as a trusted root. Users can tap the resulting
-// .mobileconfig file on iOS/macOS to install it.
-func buildMobileConfig(caCertPEM string) []byte {
-	// Strip PEM headers to get raw base64 payload
-	payload := caCertPEM
-
-	const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>PayloadContent</key>
-	<array>
-		<dict>
-			<key>PayloadCertificateFileName</key>
-			<string>guppi-ca.crt</string>
-			<key>PayloadContent</key>
-			<data>%s</data>
-			<key>PayloadDescription</key>
-			<string>Adds the guppi CA certificate as a trusted root</string>
-			<key>PayloadDisplayName</key>
-			<string>guppi CA</string>
-			<key>PayloadIdentifier</key>
-			<string>com.guppi.ca-cert</string>
-			<key>PayloadType</key>
-			<string>com.apple.security.root</string>
-			<key>PayloadUUID</key>
-			<string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
-			<key>PayloadVersion</key>
-			<integer>1</integer>
-		</dict>
-	</array>
-	<key>PayloadDisplayName</key>
-	<string>guppi CA Trust</string>
-	<key>PayloadIdentifier</key>
-	<string>com.guppi.ca-trust-profile</string>
-	<key>PayloadRemovalDisallowed</key>
-	<false/>
-	<key>PayloadType</key>
-	<string>Configuration</string>
-	<key>PayloadUUID</key>
-	<string>F1E2D3C4-B5A6-7890-FEDC-BA0987654321</string>
-	<key>PayloadVersion</key>
-	<integer>1</integer>
-	<key>PayloadDescription</key>
-	<string>Installs the guppi CA certificate so your device trusts the guppi server</string>
-</dict>
-</plist>`
-
-	// The mobileconfig PayloadContent <data> field expects base64-encoded DER.
-	// Our PEM is already base64-encoded DER with headers — strip the headers.
-	clean := ""
-	for _, line := range strings.Split(payload, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "-----") {
-			continue
-		}
-		clean += trimmed
-	}
-
-	return []byte(fmt.Sprintf(profileTemplate, clean))
 }
 
 func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tracker) {

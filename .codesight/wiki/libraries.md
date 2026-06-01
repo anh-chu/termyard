@@ -2,36 +2,36 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**59 library files** across 2 modules
+**58 library files** across 2 modules
 
-## Pkg (45 files)
+## Pkg (44 files)
 
 - `pkg/peer/protocol.go` — NewMessage, Message, AuthPayload, ChallengePayload, StateUpdatePayload, StateEventPayload, …
 - `pkg/auth/auth.go` — NewPasswordStore, NewSessionManager, Middleware, SetupHandler, LoginHandler, LogoutHandler, …
 - `pkg/preferences/preferences.go` — Default, NewStore, Terminal, Sidebar, Notifications, AgentBanner, …
 - `pkg/tmux/controlmode.go` — ControlSessionName, WithRefreshDelay, WithOnConnect, WithOnDisconnect, WithOnOutput, NewControlMode, …
-- `pkg/tlscert/tlscert.go` — ParseSANs, LoadOrGenerateCA, LoadCACertPEM, LoadOrGenerate, LoadTLSConfig, LoadTLSConfigWithReloader, …
 - `pkg/peer/pty_relay.go` — NewPTYRelay, GenerateStreamID, Bridge, PTYRelay, PendingStream, ActiveBridge
 - `pkg/tmux/sessionmeta.go` — NormalizeAgentType, IsShellCommand, PrimaryPane, InferAgentType, ResolveProjectPath, ExtractPromptPreview
 - `pkg/identity/identity.go` — Generate, Verify, LoadOrCreate, Load, Identity
+- `pkg/peer/bootstrap.go` — NormalizeAddress, SendBootstrap, BootstrapRequest, BootstrapResponse, BootstrapError
+- `pkg/peer/manager.go` — NewPeerConnection, NewManager, HostState, PeerConnection, Manager
 - `pkg/toolevents/tracker.go` — NewTracker, Event, PaneKey, SessionMeta, Tracker
 - `pkg/activity/tracker.go` — NewTracker, SessionActivity, Snapshot, Tracker
 - `pkg/git/worktree.go` — IsWorktree, FindMainWorktreeRoot, RemoveWorktree, CreateWorktree
-- `pkg/peer/manager.go` — NewManager, HostState, PeerConnection, Manager
 - `pkg/state/manager.go` — NewManager, SessionMetadata, Manager, StateEvent
 - `pkg/tmux/types.go` — Session, Window, PaneDetailed, Pane
 - `pkg/toolevents/reconciler.go` — NewReconciler, PaneState, PaneInfo, Reconciler
 - `pkg/ws/hub.go` — CheckSameOrigin, NewHub, Hub, ActivitySource
 - `pkg/agentcheck/agentcheck.go` — CheckAgents, AgentStatus, StatusResult
-- `pkg/identity/pairing.go` — NewPairingManager, PairingCode, PairingManager
 - `pkg/identity/peers.go` — NewPeerStore, Peer, PeerStore
 - `pkg/peer/pty_manager.go` — NewPTYManager, PTYManager, ActivePTY
+- `pkg/peer/supervisor.go` — NewLinkSupervisor, LinkSnapshot, LinkSupervisor
 - `pkg/portforward/store.go` — NewStore, Forward, Store
 - `pkg/socket/socket.go` — DefaultPath, EnsureDir, Cleanup
 - `pkg/stats/stats.go` — SystemStats, ProcessCountsFromSessions, ProcessEntry
 - `pkg/tmux/client.go` — NewClient, ValidateSessionName, Client
 - `pkg/tmux/paste_image.go` — HandlePTYControlMessage, StorePastedImage, PTYControlMessage
-- _…and 20 more files_
+- _…and 19 more files_
 
 ## Web (14 files)
 

@@ -1,8 +1,6 @@
 package identity
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,38 +11,19 @@ import (
 
 // Peer represents a known paired peer
 type Peer struct {
-	Name       string    `json:"name"`
-	PublicKey  string    `json:"public_key"`
-	PairedAt   time.Time `json:"paired_at"`
-	TLSCertPEM string   `json:"tls_cert_pem,omitempty"` // pinned TLS certificate from pairing
-	CACertPEM  string   `json:"ca_cert_pem,omitempty"`  // node's CA certificate
+	Name          string    `json:"name"`
+	PublicKey     string    `json:"public_key"`
+	PairedAt      time.Time `json:"paired_at"`
+	Address       string    `json:"address"`                 // host:port last successfully used
+	Enabled       bool      `json:"enabled"`                 // auto-reconnect on/off (governs outbound dials only)
+	InitiatedByUs bool      `json:"initiated_by_us"`         // true ⇒ we dial; false ⇒ we wait for inbound
+	LastSeen      time.Time `json:"last_seen,omitempty"`     // updated on every successful connect
 }
 
 // Fingerprint returns a short identifier derived from the peer's public key
 func (p *Peer) Fingerprint() string {
 	id := &Identity{PublicKey: p.PublicKey}
 	return id.Fingerprint()
-}
-
-// TLSConfig returns a tls.Config that trusts the peer's certificate.
-// Trust priority: CACertPEM (standard CA verification) > TLSCertPEM (pinned cert) > system defaults.
-func (p *Peer) TLSConfig(insecure bool) *tls.Config {
-	if insecure {
-		return &tls.Config{InsecureSkipVerify: true}
-	}
-	if p.CACertPEM != "" {
-		pool := x509.NewCertPool()
-		if pool.AppendCertsFromPEM([]byte(p.CACertPEM)) {
-			return &tls.Config{RootCAs: pool}
-		}
-	}
-	if p.TLSCertPEM != "" {
-		pool := x509.NewCertPool()
-		if pool.AppendCertsFromPEM([]byte(p.TLSCertPEM)) {
-			return &tls.Config{RootCAs: pool}
-		}
-	}
-	return nil // use system defaults
 }
 
 // PeerStore manages the list of known peers
@@ -58,7 +37,8 @@ type peerStoreData struct {
 	Peers []Peer `json:"peers"`
 }
 
-// NewPeerStore loads or creates the peer store
+// NewPeerStore loads or creates the peer store. Performs a one-time migration
+// for legacy records: missing Enabled ⇒ true, missing InitiatedByUs ⇒ true.
 func NewPeerStore() (*PeerStore, error) {
 	dir, err := configDir()
 	if err != nil {
@@ -69,23 +49,58 @@ func NewPeerStore() (*PeerStore, error) {
 	ps := &PeerStore{path: path}
 
 	data, err := os.ReadFile(path)
-	if err == nil {
-		if err := json.Unmarshal(data, &ps.store); err != nil {
-			return nil, fmt.Errorf("parse peers: %w", err)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ps, nil
 		}
-	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read peers: %w", err)
+	}
+
+	// Detect which fields are present using a raw map per peer.
+	var raw struct {
+		Peers []map[string]any `json:"peers"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse peers (raw): %w", err)
+	}
+
+	if err := json.Unmarshal(data, &ps.store); err != nil {
+		return nil, fmt.Errorf("parse peers: %w", err)
+	}
+
+	// Migrate missing fields with sensible defaults.
+	mutated := false
+	for i := range ps.store.Peers {
+		var rawMap map[string]any
+		if i < len(raw.Peers) {
+			rawMap = raw.Peers[i]
+		}
+		if _, ok := rawMap["enabled"]; !ok {
+			ps.store.Peers[i].Enabled = true
+			mutated = true
+		}
+		if _, ok := rawMap["initiated_by_us"]; !ok {
+			ps.store.Peers[i].InitiatedByUs = true
+			mutated = true
+		}
+	}
+	if mutated {
+		ps.mu.Lock()
+		err := ps.save()
+		ps.mu.Unlock()
+		if err != nil {
+			return nil, fmt.Errorf("migrate peers: %w", err)
+		}
 	}
 
 	return ps, nil
 }
 
-// Add adds a peer to the store and persists to disk
+// Add adds (or refreshes) a peer keyed by public key.
 func (ps *PeerStore) Add(peer Peer) error {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	// Replace if public key already exists
 	for i, p := range ps.store.Peers {
 		if p.PublicKey == peer.PublicKey {
 			ps.store.Peers[i] = peer
@@ -97,47 +112,63 @@ func (ps *PeerStore) Add(peer Peer) error {
 	return ps.save()
 }
 
-// Remove removes a peer by name and persists to disk
-func (ps *PeerStore) Remove(name string) error {
+// RemoveByPublicKey removes a peer by public key.
+func (ps *PeerStore) RemoveByPublicKey(publicKey string) error {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	for i, p := range ps.store.Peers {
-		if p.Name == name {
+		if p.PublicKey == publicKey {
 			ps.store.Peers = append(ps.store.Peers[:i], ps.store.Peers[i+1:]...)
 			return ps.save()
 		}
 	}
-	return fmt.Errorf("peer %q not found", name)
+	return fmt.Errorf("peer not found")
 }
 
-// Get returns a peer by name
+// Get returns a peer by name.
 func (ps *PeerStore) Get(name string) *Peer {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 
 	for _, p := range ps.store.Peers {
 		if p.Name == name {
-			return &p
+			cp := p
+			return &cp
 		}
 	}
 	return nil
 }
 
-// GetByPublicKey returns a peer by public key
+// GetByPublicKey returns a peer by public key.
 func (ps *PeerStore) GetByPublicKey(publicKey string) *Peer {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 
 	for _, p := range ps.store.Peers {
 		if p.PublicKey == publicKey {
-			return &p
+			cp := p
+			return &cp
 		}
 	}
 	return nil
 }
 
-// List returns all known peers
+// GetByFingerprint returns a peer by short fingerprint.
+func (ps *PeerStore) GetByFingerprint(fp string) *Peer {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+
+	for _, p := range ps.store.Peers {
+		if p.Fingerprint() == fp {
+			cp := p
+			return &cp
+		}
+	}
+	return nil
+}
+
+// List returns all known peers.
 func (ps *PeerStore) List() []Peer {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
@@ -147,19 +178,56 @@ func (ps *PeerStore) List() []Peer {
 	return result
 }
 
-// UpdateTLSCert updates the pinned TLS certificate for a peer identified by
-// public key and persists the change to disk.
-func (ps *PeerStore) UpdateTLSCert(publicKey, certPEM string) error {
+// UpdateAddress updates the last-known address used to reach a peer.
+func (ps *PeerStore) UpdateAddress(publicKey, address string) error {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-
 	for i, p := range ps.store.Peers {
 		if p.PublicKey == publicKey {
-			ps.store.Peers[i].TLSCertPEM = certPEM
+			ps.store.Peers[i].Address = address
 			return ps.save()
 		}
 	}
-	return fmt.Errorf("peer with public key %q not found", publicKey[:16]+"...")
+	return fmt.Errorf("peer not found")
+}
+
+// SetEnabled toggles auto-reconnect for a peer.
+func (ps *PeerStore) SetEnabled(publicKey string, enabled bool) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	for i, p := range ps.store.Peers {
+		if p.PublicKey == publicKey {
+			ps.store.Peers[i].Enabled = enabled
+			return ps.save()
+		}
+	}
+	return fmt.Errorf("peer not found")
+}
+
+// SetInitiatedByUs flips the dialer/listener role for a peer.
+func (ps *PeerStore) SetInitiatedByUs(publicKey string, initiated bool) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	for i, p := range ps.store.Peers {
+		if p.PublicKey == publicKey {
+			ps.store.Peers[i].InitiatedByUs = initiated
+			return ps.save()
+		}
+	}
+	return fmt.Errorf("peer not found")
+}
+
+// UpdateLastSeen sets LastSeen to now.
+func (ps *PeerStore) UpdateLastSeen(publicKey string) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	for i, p := range ps.store.Peers {
+		if p.PublicKey == publicKey {
+			ps.store.Peers[i].LastSeen = time.Now()
+			return ps.save()
+		}
+	}
+	return fmt.Errorf("peer not found")
 }
 
 // save writes the peer store to disk (must be called with lock held)

@@ -1,265 +1,67 @@
-# Multi-Host Setup with Tailscale / WireGuard
+# Multi-host (symmetric peer-to-peer)
 
-guppi supports connecting multiple machines together so you can monitor and interact with tmux sessions across all your hosts from a single dashboard. This guide covers how to set it up effectively using Tailscale or any WireGuard-based VPN.
+guppi runs as a symmetric peer-to-peer mesh. Every machine runs the same
+`guppi server` process — there is no hub or peer role anymore. Any node can
+connect to any other node from its dashboard.
 
-## How It Works
+## How it works
 
-guppi uses a star topology:
+1. On each machine, run `guppi server` (no flags needed beyond `--port` if
+   you want to change the default 7654).
+2. Open each dashboard in your browser and set a password (one-time).
+3. On node A's dashboard, open **Settings → Machines → Connect to another
+   machine**. Enter node B's `host:port` and node B's dashboard password.
+4. A and B now share sessions bidirectionally. The link auto-recovers if it
+   drops.
 
-```
-                    ┌──────────┐
-          ┌────────►│   Hub    │◄────────┐
-          │         │ (desktop)│         │
-          │         └──────────┘         │
-          │                              │
-     ┌────┴─────┐                 ┌──────┴───┐
-     │  Peer A  │                 │  Peer B   │
-     │ (laptop) │                 │ (server)  │
-     └──────────┘                 └───────────┘
-```
+You only need to run the Connect flow once per pair, from whichever side can
+reach the other. Bootstrap is idempotent — re-running just refreshes the
+address.
 
-- **Hub**: One node acts as the coordinator. It aggregates session state from all peers and serves the combined dashboard.
-- **Peers**: Other nodes connect to the hub and share their tmux session state. Terminal streams (PTY data) are relayed through the hub on demand.
-- **mTLS**: All peer-to-hub communication uses mutual TLS with auto-generated certificates and ed25519 identity keys.
+## Reachability
 
-## Why Tailscale / WireGuard?
+guppi serves plain HTTP. The peer-to-peer link is plain WebSocket (`ws://`).
+There is no built-in TLS, no certificate generation, and no pairing codes.
 
-A VPN overlay network solves several problems at once:
+Use one of these for encryption / cross-network reachability:
 
-1. **No port forwarding** — Nodes communicate over private IPs regardless of NAT, firewalls, or ISP restrictions.
-2. **Encrypted transport** — WireGuard encrypts all traffic at the network layer. Combined with guppi's mTLS, you get defense in depth.
-3. **Stable hostnames** — Tailscale provides MagicDNS names (e.g., `desktop.ts.net`) that follow machines across networks.
-4. **ACLs** — Tailscale ACLs let you restrict which machines can talk to each other, adding another layer of access control on top of guppi's pairing-based auth.
+- **Tailscale / WireGuard** (recommended) — gives each node a stable
+  hostname and end-to-end encryption.
+- **Reverse proxy** (Caddy, nginx) in front of `guppi server` if you want
+  HTTPS for the browser side.
 
-## Setup with Tailscale
+If neither machine can reach the other directly, no overlay network will
+fix that for you. Pick the side that can reach the other and run Connect
+from there — that side becomes the dialer; the other side just listens.
 
-### Prerequisites
+## Behaviour
 
-- [Tailscale](https://tailscale.com/download) installed and authenticated on all machines
-- `guppi` binary installed on all machines
-- tmux running on all machines
+- **Bidirectional**: once A↔B is up, A sees B's sessions and B sees A's.
+- **Auto-reconnect**: enabled by default. Backoff 1s → 30s with jitter.
+- **No transitivity**: if A↔B and A↔C are paired, B does not see C through
+  A. You must pair B and C directly if you want that.
+- **Disable / forget**: in the Machines panel, toggle Auto-reconnect off to
+  stop dialing without removing the peer; click Forget to remove the peer
+  entirely. Forget propagates over the live link so both sides clean up.
+- **Local sessions stay functional** when a peer goes offline.
 
-### Step 1: Start the Hub
+## Server flags
 
-Pick one machine to be the hub (typically your primary workstation). Note its Tailscale hostname:
+`guppi server` only takes:
 
-```bash
-tailscale status
-# 100.x.x.x  desktop        youruser@  linux  ...
-```
+- `--port` / `GUPPI_PORT` (default 7654)
+- `--socket` / `GUPPI_SOCKET` (local notify CLI socket path)
+- `--discovery-interval` / `GUPPI_DISCOVERY_INTERVAL` (default 2s)
+- `--no-control-mode` / `GUPPI_NO_CONTROL_MODE`
+- `--no-auth` / `GUPPI_NO_AUTH`
 
-Start guppi with TLS SANs that include the Tailscale hostname and IP:
+All peer configuration lives in `~/.config/guppi/peers.json` and is managed
+through the UI. There is no `--hub`, no `--tls-*`, no `guppi pair`, no
+`guppi peers` CLI.
 
-```bash
-guppi server --tls-san desktop.ts.net --tls-san 100.x.x.x
-```
+## Migration from older guppi
 
-Or set via environment variable:
-
-```bash
-export GUPPI_TLS_SAN=desktop.ts.net,100.x.x.x
-guppi server
-```
-
-The auto-generated TLS certificate will include these SANs, allowing peers to connect using the Tailscale hostname.
-
-### Step 2: Pair Peers
-
-On the hub, generate a pairing code:
-
-```bash
-guppi pair generate
-# Pairing code: ABC123 (valid for 5 minutes)
-```
-
-On the peer machine, join the hub:
-
-```bash
-guppi pair join --hub https://desktop.ts.net:7654 --code ABC123
-```
-
-This exchanges ed25519 identity keys and establishes mutual trust. Once paired, the peer's identity is stored and it can reconnect automatically.
-
-### Step 3: Start Peers
-
-On each peer machine, start guppi pointing at the hub:
-
-```bash
-guppi server --hub https://desktop.ts.net:7654
-```
-
-The peer will connect to the hub, share its tmux session state, and relay PTY connections on demand.
-
-#### Local-Only Mode
-
-If you want a peer to participate in the network but only show its own sessions in its local dashboard:
-
-```bash
-guppi server --hub https://desktop.ts.net:7654 --local-only
-```
-
-The hub still sees all sessions. This is useful for machines where you don't need the full multi-host view locally.
-
-### Step 4: Access the Dashboard
-
-Open the hub's dashboard in your browser:
-
-```
-https://desktop.ts.net:7654
-```
-
-You'll see sessions from all connected peers. Clicking a remote session opens a PTY relay through the hub — the terminal stream flows from the peer through the hub to your browser.
-
-## Setup with Generic WireGuard
-
-If you're using raw WireGuard (without Tailscale), the setup is the same — just use the WireGuard tunnel IPs instead of Tailscale hostnames.
-
-```bash
-# Hub
-guppi server --tls-san 10.0.0.1
-
-# Peer
-guppi server --hub https://10.0.0.1:7654
-```
-
-You'll need to handle DNS and key distribution yourself. The main differences from Tailscale:
-
-- No MagicDNS — use IPs or configure DNS manually
-- No automatic NAT traversal — ensure WireGuard peers can reach each other
-- No centralized ACLs — use WireGuard's AllowedIPs and firewall rules
-
-## systemd Services for Multi-Host
-
-Extend the [systemd user services](tmux-setup.md#systemd-user-service) with hub configuration:
-
-### Hub Service
-
-```ini
-[Unit]
-Description=guppi web dashboard (hub)
-After=tmux-server.service tailscaled.service
-Requires=tmux-server.service
-Wants=tailscaled.service
-
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/guppi server --tls-san %H.ts.net
-Restart=on-failure
-RestartSec=5
-Environment=GUPPI_PORT=7654
-
-[Install]
-WantedBy=default.target
-```
-
-### Peer Service
-
-```ini
-[Unit]
-Description=guppi web dashboard (peer)
-After=tmux-server.service tailscaled.service
-Requires=tmux-server.service
-Wants=tailscaled.service
-
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/guppi server --hub https://desktop.ts.net:7654
-Restart=on-failure
-RestartSec=5
-Environment=GUPPI_PORT=7654
-
-[Install]
-WantedBy=default.target
-```
-
-Note: `%H` in systemd expands to the machine's hostname. Adjust the hub address to match your actual hub's Tailscale hostname.
-
-## TLS Configuration
-
-### Auto-Generated Certificates (Default)
-
-By default, guppi generates a self-signed ECDSA P-256 certificate on first run. The certificate is stored in the guppi config directory and reused across restarts.
-
-Use `--tls-san` to add Subject Alternative Names so the certificate is valid for the hostnames/IPs peers use to connect:
-
-```bash
-guppi server --tls-san desktop.ts.net --tls-san 100.64.0.1 --tls-san desktop.local
-```
-
-### Custom Certificates
-
-If you have certificates from a private CA or Let's Encrypt:
-
-```bash
-guppi server --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
-```
-
-### Using Tailscale's Built-in Certificates
-
-Tailscale can issue certificates for your machines from a public CA via `tailscale cert`:
-
-```bash
-# Generate a cert for your machine's Tailscale FQDN
-tailscale cert desktop.ts.net
-
-# Use it with guppi
-guppi server --tls-cert desktop.ts.net.crt --tls-key desktop.ts.net.key
-```
-
-This eliminates browser certificate warnings since the cert is signed by a trusted CA. Note that `tailscale cert` requires HTTPS to be enabled in your Tailscale admin console.
-
-### Disabling TLS
-
-If your VPN already provides encryption (WireGuard encrypts all traffic), you can optionally disable TLS:
-
-```bash
-guppi server --no-tls
-```
-
-However, keeping TLS enabled is recommended for defense in depth — it protects against local network sniffing and provides authentication at the application layer.
-
-## Security Considerations
-
-### Defense in Depth
-
-With Tailscale + guppi, you get multiple layers of security:
-
-| Layer | Protection |
-|-------|-----------|
-| WireGuard (Tailscale) | Network-level encryption, NAT traversal, private IPs |
-| Tailscale ACLs | Which machines can communicate |
-| guppi mTLS | Peer authentication via ed25519 keys + TLS certificates |
-| guppi pairing | One-time code exchange to establish trust |
-| guppi auth | Password-based login for the web dashboard |
-
-### Recommendations
-
-- **Always use a VPN** for multi-host setups. Don't expose guppi directly to the internet.
-- **Keep pairing codes short-lived** — they expire after 5 minutes by default.
-- **Use `--local-only`** on machines that don't need to see remote sessions.
-- **Enable lingering** (`loginctl enable-linger`) on headless servers so guppi stays running.
-- **Set a strong password** for the web dashboard, especially if accessing it remotely.
-- **Use Tailscale ACLs** to restrict which machines can reach the hub's port.
-
-## Troubleshooting
-
-### Peer won't connect to hub
-
-1. Verify Tailscale connectivity: `tailscale ping desktop.ts.net`
-2. Check the hub is listening: `curl -k https://desktop.ts.net:7654/api/health`
-3. Verify pairing was completed: `guppi peers list`
-4. Check logs: `journalctl --user -u guppi.service -f`
-
-### Certificate errors
-
-If peers get TLS errors connecting to the hub:
-
-- Ensure the hub was started with the correct `--tls-san` values
-- Delete the auto-generated cert and restart to regenerate: the cert is stored in the guppi config directory
-- Use `--insecure` temporarily for debugging (not recommended for production)
-
-### Sessions not appearing
-
-- Ensure tmux is running on the peer: `tmux list-sessions`
-- Check that the peer isn't in `--local-only` mode if you expect to see its sessions on the hub
-- Verify the peer shows as connected: `guppi peers list` on the hub
+Old `peers.json` entries are loaded automatically (legacy TLS fields are
+ignored). You will need to re-pair only if the old setup relied on pinned
+self-signed TLS certs to reach a non-system-trusted host — TLS is gone, so
+the address either works on plain HTTP/WS or doesn't.
