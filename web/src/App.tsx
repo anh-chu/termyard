@@ -22,6 +22,7 @@ import { useWebSocket } from './hooks/useWebSocket'
 import { usePushNotifications } from './hooks/usePushNotifications'
 import { usePreferencesProvider, usePreferences, PreferencesContext } from './hooks/usePreferences'
 import { useAuth } from './hooks/useAuth'
+import { useLayoutSync } from './hooks/useLayoutSync'
 import { applyTheme } from './theme'
 
 type View = 'overview' | 'session' | 'settings' | 'setup'
@@ -158,6 +159,47 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   activeKeyRef.current = activeKey
   const { prefs } = usePreferences()
 
+  // Layout sync — mirrors viewport state to the server so other tabs/devices
+  // see the same pane tree, saved groups, sidebar state, etc.
+  const { version: layoutVersion, pushNow: pushLayout, applyRemote: applyRemoteLayout } = useLayoutSync(true)
+
+  // When the server tells us another tab updated the layout, re-hydrate our
+  // React state from the freshly written localStorage values.
+  useEffect(() => {
+    if (layoutVersion === 0) return
+    try {
+      const tree = localStorage.getItem('guppi:pane-tree')
+      const ak = localStorage.getItem('guppi:active-key')
+      if (tree) {
+        const parsed = JSON.parse(tree) as PaneTree
+        setPaneTree(parsed)
+        setSingleView(null)
+        if (ak) setActiveKey(ak)
+      } else {
+        setPaneTree(null)
+      }
+    } catch {}
+    try {
+      const sg = localStorage.getItem('guppi:saved-groups')
+      if (sg) setSavedGroups(JSON.parse(sg))
+    } catch {}
+    try {
+      const gid = localStorage.getItem('guppi:active-group-id')
+      if (gid) setActiveGroupId(gid)
+    } catch {}
+    try {
+      const gn = localStorage.getItem('guppi:active-group-name') || ''
+      setActiveGroupName(gn)
+    } catch {}
+    try {
+      const go = localStorage.getItem('guppi:group-order')
+      if (go) setGroupOrder(JSON.parse(go))
+    } catch {}
+    try {
+      setSidebarCollapsed(localStorage.getItem('guppi:sidebar-collapsed') === 'true')
+    } catch {}
+  }, [layoutVersion])
+
   // Auto-lock: idle detection + optional background accelerator
   const lastActivityRef = useRef<number>(Date.now())
   useEffect(() => {
@@ -201,12 +243,13 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     }
   }, [onLogout, prefs.lock_timeout_minutes, prefs.lock_background_faster, prefs.lock_background_minutes])
 
-  // Persist sidebar state
+  // Persist sidebar state + sync.
   useEffect(() => {
     localStorage.setItem('guppi:sidebar-collapsed', String(sidebarCollapsed))
-  }, [sidebarCollapsed])
+    pushLayout()
+  }, [sidebarCollapsed, pushLayout])
 
-  // Persist pane tree across reloads
+  // Persist pane tree across reloads + sync.
   useEffect(() => {
     try {
       if (paneTree) {
@@ -217,9 +260,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         localStorage.removeItem('guppi:active-key')
       }
     } catch {}
-  }, [paneTree, activeKey])
+    pushLayout()
+  }, [paneTree, activeKey, pushLayout])
 
-  // Persist saved groups across reloads
+  // Persist saved groups across reloads + sync.
   useEffect(() => {
     try {
       localStorage.setItem('guppi:saved-groups', JSON.stringify(savedGroups))
@@ -227,7 +271,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       localStorage.setItem('guppi:active-group-name', activeGroupName)
       localStorage.setItem('guppi:group-order', JSON.stringify(groupOrder))
     } catch {}
-  }, [savedGroups, activeGroupId, activeGroupName, groupOrder])
+    pushLayout()
+  }, [savedGroups, activeGroupId, activeGroupName, groupOrder, pushLayout])
 
   // Sync URL -> state on popstate (back/forward)
   useEffect(() => {
@@ -540,7 +585,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       refresh()
       refreshHosts()
     }
-  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent])
+    if (evt.type === 'layout-updated') {
+      applyRemoteLayout(evt.data || {}, evt.client_id)
+    }
+  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, applyRemoteLayout])
 
   const { connected } = useWebSocket('/ws/events', onEvent)
 

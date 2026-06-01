@@ -21,6 +21,7 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 - [Host](./host.md)
 - [Hosts](./hosts.md)
 - [Hub](./hub.md)
+- [Layout](./layout.md)
 - [Name](./name.md)
 - [Notify](./notify.md)
 - [Peers](./peers.md)
@@ -43,7 +44,7 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 
 ## Quick Stats
 
-- Routes: **83**
+- Routes: **87**
 - Models: **0**
 - Components: **15**
 - Env vars: **7** required, **0** with defaults
@@ -72,4 +73,4 @@ These exist in your codebase but are **not** reflected in wiki articles:
 When in doubt, search the source. The wiki is a starting point, not a complete inventory.
 
 ---
-_Last compiled: 2026-06-01 · 33 articles · [codesight](https://github.com/Houseofmvps/codesight)_
+_Last compiled: 2026-06-01 · 34 articles · [codesight](https://github.com/Houseofmvps/codesight)_

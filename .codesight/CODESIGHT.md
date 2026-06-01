@@ -2,9 +2,9 @@
 
 > **Stack:** chi | none | react | go
 
-> 83 routes | 0 models | 15 components | 58 lib files | 7 env vars | 1 middleware | 7% test coverage
-> **Token savings:** this file is ~5,600 tokens. Without it, AI exploration would cost ~73,400 tokens. **Saves ~67,800 tokens per conversation.**
-> **Last scanned:** 2026-06-01 08:01 — re-run after significant changes
+> 87 routes | 0 models | 15 components | 60 lib files | 7 env vars | 1 middleware | 7% test coverage
+> **Token savings:** this file is ~5,700 tokens. Without it, AI exploration would cost ~76,000 tokens. **Saves ~70,300 tokens per conversation.**
+> **Last scanned:** 2026-06-01 08:38 — re-run after significant changes
 
 ---
 
@@ -44,6 +44,8 @@
 - `POST` `/api/push/unsubscribe` params() [auth, db, queue, ai]
 - `GET` `/api/preferences` params() [auth, db, queue, ai]
 - `PUT` `/api/preferences` params() [auth, db, queue, ai]
+- `GET` `/api/layout` params() [auth, db, queue, ai]
+- `PUT` `/api/layout` params() [auth, db, queue, ai]
 - `GET` `/api/portforwards` params() [auth, db, queue, ai]
 - `POST` `/api/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/api/portforward/{port}` params(port) [auth, db, queue, ai]
@@ -80,6 +82,8 @@
 - `POST` `/push/unsubscribe` params() [auth, db, queue, ai]
 - `GET` `/preferences` params() [auth, db, queue, ai]
 - `PUT` `/preferences` params() [auth, db, queue, ai]
+- `GET` `/layout` params() [auth, db, queue, ai]
+- `PUT` `/layout` params() [auth, db, queue, ai]
 - `GET` `/portforwards` params() [auth, db, queue, ai]
 - `POST` `/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/portforward/{port}` params(port) [auth, db, queue, ai]
@@ -155,6 +159,10 @@
   - function NewPeerStore: () (*PeerStore, error)
   - class Peer
   - class PeerStore
+- `pkg/layout/layout.go`
+  - function NewStore: () (*Store, error)
+  - class Layout
+  - class Store
 - `pkg/peer/bootstrap.go`
   - function NormalizeAddress: (addr string) (string, error)
   - function SendBootstrap: (ctx context.Context, addr string, req BootstrapRequest) (*BootstrapResponse, error)
@@ -278,6 +286,7 @@
 - `web/src/hooks/useActivity.ts` — function useActivity: () => void, interface ActivitySnapshot
 - `web/src/hooks/useAuth.ts` — function useAuth: () => AuthState
 - `web/src/hooks/useHosts.ts` — function useHosts: () => void, interface Host
+- `web/src/hooks/useLayoutSync.ts` — function useLayoutSync: (authenticated) => void, const LAYOUT_CLIENT_ID
 - `web/src/hooks/useNotifications.ts` — function useNotifications: (pushSubscribed) => void
 - `web/src/hooks/usePortForwards.ts`
   - function usePortForwards: () => void
@@ -349,8 +358,8 @@
 
 ## Most Imported Files (change these carefully)
 
-- `encoding/json` — imported by **20** files
-- `path/filepath` — imported by **19** files
+- `encoding/json` — imported by **21** files
+- `path/filepath` — imported by **20** files
 - `net/http` — imported by **10** files
 - `web/src/lib/utils.ts` — imported by **10** files
 - `os/exec` — imported by **9** files
@@ -372,8 +381,8 @@
 
 ## Import Map (who imports what)
 
-- `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/identity/identity.go`, `pkg/identity/peers.go` +15 more
-- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/git/worktree.go` +14 more
+- `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/identity/identity.go`, `pkg/identity/peers.go` +16 more
+- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/git/worktree.go` +15 more
 - `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/peer/bootstrap.go`, `pkg/peer/bootstrap_test.go`, `pkg/peer/handler.go` +5 more
 - `web/src/lib/utils.ts` ← `web/src/components/AgentMark.tsx`, `web/src/components/NewSessionModal.tsx`, `web/src/components/PortForwardModal.tsx`, `web/src/components/QuickSwitcher.tsx`, `web/src/components/Settings.tsx` +5 more
 - `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/git/worktree.go` +4 more

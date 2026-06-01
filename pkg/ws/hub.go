@@ -190,6 +190,17 @@ func (h *Hub) broadcastActivity() {
 	h.broadcastMessage(data)
 }
 
+// BroadcastJSON marshals v and sends it to every connected client. Failed
+// connections are pruned.
+func (h *Hub) BroadcastJSON(v interface{}) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		logrus.WithError(err).Warn("failed to marshal broadcast")
+		return
+	}
+	h.broadcastMessage(data)
+}
+
 // broadcastMessage sends a message to all connected clients
 func (h *Hub) broadcastMessage(data []byte) {
 	h.mu.RLock()

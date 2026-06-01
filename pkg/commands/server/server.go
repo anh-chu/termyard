@@ -13,6 +13,7 @@ import (
 	"github.com/ekristen/guppi/pkg/auth"
 	"github.com/ekristen/guppi/pkg/common"
 	"github.com/ekristen/guppi/pkg/identity"
+	"github.com/ekristen/guppi/pkg/layout"
 	"github.com/ekristen/guppi/pkg/peer"
 	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
@@ -104,6 +105,12 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		prefStore = nil
 	}
 
+	layoutStore, err := layout.NewStore()
+	if err != nil {
+		logrus.WithError(err).Warn("failed to load layout store, sync disabled")
+		layoutStore = nil
+	}
+
 	var pushKeys *webpush.VAPIDKeys
 	var pushStore *webpush.Store
 	vapidKeys, err := webpush.LoadOrCreateKeys()
@@ -182,6 +189,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PushKeys:         pushKeys,
 		PushStore:        pushStore,
 		PrefStore:        prefStore,
+		LayoutStore:      layoutStore,
 		AuthEnabled:      authEnabled,
 		PasswordStore:    passwordStore,
 		SessionMgr:       sessionMgr,

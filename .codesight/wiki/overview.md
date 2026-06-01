@@ -6,7 +6,7 @@
 
 ## Scale
 
-83 API routes · 15 UI components · 58 library files · 1 middleware layers · 7 environment variables
+87 API routes · 15 UI components · 60 library files · 1 middleware layers · 7 environment variables
 
 ## Subsystems
 
@@ -22,6 +22,7 @@
 - **[Host](./host.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Hosts](./hosts.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Hub](./hub.md)** — 1 routes — touches: auth
+- **[Layout](./layout.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Name](./name.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Notify](./notify.md)** — 1 routes — touches: auth, ai
 - **[Peers](./peers.md)** — 11 routes — touches: auth, db, queue, ai
@@ -42,14 +43,14 @@
 
 **UI:** 15 components (react) — see [ui.md](./ui.md)
 
-**Libraries:** 58 files — see [libraries.md](./libraries.md)
+**Libraries:** 60 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `encoding/json` — imported by **20** files
-- `path/filepath` — imported by **19** files
+- `encoding/json` — imported by **21** files
+- `path/filepath` — imported by **20** files
 - `net/http` — imported by **10** files
 - `web/src/lib/utils.ts` — imported by **10** files
 - `os/exec` — imported by **9** files

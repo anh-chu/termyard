@@ -42,6 +42,7 @@ import (
 	"github.com/ekristen/guppi/pkg/stats"
 	"github.com/ekristen/guppi/pkg/tmux"
 	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/ekristen/guppi/pkg/layout"
 	"github.com/ekristen/guppi/pkg/webpush"
 	"github.com/ekristen/guppi/pkg/ws"
 )
@@ -56,6 +57,7 @@ type Options struct {
 	PushKeys         *webpush.VAPIDKeys
 	PushStore        *webpush.Store
 	PrefStore        *preferences.Store
+	LayoutStore      *layout.Store
 	AuthEnabled      bool
 	PasswordStore    *auth.PasswordStore
 	SessionMgr       *auth.SessionManager
@@ -318,6 +320,18 @@ func Run(ctx context.Context, opts *Options) error {
 	logger := logrus.WithField("component", "server")
 
 	secureCookies := false
+
+	// Build the events hub up front so routes can broadcast layout changes.
+	hub := ws.NewHub(opts.StateMgr, opts.Tracker)
+	if opts.ActivityTracker != nil {
+		var peerActivity ws.ActivitySource
+		localHostID := ""
+		if opts.PeerMgr != nil {
+			peerActivity = opts.PeerMgr
+			localHostID = opts.PeerMgr.LocalID()
+		}
+		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
+	}
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Recoverer)
@@ -926,6 +940,48 @@ func Run(ctx context.Context, opts *Options) error {
 				json.NewEncoder(w).Encode(&prefs)
 			})
 
+			// Layout sync endpoints — viewport state shared across tabs and devices.
+			r.Get("/layout", func(w http.ResponseWriter, r *http.Request) {
+				if opts.LayoutStore == nil {
+					http.Error(w, "layout sync not available", http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(opts.LayoutStore.Get())
+			})
+
+			r.Put("/layout", func(w http.ResponseWriter, r *http.Request) {
+				if opts.LayoutStore == nil {
+					http.Error(w, "layout sync not available", http.StatusServiceUnavailable)
+					return
+				}
+				var body struct {
+					ClientID string                     `json:"client_id"`
+					Data     map[string]json.RawMessage `json:"data"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					http.Error(w, "invalid JSON", http.StatusBadRequest)
+					return
+				}
+				if body.Data == nil {
+					http.Error(w, "data is required", http.StatusBadRequest)
+					return
+				}
+				updated, err := opts.LayoutStore.Set(body.Data, body.ClientID)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				hub.BroadcastJSON(map[string]interface{}{
+					"type":       "layout-updated",
+					"client_id":  updated.UpdatedBy,
+					"updated_at": updated.UpdatedAt,
+					"data":       updated.Data,
+				})
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(updated)
+			})
+
 			// Port forward registry
 			r.Get("/portforwards", func(w http.ResponseWriter, r *http.Request) {
 				if opts.PortForwardStore == nil {
@@ -995,16 +1051,6 @@ func Run(ctx context.Context, opts *Options) error {
 	})
 
 	// WebSocket routes (protected by auth if enabled)
-	hub := ws.NewHub(opts.StateMgr, opts.Tracker)
-	if opts.ActivityTracker != nil {
-		var peerActivity ws.ActivitySource
-		localHostID := ""
-		if opts.PeerMgr != nil {
-			peerActivity = opts.PeerMgr
-			localHostID = opts.PeerMgr.LocalID()
-		}
-		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
-	}
 	go hub.Run()
 
 	ptyHandler := ws.NewPTYTerminalHandler(opts.Client.TmuxPath(), opts.ActivityTracker)

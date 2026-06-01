@@ -2,9 +2,9 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**58 library files** across 2 modules
+**60 library files** across 2 modules
 
-## Pkg (44 files)
+## Pkg (45 files)
 
 - `pkg/peer/protocol.go` — NewMessage, Message, AuthPayload, ChallengePayload, StateUpdatePayload, StateEventPayload, …
 - `pkg/auth/auth.go` — NewPasswordStore, NewSessionManager, Middleware, SetupHandler, LoginHandler, LogoutHandler, …
@@ -23,6 +23,7 @@
 - `pkg/ws/hub.go` — CheckSameOrigin, NewHub, Hub, ActivitySource
 - `pkg/agentcheck/agentcheck.go` — CheckAgents, AgentStatus, StatusResult
 - `pkg/identity/peers.go` — NewPeerStore, Peer, PeerStore
+- `pkg/layout/layout.go` — NewStore, Layout, Store
 - `pkg/peer/pty_manager.go` — NewPTYManager, PTYManager, ActivePTY
 - `pkg/peer/pty_relay.go` — NewPTYRelay, GenerateStreamID, PTYRelay
 - `pkg/peer/supervisor.go` — NewLinkSupervisor, LinkSnapshot, LinkSupervisor
@@ -30,10 +31,9 @@
 - `pkg/socket/socket.go` — DefaultPath, EnsureDir, Cleanup
 - `pkg/stats/stats.go` — SystemStats, ProcessCountsFromSessions, ProcessEntry
 - `pkg/tmux/client.go` — NewClient, ValidateSessionName, Client
-- `pkg/tmux/paste_image.go` — HandlePTYControlMessage, StorePastedImage, PTYControlMessage
-- _…and 19 more files_
+- _…and 20 more files_
 
-## Web (14 files)
+## Web (15 files)
 
 - `web/src/lib/paneTree.ts` — getLeaves, findLeaf, splitLeaf, removeLeaf, replaceLeaf, updateRatio, …
 - `web/src/hooks/useSessions.ts` — sessionKey, parseSessionKey, useSessions, Pane, Window, Session
@@ -42,6 +42,7 @@
 - `web/src/hooks/usePortForwards.ts` — usePortForwards, PortForward, ForwardMode
 - `web/src/hooks/useActivity.ts` — useActivity, ActivitySnapshot
 - `web/src/hooks/useHosts.ts` — useHosts, Host
+- `web/src/hooks/useLayoutSync.ts` — useLayoutSync, LAYOUT_CLIENT_ID
 - `web/src/hooks/useToolEvents.ts` — useToolEvents, ToolEvent
 - `web/src/hooks/useAuth.ts` — useAuth
 - `web/src/hooks/useNotifications.ts` — useNotifications

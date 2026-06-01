@@ -38,6 +38,10 @@
   - function NewPeerStore: () (*PeerStore, error)
   - class Peer
   - class PeerStore
+- `pkg/layout/layout.go`
+  - function NewStore: () (*Store, error)
+  - class Layout
+  - class Store
 - `pkg/peer/bootstrap.go`
   - function NormalizeAddress: (addr string) (string, error)
   - function SendBootstrap: (ctx context.Context, addr string, req BootstrapRequest) (*BootstrapResponse, error)
@@ -161,6 +165,7 @@
 - `web/src/hooks/useActivity.ts` — function useActivity: () => void, interface ActivitySnapshot
 - `web/src/hooks/useAuth.ts` — function useAuth: () => AuthState
 - `web/src/hooks/useHosts.ts` — function useHosts: () => void, interface Host
+- `web/src/hooks/useLayoutSync.ts` — function useLayoutSync: (authenticated) => void, const LAYOUT_CLIENT_ID
 - `web/src/hooks/useNotifications.ts` — function useNotifications: (pushSubscribed) => void
 - `web/src/hooks/usePortForwards.ts`
   - function usePortForwards: () => void
