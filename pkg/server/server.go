@@ -71,6 +71,46 @@ type Options struct {
 	PortForwardStore *portforward.Store
 }
 
+// layoutStoreAdapter bridges layout.Store to the narrow interfaces the peer
+// package consumes (LayoutSink + LayoutSource).
+type layoutStoreAdapter struct {
+	store *layout.Store
+}
+
+func (a layoutStoreAdapter) ApplyRemoteLayout(data map[string]json.RawMessage, updatedAt time.Time, origin string) (bool, error) {
+	_, accepted, err := a.store.ApplyRemote(data, updatedAt, origin)
+	return accepted, err
+}
+
+func (a layoutStoreAdapter) SnapshotLayout() (map[string]json.RawMessage, time.Time, bool) {
+	l := a.store.Get()
+	if l.UpdatedAt.IsZero() {
+		return nil, time.Time{}, false
+	}
+	return l.Data, l.UpdatedAt, true
+}
+
+// fanoutLayoutToPeers broadcasts a layout update to every connected paired
+// peer over the control WS. Best-effort: a full Send queue drops the frame
+// for that peer, the next push will catch them up.
+func fanoutLayoutToPeers(opts *Options, l layout.Layout) {
+	if opts.PeerMgr == nil || opts.Identity == nil {
+		return
+	}
+	payload := peer.LayoutSyncPayload{
+		UpdatedAt: l.UpdatedAt,
+		Origin:    opts.Identity.Fingerprint(),
+		Data:      l.Data,
+	}
+	msg, err := peer.NewMessage(peer.MsgLayoutSync, payload)
+	if err != nil {
+		return
+	}
+	for _, pc := range opts.PeerMgr.ConnectedPeers() {
+		pc.Enqueue(msg)
+	}
+}
+
 // handleRemoteSession handles a terminal session request for a remote peer.
 // It tells the peer to spawn a PTY, then bridges the browser WS to the peer's PTY WS.
 func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, hostID string) {
@@ -331,6 +371,21 @@ func Run(ctx context.Context, opts *Options) error {
 			localHostID = opts.PeerMgr.LocalID()
 		}
 		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
+	}
+
+	// Wire cross-machine layout sync. The peer subsystem can now apply
+	// inbound MsgLayoutSync to our local layout store, and bounce
+	// layout-updated through the browser hub.
+	if opts.LayoutStore != nil {
+		sink := layoutStoreAdapter{store: opts.LayoutStore}
+		if opts.LinkSupervisor != nil {
+			opts.LinkSupervisor.SetLayoutSink(sink)
+			opts.LinkSupervisor.SetBrowserHub(hub)
+		}
+		if opts.PeerHandler != nil {
+			opts.PeerHandler.SetLayoutSink(sink)
+			opts.PeerHandler.SetBrowserHub(hub)
+		}
 	}
 
 	r := chi.NewRouter()
@@ -978,6 +1033,10 @@ func Run(ctx context.Context, opts *Options) error {
 					"updated_at": updated.UpdatedAt,
 					"data":       updated.Data,
 				})
+				// Fan out to paired peers so other machines in the mesh mirror
+				// this layout. Origin = our local fingerprint so receivers can
+				// detect their own echoes if the link path loops.
+				fanoutLayoutToPeers(opts, updated)
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(updated)
 			})

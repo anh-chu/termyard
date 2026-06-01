@@ -61,6 +61,9 @@ const (
 	MsgPTYInput = "pty-input"
 	// MsgPTYControl carries a JSON control frame (e.g. resize) for a PTY.
 	MsgPTYControl = "pty-control"
+	// MsgLayoutSync mirrors the dashboard viewport state across paired peers.
+	// Last-write-wins by UpdatedAt timestamp.
+	MsgLayoutSync = "layout-sync"
 )
 
 // Message is the envelope for all control WebSocket messages
@@ -164,6 +167,14 @@ type PTYDataPayload struct {
 type PTYControlPayload struct {
 	StreamID string `json:"stream_id"`
 	Control  string `json:"control"`
+}
+
+// LayoutSyncPayload mirrors the dashboard layout from one paired node to
+// another. Data is opaque (frontend-owned schema), UpdatedAt drives LWW.
+type LayoutSyncPayload struct {
+	UpdatedAt time.Time                  `json:"updated_at"`
+	Origin    string                     `json:"origin"` // node fingerprint that produced the change
+	Data      map[string]json.RawMessage `json:"data"`
 }
 
 // SessionActionPayload forwards a session API action to a peer

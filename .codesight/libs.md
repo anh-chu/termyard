@@ -62,7 +62,7 @@
   - class ChallengePayload
   - class StateUpdatePayload
   - class StateEventPayload
-  - _...12 more_
+  - _...13 more_
 - `pkg/peer/pty_manager.go`
   - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
@@ -71,7 +71,11 @@
   - function NewPTYRelay: () *PTYRelay
   - function GenerateStreamID: () string
   - class PTYRelay
-- `pkg/peer/session.go` — class SessionDeps
+- `pkg/peer/session.go`
+  - class SessionDeps
+  - interface LayoutSink
+  - interface BrowserBroadcaster
+  - interface LayoutSource
 - `pkg/peer/supervisor.go`
   - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor
   - class LinkSnapshot

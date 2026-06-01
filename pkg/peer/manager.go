@@ -467,6 +467,23 @@ func (m *Manager) GetPeerConnection(id string) *PeerConnection {
 	return nil
 }
 
+// ConnectedPeers returns every currently-connected remote peer connection.
+// The local host is skipped. Used for fan-out broadcasts (e.g. layout sync).
+func (m *Manager) ConnectedPeers() []*PeerConnection {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*PeerConnection, 0, len(m.hosts))
+	for id, h := range m.hosts {
+		if id == m.localID {
+			continue
+		}
+		if h.Conn != nil {
+			out = append(out, h.Conn)
+		}
+	}
+	return out
+}
+
 // GetAllActivity returns activity snapshots from all remote peers (not local)
 func (m *Manager) GetAllActivity() []*activity.Snapshot {
 	m.mu.RLock()

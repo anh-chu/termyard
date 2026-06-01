@@ -31,6 +31,16 @@ func NewHandler(deps SessionDeps) *Handler {
 	return &Handler{deps: deps}
 }
 
+// SetLayoutSink wires the layout store after construction.
+func (h *Handler) SetLayoutSink(sink LayoutSink) {
+	h.deps.LayoutSink = sink
+}
+
+// SetBrowserHub wires the browser-events hub after construction.
+func (h *Handler) SetBrowserHub(hub BrowserBroadcaster) {
+	h.deps.BrowserHub = hub
+}
+
 // HandlePeer handles /ws/peer for incoming control-channel connections.
 // Performs ed25519 challenge-response auth, then delegates to runSession.
 func (h *Handler) HandlePeer(w http.ResponseWriter, r *http.Request) {

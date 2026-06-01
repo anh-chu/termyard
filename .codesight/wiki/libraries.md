@@ -17,6 +17,7 @@
 - `pkg/toolevents/tracker.go` — NewTracker, Event, PaneKey, SessionMeta, Tracker
 - `pkg/activity/tracker.go` — NewTracker, SessionActivity, Snapshot, Tracker
 - `pkg/git/worktree.go` — IsWorktree, FindMainWorktreeRoot, RemoveWorktree, CreateWorktree
+- `pkg/peer/session.go` — SessionDeps, LayoutSink, BrowserBroadcaster, LayoutSource
 - `pkg/state/manager.go` — NewManager, SessionMetadata, Manager, StateEvent
 - `pkg/tmux/types.go` — Session, Window, PaneDetailed, Pane
 - `pkg/toolevents/reconciler.go` — NewReconciler, PaneState, PaneInfo, Reconciler
@@ -30,7 +31,6 @@
 - `pkg/portforward/store.go` — NewStore, Forward, Store
 - `pkg/socket/socket.go` — DefaultPath, EnsureDir, Cleanup
 - `pkg/stats/stats.go` — SystemStats, ProcessCountsFromSessions, ProcessEntry
-- `pkg/tmux/client.go` — NewClient, ValidateSessionName, Client
 - _…and 20 more files_
 
 ## Web (15 files)

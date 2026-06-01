@@ -29,17 +29,34 @@ const (
 	RoleListener
 )
 
+// LayoutSink is the slice of pkg/layout the session loop needs in order to
+// merge layout updates received from paired peers. Returns (accepted, err)
+// — accepted=false means the local copy was newer and the update was
+// dropped. Kept narrow so pkg/peer doesn't pull pkg/layout directly.
+type LayoutSink interface {
+	ApplyRemoteLayout(data map[string]json.RawMessage, updatedAt time.Time, origin string) (bool, error)
+}
+
+// BrowserBroadcaster pushes a JSON message to every connected browser. Used
+// to forward layout-updated events to the local UI after we accept a remote
+// layout-sync from a paired peer.
+type BrowserBroadcaster interface {
+	BroadcastJSON(v interface{})
+}
+
 // SessionDeps groups the runtime dependencies needed by a peer session.
 type SessionDeps struct {
-	Manager     *Manager
-	LocalMgr    *state.Manager
-	Identity    *identity.Identity
-	ActTracker  *activity.Tracker
-	ToolTracker *toolevents.Tracker
-	PeerStore   *identity.PeerStore
-	TmuxClient  *tmux.Client
-	PTYManager  *PTYManager
-	PTYRelay    *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
+	Manager      *Manager
+	LocalMgr     *state.Manager
+	Identity     *identity.Identity
+	ActTracker   *activity.Tracker
+	ToolTracker  *toolevents.Tracker
+	PeerStore    *identity.PeerStore
+	TmuxClient   *tmux.Client
+	PTYManager   *PTYManager
+	PTYRelay     *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
+	LayoutSink   LayoutSink
+	BrowserHub   BrowserBroadcaster
 }
 
 // connWriter serializes WebSocket writes from multiple goroutines.
@@ -132,6 +149,7 @@ func runSession(
 	// Initial pushes — both sides advertise themselves.
 	sendStateUpdate(pc, deps)
 	sendInitialPeerState(pc, deps, peerID)
+	sendInitialLayoutSync(pc, deps)
 
 	// Background loops.
 	go pingLoop(sessionCtx, cw)
@@ -160,6 +178,35 @@ func runSession(
 		}
 		handleSessionMessage(peerID, &msg, pc, deps, log)
 	}
+}
+
+// LayoutSource is the slice of pkg/layout the session loop needs to push
+// our current layout to a freshly connected peer.
+type LayoutSource interface {
+	SnapshotLayout() (data map[string]json.RawMessage, updatedAt time.Time, ok bool)
+}
+
+// sendInitialLayoutSync pushes our current layout once on link-up so the
+// remote can reconcile. If LayoutSink also implements LayoutSource (the
+// usual case for the layout.Store adapter), we use it; otherwise we skip.
+func sendInitialLayoutSync(pc *PeerConnection, deps SessionDeps) {
+	src, ok := deps.LayoutSink.(LayoutSource)
+	if !ok {
+		return
+	}
+	data, updatedAt, ok := src.SnapshotLayout()
+	if !ok || updatedAt.IsZero() {
+		return
+	}
+	msg, err := NewMessage(MsgLayoutSync, LayoutSyncPayload{
+		UpdatedAt: updatedAt,
+		Origin:    deps.Identity.Fingerprint(),
+		Data:      data,
+	})
+	if err != nil {
+		return
+	}
+	pc.Enqueue(msg)
 }
 
 // sendInitialPeerState pushes a snapshot containing only the local host
@@ -471,6 +518,38 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 
 	case MsgRequestState:
 		sendStateUpdate(pc, deps)
+
+	case MsgLayoutSync:
+		var p LayoutSyncPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid layout-sync")
+			return
+		}
+		// Ignore loops: don't accept our own broadcast bouncing back.
+		if p.Origin == deps.Identity.Fingerprint() {
+			return
+		}
+		if deps.LayoutSink == nil {
+			return
+		}
+		accepted, err := deps.LayoutSink.ApplyRemoteLayout(p.Data, p.UpdatedAt, p.Origin)
+		if err != nil {
+			log.WithError(err).Warn("apply remote layout failed")
+			return
+		}
+		if !accepted {
+			return
+		}
+		// Tell our local browser tabs so the dashboard updates immediately.
+		if deps.BrowserHub != nil {
+			deps.BrowserHub.BroadcastJSON(map[string]interface{}{
+				"type":       "layout-updated",
+				"client_id":  p.Origin,
+				"updated_at": p.UpdatedAt,
+				"data":       p.Data,
+			})
+		}
+		log.WithField("origin", p.Origin).Debug("applied remote layout")
 
 	default:
 		log.WithField("type", msg.Type).Debug("unknown session message")

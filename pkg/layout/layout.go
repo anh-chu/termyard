@@ -97,6 +97,25 @@ func (s *Store) Set(data map[string]json.RawMessage, clientID string) (Layout, e
 	return s.snapshot(), nil
 }
 
+// ApplyRemote applies a remote layout update using last-write-wins on
+// UpdatedAt. Returns the resulting snapshot and whether the update was
+// accepted (newer than the local copy). Origin is stored in UpdatedBy so
+// the next /api/layout broadcast carries it through to all browsers.
+func (s *Store) ApplyRemote(data map[string]json.RawMessage, updatedAt time.Time, origin string) (Layout, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !updatedAt.After(s.data.UpdatedAt) {
+		return s.snapshot(), false, nil
+	}
+	s.data.Data = data
+	s.data.UpdatedAt = updatedAt
+	s.data.UpdatedBy = origin
+	if err := s.save(); err != nil {
+		return Layout{}, false, err
+	}
+	return s.snapshot(), true, nil
+}
+
 func (s *Store) snapshot() Layout {
 	cp := Layout{
 		Data:      make(map[string]json.RawMessage, len(s.data.Data)),

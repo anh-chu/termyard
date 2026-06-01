@@ -3,8 +3,8 @@
 > **Stack:** chi | none | react | go
 
 > 87 routes | 0 models | 15 components | 60 lib files | 7 env vars | 1 middleware | 7% test coverage
-> **Token savings:** this file is ~5,700 tokens. Without it, AI exploration would cost ~76,000 tokens. **Saves ~70,200 tokens per conversation.**
-> **Last scanned:** 2026-06-01 08:54 — re-run after significant changes
+> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~76,000 tokens. **Saves ~70,200 tokens per conversation.**
+> **Last scanned:** 2026-06-01 09:13 — re-run after significant changes
 
 ---
 
@@ -183,7 +183,7 @@
   - class ChallengePayload
   - class StateUpdatePayload
   - class StateEventPayload
-  - _...12 more_
+  - _...13 more_
 - `pkg/peer/pty_manager.go`
   - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
@@ -192,7 +192,11 @@
   - function NewPTYRelay: () *PTYRelay
   - function GenerateStreamID: () string
   - class PTYRelay
-- `pkg/peer/session.go` — class SessionDeps
+- `pkg/peer/session.go`
+  - class SessionDeps
+  - interface LayoutSink
+  - interface BrowserBroadcaster
+  - interface LayoutSource
 - `pkg/peer/supervisor.go`
   - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor
   - class LinkSnapshot

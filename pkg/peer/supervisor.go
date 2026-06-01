@@ -82,6 +82,17 @@ func NewLinkSupervisor(deps SessionDeps) *LinkSupervisor {
 	}
 }
 
+// SetLayoutSink wires the layout store after construction. Safe to call once
+// during Run() bootstrap before any sessions land.
+func (s *LinkSupervisor) SetLayoutSink(sink LayoutSink) {
+	s.deps.LayoutSink = sink
+}
+
+// SetBrowserHub wires the browser-events hub after construction.
+func (s *LinkSupervisor) SetBrowserHub(hub BrowserBroadcaster) {
+	s.deps.BrowserHub = hub
+}
+
 // Start begins supervision. Spawns reconnectors for enabled dialer-side peers
 // and registers passive entries for listeners.
 func (s *LinkSupervisor) Start(ctx context.Context) {
