@@ -49,11 +49,11 @@
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `encoding/json` — imported by **21** files
-- `path/filepath` — imported by **20** files
-- `net/http` — imported by **10** files
+- `encoding/json` — imported by **22** files
+- `path/filepath` — imported by **21** files
+- `net/http` — imported by **11** files
+- `os/exec` — imported by **10** files
 - `web/src/lib/utils.ts` — imported by **10** files
-- `os/exec` — imported by **9** files
 - `web/src/hooks/usePreferences.ts` — imported by **9** files
 
 ## Required Environment Variables

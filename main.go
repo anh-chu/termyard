@@ -14,6 +14,7 @@ import (
 	_ "github.com/ekristen/guppi/pkg/commands/install"
 	_ "github.com/ekristen/guppi/pkg/commands/notify"
 	_ "github.com/ekristen/guppi/pkg/commands/server"
+	_ "github.com/ekristen/guppi/pkg/commands/update"
 )
 
 func main() {
