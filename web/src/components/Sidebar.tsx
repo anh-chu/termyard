@@ -27,6 +27,8 @@ interface SidebarProps {
   onRenameGroup?: (groupId: string, name: string) => void
   onPairSessions?: (keyA: string, keyB: string) => void
   onRemoveFromSplit?: (key: string) => void
+  pushLayout?: () => void
+  layoutVersion?: number
 }
 
 interface RenameState {
@@ -178,6 +180,8 @@ export function Sidebar({
   onRenameGroup,
   onPairSessions,
   onRemoveFromSplit,
+  pushLayout,
+  layoutVersion,
 }: SidebarProps) {
   const { prefs, updatePrefs } = usePreferences()
   const [hiddenSet, setHiddenSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:hidden-sessions')))
@@ -254,11 +258,13 @@ export function Sidebar({
 
   useEffect(() => {
     writeStoredList('guppi:hidden-sessions', [...hiddenSet])
-  }, [hiddenSet])
+    pushLayout?.()
+  }, [hiddenSet, pushLayout])
 
   useEffect(() => {
     writeStoredList('guppi:background-sessions', [...backgroundSet])
-  }, [backgroundSet])
+    pushLayout?.()
+  }, [backgroundSet, pushLayout])
 
   useEffect(() => {
     if (!prefs.sidebar.background_sessions) return
@@ -271,7 +277,26 @@ export function Sidebar({
 
   useEffect(() => {
     writeStoredList('guppi:session-order', manualOrder)
-  }, [manualOrder])
+    pushLayout?.()
+  }, [manualOrder, pushLayout])
+
+  // Re-hydrate from localStorage when a remote layout update arrives. The
+  // bg/order/hidden keys ride the layout-sync channel; layoutVersion bumps
+  // whenever a peer or another tab pushes new layout state.
+  useEffect(() => {
+    if (!layoutVersion) return
+    const nextHidden = new Set(readStoredList('guppi:hidden-sessions'))
+    const nextBackground = new Set(readStoredList('guppi:background-sessions'))
+    const nextOrder = readStoredList('guppi:session-order')
+    setHiddenSet(prev =>
+      [...prev].sort().join(',') === [...nextHidden].sort().join(',') ? prev : nextHidden,
+    )
+    setBackgroundSet(prev =>
+      [...prev].sort().join(',') === [...nextBackground].sort().join(',') ? prev : nextBackground,
+    )
+    setManualOrder(prev => (prev.join(',') === nextOrder.join(',') ? prev : nextOrder))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutVersion])
 
   useEffect(() => {
     writeStoredList('guppi:project-filters', projectFilters)
@@ -654,15 +679,14 @@ export function Sidebar({
             draggingKey === sk && 'opacity-75 cursor-grab',
           )}
         >
-          {stripeColor && (
+          {collapsed && stripeColor && (
             <span
-              className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-sm pointer-events-none"
+              className="absolute top-1 right-1 w-2 h-2 rounded-full pointer-events-none"
               style={{ backgroundColor: stripeColor }}
               title={hostLabel ? `Host: ${hostLabel}` : undefined}
               aria-label={hostLabel ? `Host: ${hostLabel}` : 'remote host'}
             />
           )}
-
           <div className="flex items-center gap-2 w-full">
             {!collapsed && bracketChar && (
               <span className="text-[11px] font-mono text-mute/60 select-none w-3 shrink-0">
@@ -670,6 +694,14 @@ export function Sidebar({
               </span>
             )}
             {!collapsed && <AgentMark agentType={agentType} className="h-4.5 min-w-8 px-1.5 shrink-0" />}
+            {!collapsed && stripeColor && (
+              <span
+                className="w-2 h-2 rounded-full shrink-0 pointer-events-none"
+                style={{ backgroundColor: stripeColor }}
+                title={hostLabel ? `Host: ${hostLabel}` : undefined}
+                aria-label={hostLabel ? `Host: ${hostLabel}` : 'remote host'}
+              />
+            )}
             {isRenaming ? (
               <input
                 ref={renameInputRef}

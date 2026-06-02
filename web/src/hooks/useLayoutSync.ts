@@ -28,6 +28,9 @@ const LAYOUT_KEYS = [
   'guppi:group-order',
   'guppi:sidebar-collapsed',
   'guppi:collapsed-groups',
+  'guppi:background-sessions',
+  'guppi:session-order',
+  'guppi:hidden-sessions',
 ] as const
 
 type LayoutPayload = Record<string, unknown>

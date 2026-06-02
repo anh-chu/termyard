@@ -1010,6 +1010,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             onRenameGroup={renameGroup}
             onPairSessions={handlePairSessions}
             onRemoveFromSplit={closePane}
+            pushLayout={pushLayout}
+            layoutVersion={layoutVersion}
           />
         )}
         <div
