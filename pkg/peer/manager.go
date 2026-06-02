@@ -43,6 +43,7 @@ type PeerConnection struct {
 
 	mu     sync.Mutex
 	send   chan *Message
+	done   chan struct{}
 	closed bool
 }
 
@@ -51,7 +52,15 @@ func NewPeerConnection(hostID string, bufSize int) *PeerConnection {
 	return &PeerConnection{
 		HostID: hostID,
 		send:   make(chan *Message, bufSize),
+		done:   make(chan struct{}),
 	}
+}
+
+// Done returns a channel that is closed when the connection is closed. Lets
+// consumers (e.g. the browser-input pump) react when the underlying peer link
+// dies and tear down dependent state instead of silently dropping messages.
+func (pc *PeerConnection) Done() <-chan struct{} {
+	return pc.done
 }
 
 // Enqueue best-effort queues a message. Returns true if accepted; false if
@@ -86,6 +95,7 @@ func (pc *PeerConnection) Close() {
 	}
 	pc.closed = true
 	close(pc.send)
+	close(pc.done)
 }
 
 // Manager aggregates state from local tmux and remote peers

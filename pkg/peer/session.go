@@ -72,7 +72,12 @@ type connWriter struct {
 func (w *connWriter) writeJSON(msg *Message) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.conn.WriteJSON(msg)
+	// Bound the write so a stuck/half-open peer socket can't block the writer
+	// goroutine indefinitely and silently back up the send queue.
+	_ = w.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	err := w.conn.WriteJSON(msg)
+	_ = w.conn.SetWriteDeadline(time.Time{})
+	return err
 }
 
 func (w *connWriter) writeControl(messageType int, data []byte, deadline time.Time) error {

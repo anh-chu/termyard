@@ -86,6 +86,24 @@ func (r *PTYRelay) DeliverOutput(streamID string, data []byte) bool {
 // shared control channel. Blocks until the browser side closes.
 func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn, pc *PeerConnection) {
 	log := logrus.WithField("stream", streamID)
+
+	// If the underlying peer link dies (redial, role flip, transient drop), pc
+	// is closed and Enqueue would silently drop every keystroke while output
+	// keeps flowing over the new link — the terminal looks alive but eats no
+	// input. Close the browser WS so the client's onclose fires and it
+	// reconnects, picking up the fresh peer connection. Without this the user
+	// has to manually switch sessions and back to recover.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-pc.Done():
+			log.Debug("peer connection closed; dropping browser WS to force reconnect")
+			_ = browserWS.Close()
+		case <-done:
+		}
+	}()
+
 	for {
 		msgType, data, err := browserWS.ReadMessage()
 		if err != nil {
