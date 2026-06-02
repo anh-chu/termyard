@@ -169,7 +169,7 @@
 - `web/src/hooks/useActivity.ts` — function useActivity: () => void, interface ActivitySnapshot
 - `web/src/hooks/useAuth.ts` — function useAuth: () => AuthState
 - `web/src/hooks/useHosts.ts` — function useHosts: () => void, interface Host
-- `web/src/hooks/useLayoutSync.ts` — function useLayoutSync: (authenticated) => void, const LAYOUT_CLIENT_ID
+- `web/src/hooks/useLayoutSync.ts` — function useLayoutSync: (authenticated, localFingerprint) => void, const LAYOUT_CLIENT_ID
 - `web/src/hooks/useNotifications.ts` — function useNotifications: (pushSubscribed) => void
 - `web/src/hooks/usePortForwards.ts`
   - function usePortForwards: () => void

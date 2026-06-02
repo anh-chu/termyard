@@ -373,9 +373,10 @@ func Run(ctx context.Context, opts *Options) error {
 		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
 	}
 
-	// Wire cross-machine layout sync. The peer subsystem can now apply
-	// inbound MsgLayoutSync to our local layout store, and bounce
-	// layout-updated through the browser hub.
+	// Wire cross-machine layout sync. The peer subsystem applies inbound
+	// MsgLayoutSync to our local layout store and bounces layout-updated
+	// through the browser hub. The synced blob is in the global session
+	// namespace; the frontend owns local<->global key translation.
 	if opts.LayoutStore != nil {
 		sink := layoutStoreAdapter{store: opts.LayoutStore}
 		if opts.LinkSupervisor != nil {
@@ -1041,8 +1042,11 @@ func Run(ctx context.Context, opts *Options) error {
 					"data":       updated.Data,
 				})
 				// Fan out to paired peers so other machines in the mesh mirror
-				// this layout. Origin = our local fingerprint so receivers can
-				// detect their own echoes if the link path loops.
+				// this layout. The payload is in a machine-independent GLOBAL
+				// session namespace (every session keyed as <owner-fp>/<name>);
+				// the frontend translates to/from device-local keys at the edge.
+				// Origin = our local fingerprint so receivers can detect their
+				// own echoes if the link path loops.
 				fanoutLayoutToPeers(opts, updated)
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(updated)

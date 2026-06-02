@@ -162,7 +162,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   // Layout sync — mirrors viewport state to the server so other tabs/devices
   // see the same pane tree, saved groups, sidebar state, etc.
-  const { version: layoutVersion, pushNow: pushLayout, applyRemote: applyRemoteLayout } = useLayoutSync(true)
+  const { version: layoutVersion, pushNow: pushLayout, applyRemote: applyRemoteLayout } = useLayoutSync(true, localHostId ?? null)
 
   // When the server tells us another tab updated the layout, re-hydrate our
   // React state from the freshly written localStorage values.
