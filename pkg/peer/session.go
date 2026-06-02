@@ -160,7 +160,7 @@ func runSession(
 	go periodicActivity(sessionCtx, pc, deps)
 	go periodicStats(sessionCtx, pc, deps)
 	go forwardStateEvents(sessionCtx, pc, deps)
-	go forwardToolEvents(sessionCtx, pc, deps)
+	go forwardToolEvents(sessionCtx, pc, deps, peerID)
 	go forwardPeerStateChanges(sessionCtx, pc, deps, peerID)
 
 	_ = role
@@ -323,7 +323,7 @@ func forwardStateEvents(ctx context.Context, pc *PeerConnection, deps SessionDep
 	}
 }
 
-func forwardToolEvents(ctx context.Context, pc *PeerConnection, deps SessionDeps) {
+func forwardToolEvents(ctx context.Context, pc *PeerConnection, deps SessionDeps, remotePeerID string) {
 	ch := deps.ToolTracker.Subscribe()
 	defer deps.ToolTracker.Unsubscribe(ch)
 	for {
@@ -333,6 +333,18 @@ func forwardToolEvents(ctx context.Context, pc *PeerConnection, deps SessionDeps
 		case evt, ok := <-ch:
 			if !ok {
 				return
+			}
+			// Don't echo the peer's own events back — this would create a
+			// ping-pong loop: peer A's event arrives, gets stamped Host=A,
+			// records locally, broadcasts to subscribers, and would forward
+			// straight back to A, which re-stamps and re-forwards forever.
+			if evt.Host == remotePeerID {
+				continue
+			}
+			// Only forward our own local-origin events; we don't transitively
+			// relay other peers' events.
+			if evt.Host != "" && evt.Host != deps.Manager.LocalID() {
+				continue
 			}
 			msg, err := NewMessage(MsgToolEvent, ToolEventPayload{Event: evt})
 			if err != nil {
