@@ -183,7 +183,7 @@ export function Sidebar({
   pushLayout,
   layoutVersion,
 }: SidebarProps) {
-  const { prefs, updatePrefs } = usePreferences()
+  const { prefs } = usePreferences()
   const [hiddenSet, setHiddenSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:hidden-sessions')))
   const [backgroundSet, setBackgroundSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:background-sessions')))
   const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('guppi:session-order'))
@@ -256,45 +256,36 @@ export function Sidebar({
     return () => window.removeEventListener('click', handler)
   }, [contextMenu, filterOpen])
 
+  // hidden-sessions: per-device personal view. NOT synced.
   useEffect(() => {
     writeStoredList('guppi:hidden-sessions', [...hiddenSet])
-    pushLayout?.()
-  }, [hiddenSet, pushLayout])
+  }, [hiddenSet])
 
+  // background-sessions: a SHARED session attribute ("this session is
+  // parked") mirrored across machines via the layout-sync channel. This is
+  // the single writer — pushLayout() debounces a PUT + peer fanout. We no
+  // longer double-write to server preferences (that caused two competing
+  // sources of truth).
   useEffect(() => {
     writeStoredList('guppi:background-sessions', [...backgroundSet])
     pushLayout?.()
   }, [backgroundSet, pushLayout])
 
-  useEffect(() => {
-    if (!prefs.sidebar.background_sessions) return
-    const fromServer = new Set(prefs.sidebar.background_sessions)
-    if ([...fromServer].sort().join(',') !== [...backgroundSet].sort().join(',')) {
-      setBackgroundSet(fromServer)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefs.sidebar.background_sessions])
-
+  // session-order: per-device manual ordering. NOT synced.
   useEffect(() => {
     writeStoredList('guppi:session-order', manualOrder)
-    pushLayout?.()
-  }, [manualOrder, pushLayout])
+  }, [manualOrder])
 
-  // Re-hydrate from localStorage when a remote layout update arrives. The
-  // bg/order/hidden keys ride the layout-sync channel; layoutVersion bumps
-  // whenever a peer or another tab pushes new layout state.
+  // Re-hydrate the shared background set when a remote update arrives.
+  // layoutVersion bumps whenever a peer or another tab pushes new shared
+  // state. hidden-sessions and session-order are per-device, so they are
+  // NOT re-hydrated here.
   useEffect(() => {
     if (!layoutVersion) return
-    const nextHidden = new Set(readStoredList('guppi:hidden-sessions'))
     const nextBackground = new Set(readStoredList('guppi:background-sessions'))
-    const nextOrder = readStoredList('guppi:session-order')
-    setHiddenSet(prev =>
-      [...prev].sort().join(',') === [...nextHidden].sort().join(',') ? prev : nextHidden,
-    )
     setBackgroundSet(prev =>
       [...prev].sort().join(',') === [...nextBackground].sort().join(',') ? prev : nextBackground,
     )
-    setManualOrder(prev => (prev.join(',') === nextOrder.join(',') ? prev : nextOrder))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutVersion])
 
@@ -366,8 +357,8 @@ export function Sidebar({
         onRemoveFromSplit?.(key)
       }
     }
+    // Single writer: the backgroundSet effect persists + syncs via pushLayout.
     setBackgroundSet(next)
-    updatePrefs({ sidebar: { ...prefs.sidebar, background_sessions: [...next] } })
     setContextMenu(null)
   }
 
@@ -442,9 +433,7 @@ export function Sidebar({
         if (manualOrder.includes(oldKey)) {
           setManualOrder(current => current.map(key => key === oldKey ? newKey : key))
         }
-        if (nextBackground !== backgroundSet) {
-          updatePrefs({ sidebar: { ...prefs.sidebar, background_sessions: [...nextBackground] } })
-        }
+        // backgroundSet effect persists + syncs; no separate prefs write.
         onSessionRenamed?.(oldKey, newKey)
       }
     } catch (err) {

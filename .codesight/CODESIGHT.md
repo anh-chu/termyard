@@ -4,7 +4,7 @@
 
 > 87 routes | 0 models | 15 components | 61 lib files | 7 env vars | 1 middleware | 7% test coverage
 > **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~76,200 tokens. **Saves ~70,500 tokens per conversation.**
-> **Last scanned:** 2026-06-02 04:51 — re-run after significant changes
+> **Last scanned:** 2026-06-02 05:09 — re-run after significant changes
 
 ---
 
@@ -377,12 +377,12 @@
 - `web/src/hooks/useHosts.ts` — imported by **5** files
 - `encoding/hex` — imported by **4** files
 - `net/url` — imported by **4** files
-- `web/src/lib/paneTree.ts` — imported by **3** files
 - `web/src/hooks/useActivity.ts` — imported by **3** files
 - `web/src/hooks/usePushNotifications.ts` — imported by **3** files
 - `compress/gzip` — imported by **2** files
 - `net/http/httptest` — imported by **2** files
 - `web/src/components/Terminal.tsx` — imported by **2** files
+- `web/src/lib/paneTree.ts` — imported by **2** files
 
 ## Import Map (who imports what)
 

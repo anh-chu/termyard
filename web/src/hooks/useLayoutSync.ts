@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import type { PaneTree } from '../lib/paneTree'
 
 // Generate a stable per-tab client ID so we can ignore our own echoes when
 // the server broadcasts layout-updated.
@@ -17,21 +16,19 @@ function makeClientId(): string {
 
 export const LAYOUT_CLIENT_ID = makeClientId()
 
-// Keys whose values we mirror to the server-side layout store. The server
-// is opaque about the shape — it just persists and broadcasts. Frontend
-// owns the schema.
-const LAYOUT_KEYS = [
-  'guppi:pane-tree',
-  'guppi:active-key',
-  'guppi:saved-groups',
-  'guppi:active-group-id',
-  'guppi:active-group-name',
-  'guppi:group-order',
-  'guppi:sidebar-collapsed',
-  'guppi:collapsed-groups',
+// Keys mirrored to the server-side store and fanned out to paired peers.
+//
+// IMPORTANT: this channel carries SHARED SESSION ATTRIBUTES only — facts about
+// a session that are true on every machine. Viewport/layout state (pane-tree,
+// active-key, saved-groups, group-order, sidebar-collapsed, collapsed-groups,
+// session-order, hidden-sessions) is intentionally NOT here: it describes
+// "what's on MY screen" and is per-device. Mirroring viewport across two
+// physical screens made them fight over one layout and froze drag/selection.
+//
+// background-sessions = "this session is parked". That's a property of the
+// session, meaningful everywhere, so it is safe to share.
+const SHARED_KEYS = [
   'guppi:background-sessions',
-  'guppi:session-order',
-  'guppi:hidden-sessions',
 ] as const
 
 type LayoutPayload = Record<string, unknown>
@@ -49,12 +46,12 @@ type RemoteLayout = {
 // machine is the bare name ("foo"); a session owned by a peer is host-prefixed
 // ("<peer-fp>/foo"). Two machines therefore disagree on what "foo" means.
 //
-// To mirror layout across machines we serialize in a GLOBAL namespace where
+// To share attributes across machines we serialize in a GLOBAL namespace where
 // EVERY session is "<owner-fp>/<name>". The local machine's own sessions get
 // our fingerprint prefixed on the way out and stripped on the way in. Peer
 // keys are already global and pass through untouched. The round-trip
 // (global -> local -> global) is the identity, which is what kills the
-// last-write-wins push/echo loop: re-serializing an applied remote layout
+// last-write-wins push/echo loop: re-serializing an applied remote payload
 // yields the exact bytes we received, so pushNow() short-circuits.
 // ---------------------------------------------------------------------------
 
@@ -80,38 +77,12 @@ function toLocalKey(globalKey: string, fp: string): string {
   return host === fp ? name : globalKey
 }
 
-function mapTreeKeys(tree: PaneTree | null, fn: (k: string) => string): PaneTree | null {
-  if (!tree) return tree
-  if (tree.type === 'leaf') return { ...tree, sessionKey: fn(tree.sessionKey) }
-  return {
-    ...tree,
-    first: mapTreeKeys(tree.first, fn) as PaneTree,
-    second: mapTreeKeys(tree.second, fn) as PaneTree,
-  }
-}
-
-type SavedGroup = { id: string; tree: PaneTree; activeKey: string | null; name?: string }
-
-// Translate every session-key-bearing field in a layout payload through fn.
-// Group ids/names/order, sidebar-collapsed, and collapsed-groups carry no
-// session keys and pass through unchanged.
-function translateLayout(data: LayoutPayload, fn: (k: string) => string): LayoutPayload {
+// Translate every shared key (all flat string arrays of session keys) through
+// fn. Keeping the shared set to flat arrays keeps this trivial — no recursive
+// pane-tree / saved-group walking.
+function translateShared(data: LayoutPayload, fn: (k: string) => string): LayoutPayload {
   const out: LayoutPayload = { ...data }
-
-  if ('guppi:pane-tree' in out) {
-    out['guppi:pane-tree'] = mapTreeKeys((out['guppi:pane-tree'] as PaneTree | null) ?? null, fn)
-  }
-  if (typeof out['guppi:active-key'] === 'string' && out['guppi:active-key']) {
-    out['guppi:active-key'] = fn(out['guppi:active-key'] as string)
-  }
-  if (Array.isArray(out['guppi:saved-groups'])) {
-    out['guppi:saved-groups'] = (out['guppi:saved-groups'] as SavedGroup[]).map(g => ({
-      ...g,
-      tree: mapTreeKeys(g.tree, fn) as PaneTree,
-      activeKey: g.activeKey ? fn(g.activeKey) : g.activeKey,
-    }))
-  }
-  for (const k of ['guppi:background-sessions', 'guppi:session-order', 'guppi:hidden-sessions'] as const) {
+  for (const k of SHARED_KEYS) {
     if (Array.isArray(out[k])) {
       out[k] = (out[k] as string[]).map(fn)
     }
@@ -136,13 +107,12 @@ function canonical(value: unknown): string {
   })
 }
 
-function readLocalLayout(): LayoutPayload {
+function readShared(): LayoutPayload {
   const out: LayoutPayload = {}
-  for (const k of LAYOUT_KEYS) {
+  for (const k of SHARED_KEYS) {
     try {
       const raw = localStorage.getItem(k)
       if (raw == null) continue
-      // Try to parse as JSON; fall back to string.
       try { out[k] = JSON.parse(raw) }
       catch { out[k] = raw }
     } catch {}
@@ -150,9 +120,9 @@ function readLocalLayout(): LayoutPayload {
   return out
 }
 
-function writeLocalLayout(data: LayoutPayload | null) {
+function writeShared(data: LayoutPayload | null) {
   if (!data) return
-  for (const k of LAYOUT_KEYS) {
+  for (const k of SHARED_KEYS) {
     if (!(k in data)) continue
     try {
       const v = data[k]
@@ -166,13 +136,13 @@ function writeLocalLayout(data: LayoutPayload | null) {
   }
 }
 
-// useLayoutSync wires layout localStorage keys to the server-side layout
-// store. It returns a `pushNow` function that schedules a debounced PUT, and
-// a `version` counter that bumps whenever a remote update arrives so the
-// containing component can re-read localStorage and update its React state.
+// useLayoutSync wires the shared-session-attribute localStorage keys to the
+// server-side store. It returns a `pushNow` function that schedules a debounced
+// PUT, and a `version` counter that bumps whenever a remote update arrives so
+// the containing component can re-read localStorage and update React state.
 //
 // `localFingerprint` is this machine's identity fingerprint. It is required
-// for cross-machine mirroring (local<->global key translation); until it is
+// for cross-machine sharing (local<->global key translation); until it is
 // known, sync is held off so we never persist/transmit half-translated keys.
 export function useLayoutSync(authenticated: boolean, localFingerprint: string | null) {
   const [version, setVersion] = useState(0)
@@ -198,14 +168,14 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
         if (body.data && Object.keys(body.data).length > 0) {
           // Remote payload is global -> translate to local before storing.
           const global = body.data as LayoutPayload
-          writeLocalLayout(translateLayout(global, k => toLocalKey(k, fp)))
+          writeShared(translateShared(global, k => toLocalKey(k, fp)))
           lastSerializedRef.current = canonical(global)
           setVersion(v => v + 1)
         } else {
           // Server is empty; push current local state up as the seed (global).
-          const local = readLocalLayout()
+          const local = readShared()
           if (Object.keys(local).length > 0) {
-            const global = translateLayout(local, k => toGlobalKey(k, fp))
+            const global = translateShared(local, k => toGlobalKey(k, fp))
             await fetch('/api/layout', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
@@ -219,30 +189,30 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
     return () => { cancelled = true }
   }, [ready])
 
-  // Apply a remote layout update (from /ws/events). `data` is in the GLOBAL
-  // namespace; translate to local keys before writing localStorage.
+  // Apply a remote update (from /ws/events). `data` is in the GLOBAL namespace;
+  // translate to local keys before writing localStorage.
   const applyRemote = useCallback((data: LayoutPayload, clientId?: string) => {
     if (clientId && clientId === LAYOUT_CLIENT_ID) return // own echo (same tab)
     const fp = fpRef.current
     if (!fp) return // can't translate yet — drop; initial fetch will reconcile
     const next = canonical(data)
     if (next === lastSerializedRef.current) return
-    writeLocalLayout(translateLayout(data, k => toLocalKey(k, fp)))
+    writeShared(translateShared(data, k => toLocalKey(k, fp)))
     lastSerializedRef.current = next
     setVersion(v => v + 1)
   }, [])
 
-  // Schedule a debounced PUT of the current localStorage state (translated to
-  // the global namespace).
+  // Schedule a debounced PUT of the current shared state (translated to the
+  // global namespace).
   const pushNow = useCallback(() => {
     if (!authenticated) return
     const fp = fpRef.current
     if (!fp) return
     window.clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(async () => {
-      const global = translateLayout(readLocalLayout(), k => toGlobalKey(k, fp))
+      const global = translateShared(readShared(), k => toGlobalKey(k, fp))
       const serialized = canonical(global)
-      // Short-circuit: re-pushing an applied remote layout yields identical
+      // Short-circuit: re-pushing an applied remote payload yields identical
       // canonical bytes (global round-trips), so the echo loop terminates.
       if (serialized === lastSerializedRef.current) return
       if (inFlightRef.current) {
@@ -276,7 +246,7 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
       if (!authenticated) return
       const fp = fpRef.current
       if (!fp) return
-      const global = translateLayout(readLocalLayout(), k => toGlobalKey(k, fp))
+      const global = translateShared(readShared(), k => toGlobalKey(k, fp))
       const serialized = canonical(global)
       if (serialized === lastSerializedRef.current) return
       try {

@@ -164,42 +164,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   // see the same pane tree, saved groups, sidebar state, etc.
   const { version: layoutVersion, pushNow: pushLayout, applyRemote: applyRemoteLayout } = useLayoutSync(true, localHostId ?? null)
 
-  // When the server tells us another tab updated the layout, re-hydrate our
-  // React state from the freshly written localStorage values.
-  useEffect(() => {
-    if (layoutVersion === 0) return
-    try {
-      const tree = localStorage.getItem('guppi:pane-tree')
-      const ak = localStorage.getItem('guppi:active-key')
-      if (tree) {
-        const parsed = JSON.parse(tree) as PaneTree
-        setPaneTree(parsed)
-        setSingleView(null)
-        if (ak) setActiveKey(ak)
-      } else {
-        setPaneTree(null)
-      }
-    } catch {}
-    try {
-      const sg = localStorage.getItem('guppi:saved-groups')
-      if (sg) setSavedGroups(JSON.parse(sg))
-    } catch {}
-    try {
-      const gid = localStorage.getItem('guppi:active-group-id')
-      if (gid) setActiveGroupId(gid)
-    } catch {}
-    try {
-      const gn = localStorage.getItem('guppi:active-group-name') || ''
-      setActiveGroupName(gn)
-    } catch {}
-    try {
-      const go = localStorage.getItem('guppi:group-order')
-      if (go) setGroupOrder(JSON.parse(go))
-    } catch {}
-    try {
-      setSidebarCollapsed(localStorage.getItem('guppi:sidebar-collapsed') === 'true')
-    } catch {}
-  }, [layoutVersion])
+  // NOTE: layoutVersion bumps when a peer/tab pushes a SHARED SESSION
+  // ATTRIBUTE (currently background-sessions). It is consumed by Sidebar to
+  // re-hydrate that set. Viewport state (pane-tree, active-key, saved-groups,
+  // group-order, sidebar-collapsed) is intentionally NOT re-hydrated here:
+  // it is per-device. Mirroring viewport across two physical screens made
+  // them fight over one layout and froze drag/selection.
 
   // Auto-lock: idle detection + optional background accelerator
   const lastActivityRef = useRef<number>(Date.now())
@@ -244,13 +214,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     }
   }, [onLogout, prefs.lock_timeout_minutes, prefs.lock_background_faster, prefs.lock_background_minutes])
 
-  // Persist sidebar state + sync.
+  // Persist sidebar state across reloads. Per-device — NOT synced.
   useEffect(() => {
     localStorage.setItem('guppi:sidebar-collapsed', String(sidebarCollapsed))
-    pushLayout()
-  }, [sidebarCollapsed, pushLayout])
+  }, [sidebarCollapsed])
 
-  // Persist pane tree across reloads + sync.
+  // Persist pane tree across reloads. Per-device — NOT synced.
   useEffect(() => {
     try {
       if (paneTree) {
@@ -261,10 +230,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         localStorage.removeItem('guppi:active-key')
       }
     } catch {}
-    pushLayout()
-  }, [paneTree, activeKey, pushLayout])
+  }, [paneTree, activeKey])
 
-  // Persist saved groups across reloads + sync.
+  // Persist saved groups across reloads. Per-device — NOT synced.
   useEffect(() => {
     try {
       localStorage.setItem('guppi:saved-groups', JSON.stringify(savedGroups))
@@ -272,8 +240,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       localStorage.setItem('guppi:active-group-name', activeGroupName)
       localStorage.setItem('guppi:group-order', JSON.stringify(groupOrder))
     } catch {}
-    pushLayout()
-  }, [savedGroups, activeGroupId, activeGroupName, groupOrder, pushLayout])
+  }, [savedGroups, activeGroupId, activeGroupName, groupOrder])
 
   // Sync URL -> state on popstate (back/forward)
   useEffect(() => {
