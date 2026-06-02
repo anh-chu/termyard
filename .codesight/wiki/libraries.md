@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**61 library files** across 2 modules
+**62 library files** across 2 modules
 
 ## Pkg (45 files)
 
@@ -33,13 +33,14 @@
 - `pkg/stats/stats.go` — SystemStats, ProcessCountsFromSessions, ProcessEntry
 - _…and 20 more files_
 
-## Web (16 files)
+## Web (17 files)
 
 - `web/src/lib/paneTree.ts` — getLeaves, findLeaf, splitLeaf, removeLeaf, replaceLeaf, updateRatio, …
 - `web/src/hooks/useSessions.ts` — sessionKey, parseSessionKey, useSessions, Pane, Window, Session
 - `web/src/theme.ts` — applyTheme, getXtermTheme, ThemePreset, toolColors, statusConfig, themePresets
 - `web/src/hooks/usePreferences.ts` — usePreferencesProvider, usePreferences, Preferences, defaultPreferences, PreferencesContext
 - `web/src/hooks/usePortForwards.ts` — usePortForwards, PortForward, ForwardMode
+- `web/src/lib/shortcuts.ts` — getShortcuts, ShortcutItem, modKey
 - `web/src/hooks/useActivity.ts` — useActivity, ActivitySnapshot
 - `web/src/hooks/useHosts.ts` — useHosts, Host
 - `web/src/hooks/useLayoutSync.ts` — useLayoutSync, LAYOUT_CLIENT_ID

@@ -5,6 +5,7 @@ import { themePresets, applyTheme } from '../theme'
 import { cn } from '../lib/utils'
 import { AgentStatusList, SetupCommandBox } from './Setup'
 import { ConnectPeerModal } from './ConnectPeerModal'
+import { getShortcuts } from '../lib/shortcuts'
 
 type PeerSnapshot = {
   public_key: string
@@ -61,7 +62,7 @@ const customizableVars = [
   { key: '--destructive', label: 'Destructive' },
 ]
 
-const sectionIds = ['appearance', 'terminal', 'interface', 'notifications', 'agents', 'peers', 'security'] as const
+const sectionIds = ['appearance', 'terminal', 'interface', 'shortcuts', 'notifications', 'agents', 'peers', 'security'] as const
 
 function Section({ id, title, description, children }: { id: string; title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -147,6 +148,14 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   )
 }
 
+function Kbd({ children }: { children: string }) {
+  return (
+    <kbd className="inline-flex items-center justify-center min-w-[28px] h-6 px-1.5 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] text-mute text-xs font-mono font-bold">
+      {children}
+    </kbd>
+  )
+}
+
 function ColorInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <input
@@ -184,6 +193,7 @@ const sectionLabels: Record<typeof sectionIds[number], string> = {
   appearance: 'Appearance',
   terminal: 'Terminal',
   interface: 'Interface',
+  shortcuts: 'Shortcuts',
   notifications: 'Notifications',
   agents: 'Agents',
   peers: 'Machines',
@@ -601,6 +611,29 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 onChange={(v) => update({ sparklines_visible: v })}
               />
             </Row>
+          </Section>
+
+          {/* ── Shortcuts ── */}
+          <Section id="shortcuts" title="Shortcuts" description="Keyboard shortcuts reference. Combos are chosen to avoid browser and terminal conflicts.">
+            {getShortcuts().map((item, i) => {
+              if ('section' in item) {
+                return (
+                  <div key={i} className={cn('text-[11px] font-bold text-primary uppercase tracking-widest', i > 0 && 'mt-4')}>
+                    {item.section}
+                  </div>
+                )
+              }
+              return (
+                <div key={i} className="flex items-center justify-between gap-6 py-1">
+                  <span className="text-[13px] font-semibold text-ink tracking-tight">{item.label}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {item.keys.map((k, j) => (
+                      <Kbd key={j}>{k}</Kbd>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
           </Section>
 
           {/* ── Notifications ── */}

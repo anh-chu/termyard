@@ -2,9 +2,9 @@
 
 > **Stack:** chi | none | react | go
 
-> 87 routes | 0 models | 15 components | 61 lib files | 7 env vars | 1 middleware | 7% test coverage
-> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~76,200 tokens. **Saves ~70,500 tokens per conversation.**
-> **Last scanned:** 2026-06-02 07:52 — re-run after significant changes
+> 87 routes | 0 models | 15 components | 62 lib files | 7 env vars | 1 middleware | 7% test coverage
+> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~76,500 tokens. **Saves ~70,700 tokens per conversation.**
+> **Last scanned:** 2026-06-02 09:10 — re-run after significant changes
 
 ---
 
@@ -322,6 +322,10 @@
   - function replaceLeaf: (tree, oldKey, newKey) => PaneTree
   - function updateRatio: (tree, path, ratio) => PaneTree
   - _...7 more_
+- `web/src/lib/shortcuts.ts`
+  - function getShortcuts: () => ShortcutItem[]
+  - type ShortcutItem
+  - const modKey
 - `web/src/lib/utils.ts` — function cn: (...inputs) => void
 - `web/src/theme.ts`
   - function applyTheme: (themeName, customTheme?, string>) => void

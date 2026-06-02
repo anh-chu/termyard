@@ -243,14 +243,31 @@ export function useTerminal(sessionName: string, hostId?: string) {
           return false
         }
       }
-      // Don't let xterm process global app shortcuts (help, sidebar, settings, split pane)
+      // Don't let xterm process global app shortcuts — let them bubble to the
+      // window-level tinykeys handler in App.tsx / Terminal fullscreen handler.
+      // Keep this list in sync with the bindings registered there.
       if (e.type === 'keydown' && (e.metaKey || e.ctrlKey)) {
         const key = e.key.toLowerCase()
-        if (!e.shiftKey && (key === ',' || key === '\\')) {
-          return false
-        }
-        if (e.shiftKey && (key === '/' || key === '?' || key === '\\')) {
-          return false
+        if (!e.shiftKey) {
+          // Settings (,), sidebar (\), help (/ or ?)
+          if (key === ',' || key === '\\' || key === '/' || key === '?') {
+            return false
+          }
+        } else {
+          // Shift family: help (/ or ?), split (\), quick switcher (k),
+          // overview (h), fullscreen (f), cycle sessions (arrows)
+          if (
+            key === '/' ||
+            key === '?' ||
+            key === '\\' ||
+            key === 'k' ||
+            key === 'h' ||
+            key === 'f' ||
+            e.key === 'ArrowLeft' ||
+            e.key === 'ArrowRight'
+          ) {
+            return false
+          }
         }
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'c' && e.type === 'keydown') {

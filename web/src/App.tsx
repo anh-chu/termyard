@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { tinykeys } from 'tinykeys'
 import { Sidebar } from './components/Sidebar'
 import { Terminal } from './components/Terminal'
 import { Overview } from './components/Overview'
@@ -427,104 +428,86 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     setNewSessionModalOpen(true)
   }, [])
 
-  // Global keyboard shortcuts
+  // Global keyboard shortcuts (tinykeys). $mod = Cmd on macOS, Ctrl elsewhere.
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey
+    const cycle = (dir: 1 | -1) => {
+      const skeys: string[] = []
+      document
+        .querySelectorAll('[data-session-key]')
+        .forEach(el => skeys.push(el.getAttribute('data-session-key')!))
+      if (skeys.length === 0) return
+      const current = selectedSessionRef.current
+      const idx = current ? skeys.indexOf(current) : -1
+      const nextIdx =
+        dir === 1
+          ? idx >= 0
+            ? (idx + 1) % skeys.length
+            : 0
+          : idx > 0
+            ? idx - 1
+            : skeys.length - 1
+      const targetKey = skeys[nextIdx]
+      // If target belongs to a saved group, switch to that group first
+      const group = savedGroupsRef.current.find(g => findLeaf(g.tree, targetKey))
+      if (group) {
+        switchToGroupRef.current?.(group.id)
+        setActiveKeyRef.current(targetKey)
+        const { host, name } = parseSessionKey(targetKey)
+        const path = host
+          ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
+          : `/session/${encodeURIComponent(name)}`
+        if (window.location.pathname !== path) window.history.pushState(null, '', path)
+      } else {
+        selectSessionRef.current?.(targetKey)
+      }
+    }
 
-      // Help: Cmd/Ctrl + ? or Cmd/Ctrl + / (Linux Ctrl+Shift+/ often doesn't produce '?')
-      if (mod && (e.key === '?' || e.key === '/' || (e.shiftKey && e.code === 'Slash'))) {
+    const handler =
+      (fn: (e: KeyboardEvent) => void) => (e: KeyboardEvent) => {
         e.preventDefault()
-        setHelpOpen(prev => !prev)
-        return
+        fn(e)
       }
 
+    // The terminal owns the keyboard. useTerminal() (attachCustomKeyEventHandler)
+    // already decides which $mod combos escape xterm and bubble here — that
+    // narrow whitelist IS the gate. So we must NOT let tinykeys' default ignore
+    // drop events originating from the xterm helper textarea, or whitelisted
+    // shortcuts would silently fail while a session is focused. Other form
+    // inputs (modals, settings) keep the default ignore behaviour.
+    const ignore = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest?.('.xterm')) return false
+      return (
+        e.repeat ||
+        e.isComposing ||
+        (target !== e.currentTarget &&
+          !!target?.matches?.('[contenteditable],input,select,textarea'))
+      )
+    }
+
+    return tinykeys(window, {
+      // Help: Cmd/Ctrl + / (Slash). Shift+Slash ('?') handled by same physical key.
+      '$mod+Slash': handler(() => setHelpOpen(prev => !prev)),
+      '$mod+Shift+Slash': handler(() => setHelpOpen(prev => !prev)),
       // Toggle sidebar: Cmd/Ctrl + \
-      if (mod && e.key === '\\') {
-        e.preventDefault()
-        setSidebarCollapsed(c => !c)
-        return
-      }
-
+      '$mod+Backslash': handler(() => setSidebarCollapsed(c => !c)),
       // Settings: Cmd/Ctrl + ,
-      if (mod && e.key === ',') {
-        e.preventDefault()
-        navigateTo(null, 'settings')
-        return
-      }
-
+      '$mod+Comma': handler(() => navigateTo(null, 'settings')),
       // Split pane: Cmd/Ctrl + Shift + \
-      if (mod && e.shiftKey && e.key === '\\') {
-        e.preventDefault()
+      '$mod+Shift+Backslash': handler(() => {
         if (activeKey !== null) {
           splitTargetRef.current = { key: activeKey, direction: 'h' }
           openNewSessionModal()
         }
-        return
-      }
-
-      // Quick Switcher: Cmd/Ctrl + K
-      if (mod && e.key === 'k') {
-        e.preventDefault()
-        setQuickSwitcherOpen(true)
-        return
-      }
-
-      // Overview: Cmd/Ctrl + Shift + O
-      if (mod && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
-        e.preventDefault()
-        navigateTo(null)
-        return
-      }
-
-      const cycleTo = (targetKey: string) => {
-        // If target belongs to a saved group, switch to that group first
-        const group = savedGroupsRef.current.find(g => findLeaf(g.tree, targetKey))
-        if (group) {
-          switchToGroupRef.current?.(group.id)
-          setActiveKeyRef.current(targetKey)
-          const { host, name } = parseSessionKey(targetKey)
-          const path = host
-            ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
-            : `/session/${encodeURIComponent(name)}`
-          if (window.location.pathname !== path) window.history.pushState(null, '', path)
-        } else {
-          selectSessionRef.current?.(targetKey)
-        }
-      }
-
-      // Cycle sessions: Cmd/Ctrl + Shift + ]
-      if (mod && e.shiftKey && (e.key === ']' || e.code === 'BracketRight')) {
-        e.preventDefault()
-        const els = document.querySelectorAll('[data-session-key]')
-        const skeys: string[] = []
-        els.forEach(el => skeys.push(el.getAttribute('data-session-key')!))
-        if (skeys.length > 0) {
-          const current = selectedSessionRef.current
-          const idx = current ? skeys.indexOf(current) : -1
-          const nextIdx = idx >= 0 ? (idx + 1) % skeys.length : 0
-          cycleTo(skeys[nextIdx])
-        }
-        return
-      }
-
-      // Cycle sessions: Cmd/Ctrl + Shift + [
-      if (mod && e.shiftKey && (e.key === '[' || e.code === 'BracketLeft')) {
-        e.preventDefault()
-        const els = document.querySelectorAll('[data-session-key]')
-        const skeys: string[] = []
-        els.forEach(el => skeys.push(el.getAttribute('data-session-key')!))
-        if (skeys.length > 0) {
-          const current = selectedSessionRef.current
-          const idx = current ? skeys.indexOf(current) : -1
-          const prevIdx = idx > 0 ? idx - 1 : skeys.length - 1
-          cycleTo(skeys[prevIdx])
-        }
-        return
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+      }),
+      // Quick Switcher: Cmd/Ctrl + Shift + K (K alone collides w/ Firefox search bar)
+      '$mod+Shift+k': handler(() => setQuickSwitcherOpen(true)),
+      // Overview: Cmd/Ctrl + Shift + H (Shift+O collides w/ Firefox bookmarks)
+      '$mod+Shift+h': handler(() => navigateTo(null)),
+      // Cycle sessions: Cmd/Ctrl + Shift + Arrow (Shift+[ / ] switches browser tabs)
+      '$mod+Shift+ArrowRight': handler(() => cycle(1)),
+      '$mod+Shift+ArrowLeft': handler(() => cycle(-1)),
+    }, { ignore })
   }, [navigateTo, activeKey, openNewSessionModal])
 
   // Listen for state events via WebSocket

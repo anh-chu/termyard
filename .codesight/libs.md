@@ -201,6 +201,10 @@
   - function replaceLeaf: (tree, oldKey, newKey) => PaneTree
   - function updateRatio: (tree, path, ratio) => PaneTree
   - _...7 more_
+- `web/src/lib/shortcuts.ts`
+  - function getShortcuts: () => ShortcutItem[]
+  - type ShortcutItem
+  - const modKey
 - `web/src/lib/utils.ts` — function cn: (...inputs) => void
 - `web/src/theme.ts`
   - function applyTheme: (themeName, customTheme?, string>) => void
