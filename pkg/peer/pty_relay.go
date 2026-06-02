@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -123,6 +124,23 @@ func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn,
 				log.Debug("pty-input queue full, dropping")
 			}
 		case websocket.TextMessage:
+			// Heartbeat from the browser liveness watchdog terminates here — the
+			// browser↔server edge socket is what goes half-open, not the peer
+			// link — so answer locally instead of round-tripping to the peer.
+			if bytes.Contains(data, []byte(`"ping"`)) {
+				r.mu.RLock()
+				s := r.streams[streamID]
+				r.mu.RUnlock()
+				if s != nil {
+					s.writeMu.Lock()
+					err := s.browserWS.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
+					s.writeMu.Unlock()
+					if err != nil {
+						return
+					}
+				}
+				continue
+			}
 			// Forward as a resize/control message. The remote side uses
 			// HandlePTYControlMessage which parses JSON, so wrap it in a
 			// MsgPTYInput envelope tagged as control via a magic prefix is

@@ -1,8 +1,10 @@
 package ws
 
 import (
+	"bytes"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
@@ -10,6 +12,15 @@ import (
 	"github.com/ekristen/guppi/pkg/activity"
 	"github.com/ekristen/guppi/pkg/tmux"
 )
+
+// pongFrame is the canonical reply to a browser heartbeat ping.
+var pongFrame = []byte(`{"type":"pong"}`)
+
+// isPing reports whether a text control frame is a heartbeat ping. Cheap
+// substring check avoids a JSON unmarshal on every frame.
+func isPing(msg []byte) bool {
+	return bytes.Contains(msg, []byte(`"ping"`))
+}
 
 // PTYTerminalHandler handles WebSocket connections backed by a PTY running tmux attach
 type PTYTerminalHandler struct {
@@ -62,6 +73,10 @@ func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Reques
 	}
 	defer ptySess.Close()
 
+	// writeMu serializes WS writes between the PTY reader goroutine and the
+	// heartbeat pong reply path below.
+	var writeMu sync.Mutex
+
 	// Read goroutine: PTY → WebSocket (binary messages)
 	done := make(chan struct{})
 	go func() {
@@ -76,7 +91,10 @@ func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Reques
 			if h.activityTracker != nil {
 				h.activityTracker.Record(sessionName, n)
 			}
-			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+			writeMu.Lock()
+			err = conn.WriteMessage(websocket.BinaryMessage, buf[:n])
+			writeMu.Unlock()
+			if err != nil {
 				return
 			}
 		}
@@ -95,6 +113,17 @@ func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Reques
 
 		switch msgType {
 		case websocket.TextMessage:
+			// Heartbeat from the browser liveness watchdog. Reply so the client
+			// can detect a half-open socket and reconnect.
+			if isPing(message) {
+				writeMu.Lock()
+				err := conn.WriteMessage(websocket.TextMessage, pongFrame)
+				writeMu.Unlock()
+				if err != nil {
+					break
+				}
+				continue
+			}
 			if err := tmux.HandlePTYControlMessage(ptySess, message); err != nil {
 				log.WithError(err).Debug("control message failed")
 			}

@@ -119,6 +119,8 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const containerRef = useRef<HTMLElement | null>(null)
   const listenerCleanupRef = useRef<(() => void) | null>(null)
   const reconnectTimer = useRef<number | undefined>(undefined)
+  const heartbeatTimer = useRef<number | undefined>(undefined)
+  const watchdogTimer = useRef<number | undefined>(undefined)
   const activeConnId = useRef(0)
   const [termConnected, setTermConnected] = useState(false)
   const [ctrlModifierActive, setCtrlModifierActive] = useState(false)
@@ -168,6 +170,14 @@ export function useTerminal(sessionName: string, hostId?: string) {
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current)
       reconnectTimer.current = undefined
+    }
+    if (heartbeatTimer.current) {
+      clearInterval(heartbeatTimer.current)
+      heartbeatTimer.current = undefined
+    }
+    if (watchdogTimer.current) {
+      clearTimeout(watchdogTimer.current)
+      watchdogTimer.current = undefined
     }
     cleanupWs()
     if (termRef.current) {
@@ -346,6 +356,22 @@ export function useTerminal(sessionName: string, hostId?: string) {
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 
+    // Liveness watchdog. A half-open TCP (laptop sleep, wifi handoff, NAT
+    // idle timeout) leaves ws.readyState === OPEN: output silently stops and
+    // keystrokes vanish with no error and no onclose, so the disconnect
+    // overlay never shows. We app-level ping every 10s and force-close if no
+    // traffic arrives for ~25s, which triggers the normal reconnect path.
+    const HEARTBEAT_MS = 10000
+    const WATCHDOG_MS = 25000
+    const armWatchdog = () => {
+      if (watchdogTimer.current) clearTimeout(watchdogTimer.current)
+      watchdogTimer.current = window.setTimeout(() => {
+        if (activeConnId.current !== connId) return
+        // Stale socket — drop it so onclose schedules a reconnect.
+        try { ws.close() } catch { /* ignored */ }
+      }, WATCHDOG_MS)
+    }
+
     ws.onopen = () => {
       // Stale connection — a newer connect() was called
       if (activeConnId.current !== connId) {
@@ -353,12 +379,28 @@ export function useTerminal(sessionName: string, hostId?: string) {
         return
       }
       setTermConnected(true)
+      armWatchdog()
+      if (heartbeatTimer.current) clearInterval(heartbeatTimer.current)
+      heartbeatTimer.current = window.setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({ type: 'ping' })) } catch { /* ignored */ }
+        }
+      }, HEARTBEAT_MS)
     }
 
     ws.onmessage = (evt) => {
+      // Any inbound traffic proves the link is alive.
+      armWatchdog()
       if (evt.data instanceof ArrayBuffer) {
         term.write(new Uint8Array(evt.data))
       } else {
+        // Text frames are control messages (pong). Don't echo to the terminal.
+        if (typeof evt.data === 'string') {
+          try {
+            const ctrl = JSON.parse(evt.data)
+            if (ctrl && ctrl.type === 'pong') return
+          } catch { /* not JSON — fall through and write raw */ }
+        }
         term.write(evt.data)
       }
     }
@@ -366,6 +408,14 @@ export function useTerminal(sessionName: string, hostId?: string) {
     ws.onclose = () => {
       // Only handle if this is still the active connection
       if (activeConnId.current !== connId) return
+      if (heartbeatTimer.current) {
+        clearInterval(heartbeatTimer.current)
+        heartbeatTimer.current = undefined
+      }
+      if (watchdogTimer.current) {
+        clearTimeout(watchdogTimer.current)
+        watchdogTimer.current = undefined
+      }
       // Don't flash the disconnect overlay if the page is just hidden
       if (!document.hidden) {
         setTermConnected(false)
@@ -422,6 +472,14 @@ export function useTerminal(sessionName: string, hostId?: string) {
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current)
       reconnectTimer.current = undefined
+    }
+    if (heartbeatTimer.current) {
+      clearInterval(heartbeatTimer.current)
+      heartbeatTimer.current = undefined
+    }
+    if (watchdogTimer.current) {
+      clearTimeout(watchdogTimer.current)
+      watchdogTimer.current = undefined
     }
     cleanupWs()
     if (termRef.current) {
