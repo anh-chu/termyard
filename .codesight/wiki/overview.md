@@ -67,4 +67,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `XDG_RUNTIME_DIR` — `pkg/socket/socket.go`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-06-01_
+_Back to [index.md](./index.md) · Generated 2026-06-02_

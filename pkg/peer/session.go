@@ -178,6 +178,7 @@ func runSession(
 			if err := deps.PeerStore.RemoveByPublicKey(peerInfo.PublicKey); err != nil {
 				log.WithError(err).Debug("forget remove failed")
 			}
+			deps.Manager.RemoveHost(peerID)
 			return fmt.Errorf("peer forgot us")
 		}
 		handleSessionMessage(peerID, &msg, pc, deps, log)

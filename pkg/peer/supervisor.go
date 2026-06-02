@@ -134,7 +134,7 @@ func (s *LinkSupervisor) RemovePeer(publicKey string) error {
 	}
 	s.mu.Unlock()
 
-	s.deps.Manager.UnregisterPeer(p.Fingerprint())
+	s.deps.Manager.RemoveHost(p.Fingerprint())
 	return s.deps.PeerStore.RemoveByPublicKey(publicKey)
 }
 

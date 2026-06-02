@@ -398,6 +398,32 @@ func (m *Manager) UnregisterPeer(id string) {
 	}
 }
 
+// RemoveHost fully removes a host from the aggregated state (used on forget,
+// where we must not keep the peer's sessions lingering until prune).
+func (m *Manager) RemoveHost(id string) {
+	if id == m.localID {
+		return
+	}
+	m.mu.Lock()
+	h, ok := m.hosts[id]
+	if ok {
+		delete(m.hosts, id)
+	}
+	m.mu.Unlock()
+
+	if ok {
+		m.broadcast(state.StateEvent{
+			Type:     "peer-disconnected",
+			Host:     id,
+			HostName: h.Name,
+		})
+		logrus.WithFields(logrus.Fields{
+			"peer": h.Name,
+			"id":   id,
+		}).Info("host removed")
+	}
+}
+
 // UpdatePeerSessions updates a peer's session list
 func (m *Manager) UpdatePeerSessions(id string, sessions []*tmux.Session) {
 	m.mu.Lock()
