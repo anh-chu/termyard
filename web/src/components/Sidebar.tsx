@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Session, sessionKey } from '../hooks/useSessions'
+import { Session, sessionKey, parseSessionKey } from '../hooks/useSessions'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
@@ -310,17 +310,23 @@ export function Sidebar({
       setManualOrder(nextOrder)
     }
     // background-sessions and hidden-sessions are SHARED, cross-machine
-    // attributes. Their keys span every node in the mesh, but this device's
-    // session list is only authoritative for LOCALLY-owned sessions (bare
-    // keys). A peer-owned key (host-prefixed) being absent here just means
-    // that peer is offline / not yet loaded — NOT that the session is gone.
-    // Pruning those would delete the peer's parked/hidden state and (via the
-    // write-effect's pushLayout) fan that reset out to the whole mesh, which
-    // is exactly the "phone visit resets everything" bug. So only prune
-    // local (bare) keys; peer keys are cleaned up by their owning machine.
-    // A host-prefixed (peer-owned) key contains '/'; a bare local key does not.
-    const survives = (key: string) =>
-      validKeys.has(key) || key.includes('/')
+    // attributes whose keys are host-qualified ("<owner-fp>/<name>") for every
+    // node in the mesh, including this one. We can only safely garbage-collect
+    // a key when we KNOW its owning host is online yet the session is absent
+    // (genuinely gone). If the owner is offline or not yet known, its sessions
+    // are simply missing from our list — pruning then would delete that peer's
+    // parked/hidden state and (via the write-effect's pushLayout) fan the reset
+    // out to the whole mesh: the "phone visit resets everything" bug. So keys
+    // for offline/unknown owners always survive.
+    const onlineHostIds = new Set((hosts ?? []).filter(h => h.online).map(h => h.id))
+    const survives = (key: string) => {
+      if (validKeys.has(key)) return true
+      const { host } = parseSessionKey(key)
+      // Unqualified or unknown/offline owner -> keep (can't prove it's gone).
+      if (!host || !onlineHostIds.has(host)) return true
+      // Owner is online and the session isn't in the list -> really gone.
+      return false
+    }
     const nextHidden = [...hiddenSet].filter(survives)
     if (nextHidden.length !== hiddenSet.size) {
       setHiddenSet(new Set(nextHidden))
@@ -329,7 +335,7 @@ export function Sidebar({
     if (nextBackground.length !== backgroundSet.size) {
       setBackgroundSet(new Set(nextBackground))
     }
-  }, [sessions, manualOrder, hiddenSet, backgroundSet])
+  }, [sessions, manualOrder, hiddenSet, backgroundSet, hosts])
 
   const projects = useMemo(
     () => Array.from(new Set(sessions.map(s => s.project_path).filter((value): value is string => Boolean(value)))).sort(),

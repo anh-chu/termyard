@@ -42,54 +42,43 @@ type RemoteLayout = {
 }
 
 // ---------------------------------------------------------------------------
-// Global <-> local session-key namespace translation.
+// Session-key namespace.
 //
-// Session keys are MACHINE-RELATIVE in localStorage: a session owned by THIS
-// machine is the bare name ("foo"); a session owned by a peer is host-prefixed
-// ("<peer-fp>/foo"). Two machines therefore disagree on what "foo" means.
+// Every session key is GLOBAL and host-qualified everywhere the UI touches it:
+// the server's /api/sessions always stamps session.host (PeerMgr is always
+// constructed at runtime, and GetAllSessions() sets s.Host = h.ID even for
+// THIS node's own sessions), so sessionKey() in useSessions.ts always yields
+// "<owner-fp>/<name>". The render filter, the bg/hidden toggles, localStorage,
+// and the synced wire payload therefore all speak the SAME host-qualified
+// namespace.
 //
-// To share attributes across machines we serialize in a GLOBAL namespace where
-// EVERY session is "<owner-fp>/<name>". The local machine's own sessions get
-// our fingerprint prefixed on the way out and stripped on the way in. Peer
-// keys are already global and pass through untouched. The round-trip
-// (global -> local -> global) is the identity, which is what kills the
-// last-write-wins push/echo loop: re-serializing an applied remote payload
-// yields the exact bytes we received, so pushNow() short-circuits.
+// HISTORICAL NOTE: this layer used to strip the local fingerprint on the way
+// in ("<our-fp>/foo" -> "foo") and re-add it on the way out, on the premise
+// that this machine's own sessions were bare-keyed in localStorage. That
+// premise was false in multi-host mode — our own sessions are host-prefixed
+// too — so the global->local round-trip was NOT the identity. After a reload
+// or a phone revisit, applied keys came back bare ("foo") while the render
+// filter looked them up host-qualified ("<our-fp>/foo"), so every parked/hidden
+// session silently reverted to foreground. The translation is now the identity
+// (keys pass through untouched), which both fixes that mismatch and still kills
+// the push/echo loop (re-serializing an applied payload yields identical bytes).
 // ---------------------------------------------------------------------------
 
-// Mirrors parseSessionKey()/sessionKey() in useSessions.ts. The first '/'
-// separates host from name; names may themselves contain '/'.
-function splitKey(key: string): { host: string; name: string } {
-  const idx = key.indexOf('/')
-  if (idx === -1) return { host: '', name: key }
-  return { host: key.substring(0, idx), name: key.substring(idx + 1) }
+// Identity passthrough. fp is accepted for signature compatibility with the
+// old translateShared(fn) call sites but is unused: keys are already global.
+function toGlobalKey(key: string, _fp: string): string {
+  return key
 }
 
-function toGlobalKey(localKey: string, fp: string): string {
-  if (!localKey) return localKey
-  const { host } = splitKey(localKey)
-  // Bare key = a session owned by this machine -> qualify with our fp.
-  return host === '' ? `${fp}/${localKey}` : localKey
+function toLocalKey(key: string, _fp: string): string {
+  return key
 }
 
-function toLocalKey(globalKey: string, fp: string): string {
-  if (!globalKey) return globalKey
-  const { host, name } = splitKey(globalKey)
-  // Our own sessions become bare; peer sessions stay host-qualified.
-  return host === fp ? name : globalKey
-}
-
-// Translate every shared key (all flat string arrays of session keys) through
-// fn. Keeping the shared set to flat arrays keeps this trivial — no recursive
-// pane-tree / saved-group walking.
-function translateShared(data: LayoutPayload, fn: (k: string) => string): LayoutPayload {
-  const out: LayoutPayload = { ...data }
-  for (const k of SHARED_KEYS) {
-    if (Array.isArray(out[k])) {
-      out[k] = (out[k] as string[]).map(fn)
-    }
-  }
-  return out
+// translateShared previously mapped every shared key through a translation
+// fn. Keys are now global on both sides, so this is a structural passthrough
+// that simply clones the payload (callers still expect a fresh object).
+function translateShared(data: LayoutPayload, _fn: (k: string) => string): LayoutPayload {
+  return { ...data }
 }
 
 // Deterministic JSON with recursively sorted object keys. Two machines build
