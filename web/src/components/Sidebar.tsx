@@ -309,11 +309,23 @@ export function Sidebar({
     if (nextOrder.length !== manualOrder.length) {
       setManualOrder(nextOrder)
     }
-    const nextHidden = [...hiddenSet].filter(key => validKeys.has(key))
+    // background-sessions and hidden-sessions are SHARED, cross-machine
+    // attributes. Their keys span every node in the mesh, but this device's
+    // session list is only authoritative for LOCALLY-owned sessions (bare
+    // keys). A peer-owned key (host-prefixed) being absent here just means
+    // that peer is offline / not yet loaded — NOT that the session is gone.
+    // Pruning those would delete the peer's parked/hidden state and (via the
+    // write-effect's pushLayout) fan that reset out to the whole mesh, which
+    // is exactly the "phone visit resets everything" bug. So only prune
+    // local (bare) keys; peer keys are cleaned up by their owning machine.
+    // A host-prefixed (peer-owned) key contains '/'; a bare local key does not.
+    const survives = (key: string) =>
+      validKeys.has(key) || key.includes('/')
+    const nextHidden = [...hiddenSet].filter(survives)
     if (nextHidden.length !== hiddenSet.size) {
       setHiddenSet(new Set(nextHidden))
     }
-    const nextBackground = [...backgroundSet].filter(key => validKeys.has(key))
+    const nextBackground = [...backgroundSet].filter(survives)
     if (nextBackground.length !== backgroundSet.size) {
       setBackgroundSet(new Set(nextBackground))
     }
