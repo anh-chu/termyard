@@ -21,14 +21,16 @@ export const LAYOUT_CLIENT_ID = makeClientId()
 // IMPORTANT: this channel carries SHARED SESSION ATTRIBUTES only — facts about
 // a session that are true on every machine. Viewport/layout state (pane-tree,
 // active-key, saved-groups, group-order, sidebar-collapsed, collapsed-groups,
-// session-order, hidden-sessions) is intentionally NOT here: it describes
+// session-order) is intentionally NOT here: it describes
 // "what's on MY screen" and is per-device. Mirroring viewport across two
 // physical screens made them fight over one layout and froze drag/selection.
 //
-// background-sessions = "this session is parked". That's a property of the
-// session, meaningful everywhere, so it is safe to share.
+// background-sessions = "this session is parked" and hidden-sessions = "this
+// session is hidden from the list". Both are properties of the session,
+// meaningful everywhere, so they are safe to share.
 const SHARED_KEYS = [
   'guppi:background-sessions',
+  'guppi:hidden-sessions',
 ] as const
 
 type LayoutPayload = Record<string, unknown>
@@ -152,6 +154,15 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
   const pendingRef = useRef(false)
   const fpRef = useRef<string | null>(localFingerprint)
   fpRef.current = localFingerprint
+  // Gate outbound writes until the initial GET /api/layout reconciles. A fresh
+  // client (e.g. a phone opening the URL the first time) boots with empty
+  // localStorage; the Sidebar mount effect immediately calls pushNow(). If the
+  // initial fetch hasn't landed yet, that debounced PUT ships an EMPTY payload,
+  // and since the server stamps UpdatedAt=now() on every Set() it always wins
+  // last-write-wins — wiping the real background-sessions set on the node and
+  // fanning the empty state out to every paired peer. Holding pushes until
+  // hydration closes that window.
+  const hydratedRef = useRef(false)
 
   const ready = authenticated && !!localFingerprint
 
@@ -160,10 +171,12 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
     if (!ready) return
     const fp = fpRef.current as string
     let cancelled = false
+    hydratedRef.current = false
     ;(async () => {
       try {
         const res = await fetch('/api/layout')
-        if (!res.ok || cancelled) return
+        if (cancelled) return
+        if (!res.ok) { hydratedRef.current = true; return }
         const body: RemoteLayout = await res.json()
         if (body.data && Object.keys(body.data).length > 0) {
           // Remote payload is global -> translate to local before storing.
@@ -185,6 +198,9 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
           }
         }
       } catch {}
+      finally {
+        if (!cancelled) hydratedRef.current = true
+      }
     })()
     return () => { cancelled = true }
   }, [ready])
@@ -208,6 +224,7 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
     if (!authenticated) return
     const fp = fpRef.current
     if (!fp) return
+    if (!hydratedRef.current) return // pre-hydration: don't clobber server state
     window.clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(async () => {
       const global = translateShared(readShared(), k => toGlobalKey(k, fp))
@@ -246,6 +263,7 @@ export function useLayoutSync(authenticated: boolean, localFingerprint: string |
       if (!authenticated) return
       const fp = fpRef.current
       if (!fp) return
+      if (!hydratedRef.current) return // pre-hydration: don't clobber server state
       const global = translateShared(readShared(), k => toGlobalKey(k, fp))
       const serialized = canonical(global)
       if (serialized === lastSerializedRef.current) return

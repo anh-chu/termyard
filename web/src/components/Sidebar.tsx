@@ -256,10 +256,13 @@ export function Sidebar({
     return () => window.removeEventListener('click', handler)
   }, [contextMenu, filterOpen])
 
-  // hidden-sessions: per-device personal view. NOT synced.
+  // hidden-sessions: a SHARED session attribute ("this session is hidden")
+  // mirrored across machines via the layout-sync channel, same as
+  // background-sessions. pushLayout() debounces a PUT + peer fanout.
   useEffect(() => {
     writeStoredList('guppi:hidden-sessions', [...hiddenSet])
-  }, [hiddenSet])
+    pushLayout?.()
+  }, [hiddenSet, pushLayout])
 
   // background-sessions: a SHARED session attribute ("this session is
   // parked") mirrored across machines via the layout-sync channel. This is
@@ -276,15 +279,18 @@ export function Sidebar({
     writeStoredList('guppi:session-order', manualOrder)
   }, [manualOrder])
 
-  // Re-hydrate the shared background set when a remote update arrives.
-  // layoutVersion bumps whenever a peer or another tab pushes new shared
-  // state. hidden-sessions and session-order are per-device, so they are
-  // NOT re-hydrated here.
+  // Re-hydrate the shared sets when a remote update arrives. layoutVersion
+  // bumps whenever a peer or another tab pushes new shared state.
+  // session-order is per-device, so it is NOT re-hydrated here.
   useEffect(() => {
     if (!layoutVersion) return
     const nextBackground = new Set(readStoredList('guppi:background-sessions'))
     setBackgroundSet(prev =>
       [...prev].sort().join(',') === [...nextBackground].sort().join(',') ? prev : nextBackground,
+    )
+    const nextHidden = new Set(readStoredList('guppi:hidden-sessions'))
+    setHiddenSet(prev =>
+      [...prev].sort().join(',') === [...nextHidden].sort().join(',') ? prev : nextHidden,
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutVersion])
