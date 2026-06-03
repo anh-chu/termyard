@@ -1,17 +1,21 @@
-name: Release Please
+name: Auto Tag Release
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - "pkg/common/version.go"
 
 permissions:
   contents: read
 
 jobs:
-  release-please:
+  tag:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - name: Generate token
         id: generate_token
@@ -21,7 +25,34 @@ jobs:
           private_key: ${{ secrets.APP_PEM }}
           revoke: true
 
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           token: ${{ steps.generate_token.outputs.token }}
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(grep -oP 'var VERSION = "\K[^"]+' pkg/common/version.go)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Detected version: $version"
+
+      - name: Check tag does not exist
+        id: check
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists, skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          git tag "$tag"
+          git push origin "$tag"
+          echo "Pushed $tag"
