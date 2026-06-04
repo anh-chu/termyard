@@ -2,9 +2,9 @@
 
 > **Stack:** chi | none | react | go
 
-> 87 routes | 0 models | 15 components | 62 lib files | 7 env vars | 1 middleware | 7% test coverage
-> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~76,500 tokens. **Saves ~70,700 tokens per conversation.**
-> **Last scanned:** 2026-06-03 19:38 — re-run after significant changes
+> 89 routes | 0 models | 15 components | 62 lib files | 7 env vars | 1 middleware | 7% test coverage
+> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~77,500 tokens. **Saves ~71,700 tokens per conversation.**
+> **Last scanned:** 2026-06-04 04:35 — re-run after significant changes
 
 ---
 
@@ -44,8 +44,8 @@
 - `POST` `/api/push/unsubscribe` params() [auth, db, queue, ai]
 - `GET` `/api/preferences` params() [auth, db, queue, ai]
 - `PUT` `/api/preferences` params() [auth, db, queue, ai]
-- `GET` `/api/layout` params() [auth, db, queue, ai]
-- `PUT` `/api/layout` params() [auth, db, queue, ai]
+- `GET` `/api/session-attrs` params() [auth, db, queue, ai]
+- `POST` `/api/session-attrs` params() [auth, db, queue, ai]
 - `GET` `/api/portforwards` params() [auth, db, queue, ai]
 - `POST` `/api/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/api/portforward/{port}` params(port) [auth, db, queue, ai]
@@ -82,8 +82,8 @@
 - `POST` `/push/unsubscribe` params() [auth, db, queue, ai]
 - `GET` `/preferences` params() [auth, db, queue, ai]
 - `PUT` `/preferences` params() [auth, db, queue, ai]
-- `GET` `/layout` params() [auth, db, queue, ai]
-- `PUT` `/layout` params() [auth, db, queue, ai]
+- `GET` `/session-attrs` params() [auth, db, queue, ai]
+- `POST` `/session-attrs` params() [auth, db, queue, ai]
 - `GET` `/portforwards` params() [auth, db, queue, ai]
 - `POST` `/portforwards` params() [auth, db, queue, ai]
 - `DELETE` `/portforward/{port}` params(port) [auth, db, queue, ai]
@@ -95,6 +95,8 @@
 - `GET` `/proxy/{port}` params(port) [auth, db, queue, ai]
 - `GET` `/proxy/{port}/*` params(port) [auth, db, queue, ai]
 - `GET` `/*` params() [auth, db, queue, ai]
+- `GET` `fpA/foo` params() [auth]
+- `GET` `fpB/bar` params() [auth]
 - `GET` `Origin` params() [auth]
 
 ---
@@ -159,10 +161,6 @@
   - function NewPeerStore: () (*PeerStore, error)
   - class Peer
   - class PeerStore
-- `pkg/layout/layout.go`
-  - function NewStore: () (*Store, error)
-  - class Layout
-  - class Store
 - `pkg/peer/bootstrap.go`
   - function NormalizeAddress: (addr string) (string, error)
   - function SendBootstrap: (ctx context.Context, addr string, req BootstrapRequest) (*BootstrapResponse, error)
@@ -183,7 +181,7 @@
   - class ChallengePayload
   - class StateUpdatePayload
   - class StateEventPayload
-  - _...13 more_
+  - _...15 more_
 - `pkg/peer/pty_manager.go`
   - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
@@ -194,9 +192,8 @@
   - class PTYRelay
 - `pkg/peer/session.go`
   - class SessionDeps
-  - interface LayoutSink
+  - interface SessionAttrsSink
   - interface BrowserBroadcaster
-  - interface LayoutSource
 - `pkg/peer/supervisor.go`
   - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor
   - class LinkSnapshot
@@ -214,6 +211,11 @@
   - class AgentBanner
   - _...2 more_
 - `pkg/server/server.go` — function Run: (ctx context.Context, opts *Options) error, class Options
+- `pkg/sessionattrs/sessionattrs.go`
+  - function NewStore: () (*Store, error)
+  - class Attr
+  - class Store
+  - class Sets
 - `pkg/socket/socket.go`
   - function DefaultPath: () string
   - function EnsureDir: (socketPath string) error
@@ -290,7 +292,6 @@
 - `web/src/hooks/useActivity.ts` — function useActivity: () => void, interface ActivitySnapshot
 - `web/src/hooks/useAuth.ts` — function useAuth: () => AuthState
 - `web/src/hooks/useHosts.ts` — function useHosts: () => void, interface Host
-- `web/src/hooks/useLayoutSync.ts` — function useLayoutSync: (authenticated, localFingerprint) => void, const LAYOUT_CLIENT_ID
 - `web/src/hooks/useNotifications.ts` — function useNotifications: (pushSubscribed) => void
 - `web/src/hooks/usePortForwards.ts`
   - function usePortForwards: () => void
@@ -303,6 +304,7 @@
   - const defaultPreferences: Preferences
   - const PreferencesContext
 - `web/src/hooks/usePushNotifications.ts` — function usePushNotifications: () => void
+- `web/src/hooks/useSessionAttrs.ts` — function useSessionAttrs: (authenticated) => void, type SessionAttrSets
 - `web/src/hooks/useSessions.ts`
   - function sessionKey: (session) => string
   - function parseSessionKey: (key) => void
@@ -367,7 +369,7 @@
 
 ## Most Imported Files (change these carefully)
 
-- `path/filepath` — imported by **22** files
+- `path/filepath` — imported by **23** files
 - `encoding/json` — imported by **22** files
 - `net/http` — imported by **11** files
 - `os/exec` — imported by **10** files
@@ -390,7 +392,7 @@
 
 ## Import Map (who imports what)
 
-- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/update/update.go` +17 more
+- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/update/update.go` +18 more
 - `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go`, `pkg/identity/identity.go` +17 more
 - `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go`, `pkg/peer/bootstrap.go`, `pkg/peer/bootstrap_test.go` +6 more
 - `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go` +5 more
@@ -406,7 +408,7 @@
 # Test Coverage
 
 > **7%** of routes and models are covered by tests
-> 11 test files found
+> 12 test files found
 
 ## Covered Routes
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Session, sessionKey, parseSessionKey } from '../hooks/useSessions'
+import { Session, sessionKey } from '../hooks/useSessions'
+import type { SessionAttrSets } from '../hooks/useSessionAttrs'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
@@ -27,8 +28,8 @@ interface SidebarProps {
   onRenameGroup?: (groupId: string, name: string) => void
   onPairSessions?: (keyA: string, keyB: string) => void
   onRemoveFromSplit?: (key: string) => void
-  pushLayout?: () => void
-  layoutVersion?: number
+  sessionAttrs: SessionAttrSets
+  setSessionAttr: (key: string, next: { background?: boolean; hidden?: boolean }) => void
 }
 
 interface RenameState {
@@ -180,12 +181,15 @@ export function Sidebar({
   onRenameGroup,
   onPairSessions,
   onRemoveFromSplit,
-  pushLayout,
-  layoutVersion,
+  sessionAttrs,
+  setSessionAttr,
 }: SidebarProps) {
   const { prefs } = usePreferences()
-  const [hiddenSet, setHiddenSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:hidden-sessions')))
-  const [backgroundSet, setBackgroundSet] = useState<Set<string>>(() => new Set(readStoredList('guppi:background-sessions')))
+  // background/hidden are SERVER-AUTHORITATIVE and arrive via props. They are
+  // NOT cached in localStorage — the server owns the truth and broadcasts
+  // session-attrs-updated, which App refetches and passes back down here.
+  const hiddenSet = sessionAttrs.hidden
+  const backgroundSet = sessionAttrs.background
   const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('guppi:session-order'))
   const [projectFilters, setProjectFilters] = useState<string[]>(() => readStoredList('guppi:project-filters'))
   const [hiddenExpanded, setHiddenExpanded] = useState(false)
@@ -256,86 +260,28 @@ export function Sidebar({
     return () => window.removeEventListener('click', handler)
   }, [contextMenu, filterOpen])
 
-  // hidden-sessions: a SHARED session attribute ("this session is hidden")
-  // mirrored across machines via the layout-sync channel, same as
-  // background-sessions. pushLayout() debounces a PUT + peer fanout.
-  useEffect(() => {
-    writeStoredList('guppi:hidden-sessions', [...hiddenSet])
-    pushLayout?.()
-  }, [hiddenSet, pushLayout])
-
-  // background-sessions: a SHARED session attribute ("this session is
-  // parked") mirrored across machines via the layout-sync channel. This is
-  // the single writer — pushLayout() debounces a PUT + peer fanout. We no
-  // longer double-write to server preferences (that caused two competing
-  // sources of truth).
-  useEffect(() => {
-    writeStoredList('guppi:background-sessions', [...backgroundSet])
-    pushLayout?.()
-  }, [backgroundSet, pushLayout])
-
-  // session-order: per-device manual ordering. NOT synced.
+  // session-order: per-device manual ordering. NOT synced (stays local).
   useEffect(() => {
     writeStoredList('guppi:session-order', manualOrder)
   }, [manualOrder])
-
-  // Re-hydrate the shared sets when a remote update arrives. layoutVersion
-  // bumps whenever a peer or another tab pushes new shared state.
-  // session-order is per-device, so it is NOT re-hydrated here.
-  useEffect(() => {
-    if (!layoutVersion) return
-    const nextBackground = new Set(readStoredList('guppi:background-sessions'))
-    setBackgroundSet(prev =>
-      [...prev].sort().join(',') === [...nextBackground].sort().join(',') ? prev : nextBackground,
-    )
-    const nextHidden = new Set(readStoredList('guppi:hidden-sessions'))
-    setHiddenSet(prev =>
-      [...prev].sort().join(',') === [...nextHidden].sort().join(',') ? prev : nextHidden,
-    )
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutVersion])
 
   useEffect(() => {
     writeStoredList('guppi:project-filters', projectFilters)
   }, [projectFilters])
 
+  // Prune per-device manual ordering for sessions that have disappeared.
+  // background/hidden are server-authoritative and GC'd server-side, so they
+  // are NOT pruned here.
   useEffect(() => {
-    // Don't clear persisted ordering/hidden state during the initial empty
-    // session snapshot before the first /api/sessions refresh completes.
+    // Don't clear persisted ordering during the initial empty session snapshot
+    // before the first /api/sessions refresh completes.
     if (sessions.length === 0) return
-
     const validKeys = new Set(sessions.map(sessionKey))
     const nextOrder = manualOrder.filter(key => validKeys.has(key))
     if (nextOrder.length !== manualOrder.length) {
       setManualOrder(nextOrder)
     }
-    // background-sessions and hidden-sessions are SHARED, cross-machine
-    // attributes whose keys are host-qualified ("<owner-fp>/<name>") for every
-    // node in the mesh, including this one. We can only safely garbage-collect
-    // a key when we KNOW its owning host is online yet the session is absent
-    // (genuinely gone). If the owner is offline or not yet known, its sessions
-    // are simply missing from our list — pruning then would delete that peer's
-    // parked/hidden state and (via the write-effect's pushLayout) fan the reset
-    // out to the whole mesh: the "phone visit resets everything" bug. So keys
-    // for offline/unknown owners always survive.
-    const onlineHostIds = new Set((hosts ?? []).filter(h => h.online).map(h => h.id))
-    const survives = (key: string) => {
-      if (validKeys.has(key)) return true
-      const { host } = parseSessionKey(key)
-      // Unqualified or unknown/offline owner -> keep (can't prove it's gone).
-      if (!host || !onlineHostIds.has(host)) return true
-      // Owner is online and the session isn't in the list -> really gone.
-      return false
-    }
-    const nextHidden = [...hiddenSet].filter(survives)
-    if (nextHidden.length !== hiddenSet.size) {
-      setHiddenSet(new Set(nextHidden))
-    }
-    const nextBackground = [...backgroundSet].filter(survives)
-    if (nextBackground.length !== backgroundSet.size) {
-      setBackgroundSet(new Set(nextBackground))
-    }
-  }, [sessions, manualOrder, hiddenSet, backgroundSet, hosts])
+  }, [sessions, manualOrder])
 
   const projects = useMemo(
     () => Array.from(new Set(sessions.map(s => s.project_path).filter((value): value is string => Boolean(value)))).sort(),
@@ -364,25 +310,21 @@ export function Sidebar({
   const backgroundSessions = orderedSessions.filter(session => backgroundSet.has(sessionKey(session)))
 
   const toggleHide = (key: string) => {
-    const next = new Set(hiddenSet)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    setHiddenSet(next)
+    // Server-authoritative: POST the desired bit; the response + WS broadcast
+    // reconcile local state across tabs/peers.
+    setSessionAttr(key, { hidden: !hiddenSet.has(key) })
     setContextMenu(null)
   }
 
   const toggleBackground = (key: string) => {
-    const next = new Set(backgroundSet)
-    if (next.has(key)) next.delete(key)
-    else {
-      next.add(key)
+    const next = !backgroundSet.has(key)
+    if (next) {
       const inAnyGroup = layoutGroups?.some(g => g.leaves.includes(key))
       if (inAnyGroup) {
         onRemoveFromSplit?.(key)
       }
     }
-    // Single writer: the backgroundSet effect persists + syncs via pushLayout.
-    setBackgroundSet(next)
+    setSessionAttr(key, { background: next })
     setContextMenu(null)
   }
 
@@ -441,23 +383,17 @@ export function Sidebar({
         }),
       })
       if (res.ok) {
-        let nextBackground = backgroundSet
-        if (hiddenSet.has(oldKey)) {
-          const nextHidden = new Set(hiddenSet)
-          nextHidden.delete(oldKey)
-          nextHidden.add(newKey)
-          setHiddenSet(nextHidden)
-        }
-        if (backgroundSet.has(oldKey)) {
-          nextBackground = new Set(backgroundSet)
-          nextBackground.delete(oldKey)
-          nextBackground.add(newKey)
-          setBackgroundSet(nextBackground)
+        // Migrate server-authoritative attributes onto the new key: clear the
+        // old key and set the new one with the same bits.
+        const wasHidden = hiddenSet.has(oldKey)
+        const wasBackground = backgroundSet.has(oldKey)
+        if (wasHidden || wasBackground) {
+          setSessionAttr(oldKey, { background: false, hidden: false })
+          setSessionAttr(newKey, { background: wasBackground, hidden: wasHidden })
         }
         if (manualOrder.includes(oldKey)) {
           setManualOrder(current => current.map(key => key === oldKey ? newKey : key))
         }
-        // backgroundSet effect persists + syncs; no separate prefs write.
         onSessionRenamed?.(oldKey, newKey)
       }
     } catch (err) {

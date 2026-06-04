@@ -31,9 +31,9 @@ func NewHandler(deps SessionDeps) *Handler {
 	return &Handler{deps: deps}
 }
 
-// SetLayoutSink wires the layout store after construction.
-func (h *Handler) SetLayoutSink(sink LayoutSink) {
-	h.deps.LayoutSink = sink
+// SetAttrsSink wires the session-attrs store after construction.
+func (h *Handler) SetAttrsSink(sink SessionAttrsSink) {
+	h.deps.AttrsSink = sink
 }
 
 // SetBrowserHub wires the browser-events hub after construction.

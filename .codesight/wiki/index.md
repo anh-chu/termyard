@@ -1,6 +1,6 @@
 # guppi — Wiki
 
-_Generated 2026-06-03 — re-run `npx codesight --wiki` if the codebase has changed._
+_Generated 2026-06-04 — re-run `npx codesight --wiki` if the codebase has changed._
 
 Structural map compiled from source code via AST. No LLM — deterministic, 200ms.
 
@@ -21,7 +21,6 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 - [Host](./host.md)
 - [Hosts](./hosts.md)
 - [Hub](./hub.md)
-- [Layout](./layout.md)
 - [Name](./name.md)
 - [Notify](./notify.md)
 - [Peers](./peers.md)
@@ -33,6 +32,8 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 - [Push](./push.md)
 - [Rows](./rows.md)
 - [Session](./session.md)
+- [Session-attrs](./session-attrs.md)
+- [Sessionattrs_test](./sessionattrs_test.md)
 - [Sessions](./sessions.md)
 - [Stats](./stats.md)
 - [Tool-event](./tool-event.md)
@@ -44,7 +45,7 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 
 ## Quick Stats
 
-- Routes: **87**
+- Routes: **89**
 - Models: **0**
 - Components: **15**
 - Env vars: **7** required, **0** with defaults
@@ -73,4 +74,4 @@ These exist in your codebase but are **not** reflected in wiki articles:
 When in doubt, search the source. The wiki is a starting point, not a complete inventory.
 
 ---
-_Last compiled: 2026-06-03 · 34 articles · [codesight](https://github.com/Houseofmvps/codesight)_
+_Last compiled: 2026-06-04 · 35 articles · [codesight](https://github.com/Houseofmvps/codesight)_

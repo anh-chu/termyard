@@ -82,10 +82,10 @@ func NewLinkSupervisor(deps SessionDeps) *LinkSupervisor {
 	}
 }
 
-// SetLayoutSink wires the layout store after construction. Safe to call once
-// during Run() bootstrap before any sessions land.
-func (s *LinkSupervisor) SetLayoutSink(sink LayoutSink) {
-	s.deps.LayoutSink = sink
+// SetAttrsSink wires the session-attrs store after construction. Safe to call
+// once during Run() bootstrap before any sessions land.
+func (s *LinkSupervisor) SetAttrsSink(sink SessionAttrsSink) {
+	s.deps.AttrsSink = sink
 }
 
 // SetBrowserHub wires the browser-events hub after construction.

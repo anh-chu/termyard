@@ -42,7 +42,7 @@ import (
 	"github.com/ekristen/guppi/pkg/stats"
 	"github.com/ekristen/guppi/pkg/tmux"
 	"github.com/ekristen/guppi/pkg/toolevents"
-	"github.com/ekristen/guppi/pkg/layout"
+	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/webpush"
 	"github.com/ekristen/guppi/pkg/ws"
 )
@@ -57,7 +57,7 @@ type Options struct {
 	PushKeys         *webpush.VAPIDKeys
 	PushStore        *webpush.Store
 	PrefStore        *preferences.Store
-	LayoutStore      *layout.Store
+	AttrsStore       *sessionattrs.Store
 	AuthEnabled      bool
 	PasswordStore    *auth.PasswordStore
 	SessionMgr       *auth.SessionManager
@@ -71,38 +71,85 @@ type Options struct {
 	PortForwardStore *portforward.Store
 }
 
-// layoutStoreAdapter bridges layout.Store to the narrow interfaces the peer
-// package consumes (LayoutSink + LayoutSource).
-type layoutStoreAdapter struct {
-	store *layout.Store
+// attrsStoreAdapter bridges sessionattrs.Store to the narrow SessionAttrsSink
+// interface the peer package consumes.
+type attrsStoreAdapter struct {
+	store *sessionattrs.Store
 }
 
-func (a layoutStoreAdapter) ApplyRemoteLayout(data map[string]json.RawMessage, updatedAt time.Time, origin string) (bool, error) {
-	_, accepted, err := a.store.ApplyRemote(data, updatedAt, origin)
+func (a attrsStoreAdapter) ApplyRemoteDelta(key string, background, hidden bool, updatedAt time.Time) (bool, error) {
+	_, accepted, err := a.store.ApplyRemote(key, sessionattrs.Attr{
+		Background: background, Hidden: hidden, UpdatedAt: updatedAt,
+	})
 	return accepted, err
 }
 
-func (a layoutStoreAdapter) SnapshotLayout() (map[string]json.RawMessage, time.Time, bool) {
-	l := a.store.Get()
-	if l.UpdatedAt.IsZero() {
-		return nil, time.Time{}, false
+func (a attrsStoreAdapter) ApplyRemoteSnapshot(attrs map[string]peer.SessionAttr) ([]string, error) {
+	conv := make(map[string]sessionattrs.Attr, len(attrs))
+	for k, v := range attrs {
+		conv[k] = sessionattrs.Attr{Background: v.Background, Hidden: v.Hidden, UpdatedAt: v.UpdatedAt}
 	}
-	return l.Data, l.UpdatedAt, true
+	return a.store.ApplySnapshot(conv)
 }
 
-// fanoutLayoutToPeers broadcasts a layout update to every connected paired
-// peer over the control WS. Best-effort: a full Send queue drops the frame
-// for that peer, the next push will catch them up.
-func fanoutLayoutToPeers(opts *Options, l layout.Layout) {
+func (a attrsStoreAdapter) SnapshotAttrs() map[string]peer.SessionAttr {
+	snap := a.store.Snapshot()
+	out := make(map[string]peer.SessionAttr, len(snap))
+	for k, v := range snap {
+		out[k] = peer.SessionAttr{Background: v.Background, Hidden: v.Hidden, UpdatedAt: v.UpdatedAt}
+	}
+	return out
+}
+
+// pruneSessionAttrs garbage-collects session-attribute keys whose owning host
+// is online but whose session is gone from the authoritative mesh list, and
+// drops expired tombstones. Genuinely-gone keys are tombstoned and the removal
+// is fanned out to peers + browsers. No-op when peer mode is unavailable
+// (without the host list we can't prove a session is gone, so we keep keys).
+func pruneSessionAttrs(opts *Options, hub *ws.Hub) {
+	if opts.AttrsStore == nil || opts.PeerMgr == nil {
+		return
+	}
+	sessions := opts.PeerMgr.GetAllSessions()
+	liveKeys := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		// Global key mirrors frontend sessionKey(): "<host>/<name>".
+		if s.Host != "" {
+			liveKeys[s.Host+"/"+s.Name] = true
+		} else {
+			liveKeys[s.Name] = true
+		}
+	}
+	online := map[string]bool{}
+	for _, h := range opts.PeerMgr.GetHosts() {
+		if h.Online {
+			online[h.ID] = true
+		}
+	}
+	gone, changed, err := opts.AttrsStore.Prune(liveKeys, online)
+	if err != nil || !changed {
+		return
+	}
+	for _, key := range gone {
+		fanoutAttrsDeltaToPeers(opts, key, opts.AttrsStore.Get(key))
+	}
+	if hub != nil {
+		hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated"})
+	}
+}
+
+// fanoutAttrsDeltaToPeers broadcasts a single-key session-attribute delta to
+// every connected paired peer over the control WS. Best-effort: a full Send
+// queue drops the frame; the peer reconciles from the next snapshot on link-up.
+func fanoutAttrsDeltaToPeers(opts *Options, key string, a sessionattrs.Attr) {
 	if opts.PeerMgr == nil || opts.Identity == nil {
 		return
 	}
-	payload := peer.LayoutSyncPayload{
-		UpdatedAt: l.UpdatedAt,
-		Origin:    opts.Identity.Fingerprint(),
-		Data:      l.Data,
-	}
-	msg, err := peer.NewMessage(peer.MsgLayoutSync, payload)
+	msg, err := peer.NewMessage(peer.MsgSessionAttrsDelta, peer.SessionAttrsDeltaPayload{
+		Origin: opts.Identity.Fingerprint(),
+		Key:    key,
+		Attr:   peer.SessionAttr{Background: a.Background, Hidden: a.Hidden, UpdatedAt: a.UpdatedAt},
+	})
 	if err != nil {
 		return
 	}
@@ -373,18 +420,18 @@ func Run(ctx context.Context, opts *Options) error {
 		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
 	}
 
-	// Wire cross-machine layout sync. The peer subsystem applies inbound
-	// MsgLayoutSync to our local layout store and bounces layout-updated
-	// through the browser hub. The synced blob is in the global session
-	// namespace; the frontend owns local<->global key translation.
-	if opts.LayoutStore != nil {
-		sink := layoutStoreAdapter{store: opts.LayoutStore}
+	// Wire cross-machine session-attribute sync. The peer subsystem applies
+	// inbound MsgSessionAttrs{Snapshot,Delta} to our server-authoritative store
+	// (per-key LWW) and bounces session-attrs-updated through the browser hub.
+	// Keys are global and host-qualified on every node — no translation layer.
+	if opts.AttrsStore != nil {
+		sink := attrsStoreAdapter{store: opts.AttrsStore}
 		if opts.LinkSupervisor != nil {
-			opts.LinkSupervisor.SetLayoutSink(sink)
+			opts.LinkSupervisor.SetAttrsSink(sink)
 			opts.LinkSupervisor.SetBrowserHub(hub)
 		}
 		if opts.PeerHandler != nil {
-			opts.PeerHandler.SetLayoutSink(sink)
+			opts.PeerHandler.SetAttrsSink(sink)
 			opts.PeerHandler.SetBrowserHub(hub)
 		}
 	}
@@ -1003,53 +1050,49 @@ func Run(ctx context.Context, opts *Options) error {
 				json.NewEncoder(w).Encode(&prefs)
 			})
 
-			// Layout sync endpoints — viewport state shared across tabs and devices.
-			r.Get("/layout", func(w http.ResponseWriter, r *http.Request) {
-				if opts.LayoutStore == nil {
-					http.Error(w, "layout sync not available", http.StatusServiceUnavailable)
+			// Session-attribute endpoints — server-authoritative, mesh-wide shared
+			// per-session UI bits (backgrounded / hidden). Keys are global and
+			// host-qualified ("<owner-fp>/<name>"), identical to the frontend's
+			// sessionKey(). No localStorage source of truth, no namespace
+			// translation, no whole-blob writes.
+			r.Get("/session-attrs", func(w http.ResponseWriter, r *http.Request) {
+				if opts.AttrsStore == nil {
+					http.Error(w, "session attrs not available", http.StatusServiceUnavailable)
 					return
 				}
+				// Opportunistically GC sessions that are genuinely gone (owner
+				// online but session absent) before returning the live sets.
+				pruneSessionAttrs(opts, hub)
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(opts.LayoutStore.Get())
+				json.NewEncoder(w).Encode(opts.AttrsStore.Sets())
 			})
 
-			r.Put("/layout", func(w http.ResponseWriter, r *http.Request) {
-				if opts.LayoutStore == nil {
-					http.Error(w, "layout sync not available", http.StatusServiceUnavailable)
+			r.Post("/session-attrs", func(w http.ResponseWriter, r *http.Request) {
+				if opts.AttrsStore == nil {
+					http.Error(w, "session attrs not available", http.StatusServiceUnavailable)
 					return
 				}
 				var body struct {
-					ClientID string                     `json:"client_id"`
-					Data     map[string]json.RawMessage `json:"data"`
+					Key        string `json:"key"`
+					Background bool   `json:"background"`
+					Hidden     bool   `json:"hidden"`
 				}
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					http.Error(w, "invalid JSON", http.StatusBadRequest)
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Key == "" {
+					http.Error(w, "key is required", http.StatusBadRequest)
 					return
 				}
-				if body.Data == nil {
-					http.Error(w, "data is required", http.StatusBadRequest)
-					return
-				}
-				updated, err := opts.LayoutStore.Set(body.Data, body.ClientID)
+				a, err := opts.AttrsStore.Set(body.Key, body.Background, body.Hidden)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
 				hub.BroadcastJSON(map[string]interface{}{
-					"type":       "layout-updated",
-					"client_id":  updated.UpdatedBy,
-					"updated_at": updated.UpdatedAt,
-					"data":       updated.Data,
+					"type": "session-attrs-updated",
+					"key":  body.Key,
 				})
-				// Fan out to paired peers so other machines in the mesh mirror
-				// this layout. The payload is in a machine-independent GLOBAL
-				// session namespace (every session keyed as <owner-fp>/<name>);
-				// the frontend translates to/from device-local keys at the edge.
-				// Origin = our local fingerprint so receivers can detect their
-				// own echoes if the link path loops.
-				fanoutLayoutToPeers(opts, updated)
+				fanoutAttrsDeltaToPeers(opts, body.Key, a)
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(updated)
+				json.NewEncoder(w).Encode(opts.AttrsStore.Sets())
 			})
 
 			// Port forward registry

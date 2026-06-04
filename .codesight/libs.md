@@ -38,10 +38,6 @@
   - function NewPeerStore: () (*PeerStore, error)
   - class Peer
   - class PeerStore
-- `pkg/layout/layout.go`
-  - function NewStore: () (*Store, error)
-  - class Layout
-  - class Store
 - `pkg/peer/bootstrap.go`
   - function NormalizeAddress: (addr string) (string, error)
   - function SendBootstrap: (ctx context.Context, addr string, req BootstrapRequest) (*BootstrapResponse, error)
@@ -62,7 +58,7 @@
   - class ChallengePayload
   - class StateUpdatePayload
   - class StateEventPayload
-  - _...13 more_
+  - _...15 more_
 - `pkg/peer/pty_manager.go`
   - function NewPTYManager: (tmuxPath string, actTracker *activity.Tracker) *PTYManager
   - class PTYManager
@@ -73,9 +69,8 @@
   - class PTYRelay
 - `pkg/peer/session.go`
   - class SessionDeps
-  - interface LayoutSink
+  - interface SessionAttrsSink
   - interface BrowserBroadcaster
-  - interface LayoutSource
 - `pkg/peer/supervisor.go`
   - function NewLinkSupervisor: (deps SessionDeps) *LinkSupervisor
   - class LinkSnapshot
@@ -93,6 +88,11 @@
   - class AgentBanner
   - _...2 more_
 - `pkg/server/server.go` — function Run: (ctx context.Context, opts *Options) error, class Options
+- `pkg/sessionattrs/sessionattrs.go`
+  - function NewStore: () (*Store, error)
+  - class Attr
+  - class Store
+  - class Sets
 - `pkg/socket/socket.go`
   - function DefaultPath: () string
   - function EnsureDir: (socketPath string) error
@@ -169,7 +169,6 @@
 - `web/src/hooks/useActivity.ts` — function useActivity: () => void, interface ActivitySnapshot
 - `web/src/hooks/useAuth.ts` — function useAuth: () => AuthState
 - `web/src/hooks/useHosts.ts` — function useHosts: () => void, interface Host
-- `web/src/hooks/useLayoutSync.ts` — function useLayoutSync: (authenticated, localFingerprint) => void, const LAYOUT_CLIENT_ID
 - `web/src/hooks/useNotifications.ts` — function useNotifications: (pushSubscribed) => void
 - `web/src/hooks/usePortForwards.ts`
   - function usePortForwards: () => void
@@ -182,6 +181,7 @@
   - const defaultPreferences: Preferences
   - const PreferencesContext
 - `web/src/hooks/usePushNotifications.ts` — function usePushNotifications: () => void
+- `web/src/hooks/useSessionAttrs.ts` — function useSessionAttrs: (authenticated) => void, type SessionAttrSets
 - `web/src/hooks/useSessions.ts`
   - function sessionKey: (session) => string
   - function parseSessionKey: (key) => void

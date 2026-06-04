@@ -61,9 +61,13 @@ const (
 	MsgPTYInput = "pty-input"
 	// MsgPTYControl carries a JSON control frame (e.g. resize) for a PTY.
 	MsgPTYControl = "pty-control"
-	// MsgLayoutSync mirrors the dashboard viewport state across paired peers.
-	// Last-write-wins by UpdatedAt timestamp.
-	MsgLayoutSync = "layout-sync"
+	// MsgSessionAttrsSnapshot carries the full shared session-attribute map
+	// (background/hidden per session key) to a freshly-connected peer for
+	// per-key last-write-wins reconciliation.
+	MsgSessionAttrsSnapshot = "session-attrs-snapshot"
+	// MsgSessionAttrsDelta carries a single-key shared session-attribute
+	// update across paired peers. Per-key LWW by UpdatedAt.
+	MsgSessionAttrsDelta = "session-attrs-delta"
 )
 
 // Message is the envelope for all control WebSocket messages
@@ -169,12 +173,25 @@ type PTYControlPayload struct {
 	Control  string `json:"control"`
 }
 
-// LayoutSyncPayload mirrors the dashboard layout from one paired node to
-// another. Data is opaque (frontend-owned schema), UpdatedAt drives LWW.
-type LayoutSyncPayload struct {
-	UpdatedAt time.Time                  `json:"updated_at"`
-	Origin    string                     `json:"origin"` // node fingerprint that produced the change
-	Data      map[string]json.RawMessage `json:"data"`
+// SessionAttr is the shared attribute set for one global session key. Mirrors
+// sessionattrs.Attr without importing that package into pkg/peer.
+type SessionAttr struct {
+	Background bool      `json:"background"`
+	Hidden     bool      `json:"hidden"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// SessionAttrsSnapshotPayload carries the full attribute map to a peer.
+type SessionAttrsSnapshotPayload struct {
+	Origin string                 `json:"origin"` // node fingerprint that produced the change
+	Attrs  map[string]SessionAttr `json:"attrs"`
+}
+
+// SessionAttrsDeltaPayload carries a single-key attribute update.
+type SessionAttrsDeltaPayload struct {
+	Origin string      `json:"origin"`
+	Key    string      `json:"key"`
+	Attr   SessionAttr `json:"attr"`
 }
 
 // SessionActionPayload forwards a session API action to a peer

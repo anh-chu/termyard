@@ -23,7 +23,7 @@ import { useWebSocket } from './hooks/useWebSocket'
 import { usePushNotifications } from './hooks/usePushNotifications'
 import { usePreferencesProvider, usePreferences, PreferencesContext } from './hooks/usePreferences'
 import { useAuth } from './hooks/useAuth'
-import { useLayoutSync } from './hooks/useLayoutSync'
+import { useSessionAttrs } from './hooks/useSessionAttrs'
 import { applyTheme } from './theme'
 
 type View = 'overview' | 'session' | 'settings' | 'setup'
@@ -161,16 +161,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   activeKeyRef.current = activeKey
   const { prefs } = usePreferences()
 
-  // Layout sync — mirrors viewport state to the server so other tabs/devices
-  // see the same pane tree, saved groups, sidebar state, etc.
-  const { version: layoutVersion, pushNow: pushLayout, applyRemote: applyRemoteLayout } = useLayoutSync(true, localHostId ?? null)
-
-  // NOTE: layoutVersion bumps when a peer/tab pushes a SHARED SESSION
-  // ATTRIBUTE (currently background-sessions). It is consumed by Sidebar to
-  // re-hydrate that set. Viewport state (pane-tree, active-key, saved-groups,
-  // group-order, sidebar-collapsed) is intentionally NOT re-hydrated here:
-  // it is per-device. Mirroring viewport across two physical screens made
-  // them fight over one layout and froze drag/selection.
+  // Shared session attributes (background / hidden) — server-authoritative,
+  // mirrored across the mesh. Viewport state (pane-tree, active-key,
+  // saved-groups, sidebar-collapsed) stays per-device in localStorage.
+  const { sets: sessionAttrs, setAttr: setSessionAttr, refresh: refreshSessionAttrs } = useSessionAttrs(true)
 
   // Auto-lock: idle detection + optional background accelerator
   const lastActivityRef = useRef<number>(Date.now())
@@ -536,10 +530,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       refresh()
       refreshHosts()
     }
-    if (evt.type === 'layout-updated') {
-      applyRemoteLayout(evt.data || {}, evt.client_id)
+    if (evt.type === 'session-attrs-updated') {
+      refreshSessionAttrs()
     }
-  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, applyRemoteLayout])
+  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs])
 
   const { connected } = useWebSocket('/ws/events', onEvent)
 
@@ -960,8 +954,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             onRenameGroup={renameGroup}
             onPairSessions={handlePairSessions}
             onRemoveFromSplit={closePane}
-            pushLayout={pushLayout}
-            layoutVersion={layoutVersion}
+            sessionAttrs={sessionAttrs}
+            setSessionAttr={setSessionAttr}
           />
         )}
         <div

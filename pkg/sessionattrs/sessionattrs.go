@@ -1,0 +1,257 @@
+// Package sessionattrs is the server-authoritative store for SHARED, per-session
+// UI attributes that are meaningful on every node in the mesh: whether a
+// session is "backgrounded" (parked) and whether it is "hidden" from the list.
+//
+// WHY THIS EXISTS (and replaced the old layout-sync path):
+//
+// These two bits used to ride on the generic layout-sync channel: the browser
+// owned the truth in localStorage, pushed a whole-blob snapshot to the server,
+// and a frontend translation layer rewrote session keys between a device-local
+// and a global namespace. That design produced a string of reset bugs:
+//   - whole-blob last-write-wins stamped now() on every write, so a fresh
+//     client's empty push always "won" and wiped everyone;
+//   - the local<->global key translation was not the identity in multi-host
+//     mode, so parked/hidden bits silently dropped on reload;
+//   - client-side pruning fanned resets across the whole mesh.
+//
+// This store fixes the class of bug structurally:
+//   - the SERVER owns the truth (no localStorage source of truth);
+//   - keys are GLOBAL and host-qualified everywhere ("<owner-fp>/<name>"),
+//     identical to sessionKey() on the frontend — no translation layer;
+//   - updates are PER-KEY deltas with PER-KEY last-write-wins timestamps, so a
+//     stale write on one key can never clobber another key, and there is no
+//     "empty payload wipes everything" failure mode;
+//   - garbage collection of dead sessions happens server-side (Prune), driven
+//     by the authoritative mesh session list, so a client can't fan a reset.
+package sessionattrs
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// Attr is the shared attribute set for one session key. A key is retained in
+// the store as long as either bit is set OR it is acting as a recent tombstone
+// (both bits false) guarding against a stale delta resurrecting it. UpdatedAt
+// drives per-key last-write-wins reconciliation across the mesh.
+type Attr struct {
+	Background bool      `json:"background"`
+	Hidden     bool      `json:"hidden"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+func (a Attr) empty() bool { return !a.Background && !a.Hidden }
+
+// tombstoneTTL bounds how long a cleared (both-false) entry is kept to suppress
+// out-of-order resurrection. After this it is dropped on the next mutation.
+const tombstoneTTL = 24 * time.Hour
+
+// Store persists session attributes to disk. All keys are global
+// ("<owner-fp>/<name>").
+type Store struct {
+	mu    sync.RWMutex
+	path  string
+	attrs map[string]Attr
+}
+
+func configDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "guppi"), nil
+}
+
+// NewStore loads or creates the session-attrs store.
+func NewStore() (*Store, error) {
+	dir, err := configDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	s := &Store{
+		path:  filepath.Join(dir, "session-attrs.json"),
+		attrs: map[string]Attr{},
+	}
+	if raw, err := os.ReadFile(s.path); err == nil {
+		_ = json.Unmarshal(raw, &s.attrs)
+		if s.attrs == nil {
+			s.attrs = map[string]Attr{}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Snapshot returns a copy of every retained attribute (including tombstones).
+// Used to seed a freshly-connected peer so it can reconcile via per-key LWW.
+func (s *Store) Snapshot() map[string]Attr {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]Attr, len(s.attrs))
+	for k, v := range s.attrs {
+		out[k] = v
+	}
+	return out
+}
+
+// Sets is the flat, client-facing view: the set of keys currently backgrounded
+// and the set currently hidden. Tombstones (both-false) are omitted.
+type Sets struct {
+	Background []string `json:"background"`
+	Hidden     []string `json:"hidden"`
+}
+
+// Sets returns the flat client-facing view.
+func (s *Store) Sets() Sets {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := Sets{Background: []string{}, Hidden: []string{}}
+	for k, v := range s.attrs {
+		if v.Background {
+			out.Background = append(out.Background, k)
+		}
+		if v.Hidden {
+			out.Hidden = append(out.Hidden, k)
+		}
+	}
+	return out
+}
+
+// Set applies a local (browser-originated) single-key update, stamping it with
+// the current time. Returns the stored attr so the caller can fan it out.
+func (s *Store) Set(key string, background, hidden bool) (Attr, error) {
+	a := Attr{Background: background, Hidden: hidden, UpdatedAt: time.Now()}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.put(key, a)
+	if err := s.save(); err != nil {
+		return Attr{}, err
+	}
+	return a, nil
+}
+
+// ApplyRemote merges a single-key delta received from a paired peer using
+// per-key last-write-wins. Returns (attr, accepted): accepted=false means the
+// local copy was newer-or-equal and the delta was ignored.
+func (s *Store) ApplyRemote(key string, in Attr) (Attr, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.attrs[key]; ok && !in.UpdatedAt.After(cur.UpdatedAt) {
+		return cur, false, nil
+	}
+	s.put(key, in)
+	if err := s.save(); err != nil {
+		return Attr{}, false, err
+	}
+	return in, true, nil
+}
+
+// ApplySnapshot merges a full peer snapshot via per-key LWW. Returns the keys
+// that were accepted (changed locally) so the caller can notify browsers.
+func (s *Store) ApplySnapshot(snap map[string]Attr) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var changed []string
+	for k, in := range snap {
+		if cur, ok := s.attrs[k]; ok && !in.UpdatedAt.After(cur.UpdatedAt) {
+			continue
+		}
+		s.put(k, in)
+		changed = append(changed, k)
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+	if err := s.save(); err != nil {
+		return nil, err
+	}
+	return changed, nil
+}
+
+// Prune garbage-collects keys whose owning host is known to be ONLINE but whose
+// session is absent from liveKeys (the authoritative mesh session list), and
+// drops expired tombstones. Pruned keys are turned into fresh tombstones so the
+// removal propagates via the normal delta/LWW path. Returns the keys that were
+// turned into tombstones (genuinely-gone sessions) for fan-out, plus whether
+// anything changed on disk.
+//
+// onlineHosts is the set of host fingerprints currently connected/online; a key
+// is only eligible for GC when its owner is in this set (otherwise its absence
+// just means the owner is offline, not that the session is gone).
+func (s *Store) Prune(liveKeys map[string]bool, onlineHosts map[string]bool) ([]string, bool, error) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var gone []string
+	changed := false
+	for k, v := range s.attrs {
+		// Expired tombstone: drop silently.
+		if v.empty() {
+			if now.Sub(v.UpdatedAt) > tombstoneTTL {
+				delete(s.attrs, k)
+				changed = true
+			}
+			continue
+		}
+		if liveKeys[k] {
+			continue
+		}
+		owner := ownerOf(k)
+		if owner == "" || !onlineHosts[owner] {
+			continue // owner offline/unknown -> can't prove the session is gone
+		}
+		// Owner online, session absent -> genuinely gone. Tombstone it.
+		s.attrs[k] = Attr{UpdatedAt: now}
+		gone = append(gone, k)
+		changed = true
+	}
+	if changed {
+		if err := s.save(); err != nil {
+			return nil, false, err
+		}
+	}
+	return gone, changed, nil
+}
+
+// Get returns the stored attr for a key (zero value if absent).
+func (s *Store) Get(key string) Attr {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.attrs[key]
+}
+
+// put writes an entry, collapsing expired tombstones. Caller holds the lock.
+func (s *Store) put(key string, a Attr) {
+	if a.empty() && a.UpdatedAt.IsZero() {
+		delete(s.attrs, key)
+		return
+	}
+	s.attrs[key] = a
+}
+
+func (s *Store) save() error {
+	raw, err := json.MarshalIndent(s.attrs, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, raw, 0o644)
+}
+
+// ownerOf returns the host-fingerprint prefix of a global session key
+// ("<owner-fp>/<name>"). Mirrors parseSessionKey() on the frontend: the first
+// '/' separates host from name.
+func ownerOf(key string) string {
+	for i := 0; i < len(key); i++ {
+		if key[i] == '/' {
+			return key[:i]
+		}
+	}
+	return ""
+}

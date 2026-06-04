@@ -17,16 +17,16 @@
 - `pkg/toolevents/tracker.go` — NewTracker, Event, PaneKey, SessionMeta, Tracker
 - `pkg/activity/tracker.go` — NewTracker, SessionActivity, Snapshot, Tracker
 - `pkg/git/worktree.go` — IsWorktree, FindMainWorktreeRoot, RemoveWorktree, CreateWorktree
-- `pkg/peer/session.go` — SessionDeps, LayoutSink, BrowserBroadcaster, LayoutSource
+- `pkg/sessionattrs/sessionattrs.go` — NewStore, Attr, Store, Sets
 - `pkg/state/manager.go` — NewManager, SessionMetadata, Manager, StateEvent
 - `pkg/tmux/types.go` — Session, Window, PaneDetailed, Pane
 - `pkg/toolevents/reconciler.go` — NewReconciler, PaneState, PaneInfo, Reconciler
 - `pkg/ws/hub.go` — CheckSameOrigin, NewHub, Hub, ActivitySource
 - `pkg/agentcheck/agentcheck.go` — CheckAgents, AgentStatus, StatusResult
 - `pkg/identity/peers.go` — NewPeerStore, Peer, PeerStore
-- `pkg/layout/layout.go` — NewStore, Layout, Store
 - `pkg/peer/pty_manager.go` — NewPTYManager, PTYManager, ActivePTY
 - `pkg/peer/pty_relay.go` — NewPTYRelay, GenerateStreamID, PTYRelay
+- `pkg/peer/session.go` — SessionDeps, SessionAttrsSink, BrowserBroadcaster
 - `pkg/peer/supervisor.go` — NewLinkSupervisor, LinkSnapshot, LinkSupervisor
 - `pkg/portforward/store.go` — NewStore, Forward, Store
 - `pkg/socket/socket.go` — DefaultPath, EnsureDir, Cleanup
@@ -43,7 +43,7 @@
 - `web/src/lib/shortcuts.ts` — getShortcuts, ShortcutItem, modKey
 - `web/src/hooks/useActivity.ts` — useActivity, ActivitySnapshot
 - `web/src/hooks/useHosts.ts` — useHosts, Host
-- `web/src/hooks/useLayoutSync.ts` — useLayoutSync, LAYOUT_CLIENT_ID
+- `web/src/hooks/useSessionAttrs.ts` — useSessionAttrs, SessionAttrSets
 - `web/src/hooks/useToolEvents.ts` — useToolEvents, ToolEvent
 - `web/src/hooks/useAuth.ts` — useAuth
 - `web/src/hooks/useNotifications.ts` — useNotifications

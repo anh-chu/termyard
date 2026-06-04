@@ -6,7 +6,7 @@
 
 ## Scale
 
-87 API routes · 15 UI components · 62 library files · 1 middleware layers · 7 environment variables
+89 API routes · 15 UI components · 62 library files · 1 middleware layers · 7 environment variables
 
 ## Subsystems
 
@@ -22,7 +22,6 @@
 - **[Host](./host.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Hosts](./hosts.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Hub](./hub.md)** — 1 routes — touches: auth
-- **[Layout](./layout.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Name](./name.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Notify](./notify.md)** — 1 routes — touches: auth, ai
 - **[Peers](./peers.md)** — 11 routes — touches: auth, db, queue, ai
@@ -34,6 +33,8 @@
 - **[Push](./push.md)** — 4 routes — touches: auth, db, queue, ai
 - **[Rows](./rows.md)** — 1 routes — touches: auth, db, queue, ai
 - **[Session](./session.md)** — 10 routes — touches: auth, db, queue, ai
+- **[Session-attrs](./session-attrs.md)** — 4 routes — touches: auth, db, queue, ai
+- **[Sessionattrs_test](./sessionattrs_test.md)** — 2 routes — touches: auth
 - **[Sessions](./sessions.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Stats](./stats.md)** — 2 routes — touches: auth, db, queue, ai
 - **[Tool-event](./tool-event.md)** — 4 routes — touches: auth, db, queue, ai
@@ -49,7 +50,7 @@
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `path/filepath` — imported by **22** files
+- `path/filepath` — imported by **23** files
 - `encoding/json` — imported by **22** files
 - `net/http` — imported by **11** files
 - `os/exec` — imported by **10** files
@@ -67,4 +68,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `XDG_RUNTIME_DIR` — `pkg/socket/socket.go`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-06-03_
+_Back to [index.md](./index.md) · Generated 2026-06-04_

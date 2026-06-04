@@ -33,17 +33,23 @@ const (
 	RoleListener
 )
 
-// LayoutSink is the slice of pkg/layout the session loop needs in order to
-// merge layout updates received from paired peers. Returns (accepted, err)
-// — accepted=false means the local copy was newer and the update was
-// dropped. Kept narrow so pkg/peer doesn't pull pkg/layout directly.
-type LayoutSink interface {
-	ApplyRemoteLayout(data map[string]json.RawMessage, updatedAt time.Time, origin string) (bool, error)
+// SessionAttrsSink is the slice of pkg/sessionattrs the session loop needs in
+// order to merge shared session-attribute updates received from paired peers.
+// Kept narrow so pkg/peer doesn't pull pkg/sessionattrs directly.
+type SessionAttrsSink interface {
+	// ApplyRemoteDelta merges a single-key delta via per-key LWW. accepted=false
+	// means the local copy was newer-or-equal and the delta was dropped.
+	ApplyRemoteDelta(key string, background, hidden bool, updatedAt time.Time) (accepted bool, err error)
+	// ApplyRemoteSnapshot merges a full peer snapshot via per-key LWW, returning
+	// the keys that changed locally.
+	ApplyRemoteSnapshot(attrs map[string]SessionAttr) (changed []string, err error)
+	// SnapshotAttrs returns the full local attribute map to seed a fresh peer.
+	SnapshotAttrs() map[string]SessionAttr
 }
 
 // BrowserBroadcaster pushes a JSON message to every connected browser. Used
-// to forward layout-updated events to the local UI after we accept a remote
-// layout-sync from a paired peer.
+// to forward session-attrs-updated events to the local UI after we accept a
+// remote update from a paired peer.
 type BrowserBroadcaster interface {
 	BroadcastJSON(v interface{})
 }
@@ -59,7 +65,7 @@ type SessionDeps struct {
 	TmuxClient   *tmux.Client
 	PTYManager   *PTYManager
 	PTYRelay     *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
-	LayoutSink   LayoutSink
+	AttrsSink    SessionAttrsSink
 	BrowserHub   BrowserBroadcaster
 }
 
@@ -158,7 +164,7 @@ func runSession(
 	// Initial pushes — both sides advertise themselves.
 	sendStateUpdate(pc, deps)
 	sendInitialPeerState(pc, deps, peerID)
-	sendInitialLayoutSync(pc, deps)
+	sendInitialSessionAttrs(pc, deps)
 
 	// Background loops.
 	go pingLoop(sessionCtx, cw)
@@ -190,28 +196,19 @@ func runSession(
 	}
 }
 
-// LayoutSource is the slice of pkg/layout the session loop needs to push
-// our current layout to a freshly connected peer.
-type LayoutSource interface {
-	SnapshotLayout() (data map[string]json.RawMessage, updatedAt time.Time, ok bool)
-}
-
-// sendInitialLayoutSync pushes our current layout once on link-up so the
-// remote can reconcile. If LayoutSink also implements LayoutSource (the
-// usual case for the layout.Store adapter), we use it; otherwise we skip.
-func sendInitialLayoutSync(pc *PeerConnection, deps SessionDeps) {
-	src, ok := deps.LayoutSink.(LayoutSource)
-	if !ok {
+// sendInitialSessionAttrs pushes our full shared session-attribute map once on
+// link-up so the remote can reconcile via per-key LWW.
+func sendInitialSessionAttrs(pc *PeerConnection, deps SessionDeps) {
+	if deps.AttrsSink == nil {
 		return
 	}
-	data, updatedAt, ok := src.SnapshotLayout()
-	if !ok || updatedAt.IsZero() {
+	attrs := deps.AttrsSink.SnapshotAttrs()
+	if len(attrs) == 0 {
 		return
 	}
-	msg, err := NewMessage(MsgLayoutSync, LayoutSyncPayload{
-		UpdatedAt: updatedAt,
-		Origin:    deps.Identity.Fingerprint(),
-		Data:      data,
+	msg, err := NewMessage(MsgSessionAttrsSnapshot, SessionAttrsSnapshotPayload{
+		Origin: deps.Identity.Fingerprint(),
+		Attrs:  attrs,
 	})
 	if err != nil {
 		return
@@ -541,37 +538,53 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 	case MsgRequestState:
 		sendStateUpdate(pc, deps)
 
-	case MsgLayoutSync:
-		var p LayoutSyncPayload
+	case MsgSessionAttrsSnapshot:
+		var p SessionAttrsSnapshotPayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			log.WithError(err).Debug("invalid layout-sync")
+			log.WithError(err).Debug("invalid session-attrs-snapshot")
 			return
 		}
-		// Ignore loops: don't accept our own broadcast bouncing back.
-		if p.Origin == deps.Identity.Fingerprint() {
+		if p.Origin == deps.Identity.Fingerprint() || deps.AttrsSink == nil {
 			return
 		}
-		if deps.LayoutSink == nil {
-			return
-		}
-		accepted, err := deps.LayoutSink.ApplyRemoteLayout(p.Data, p.UpdatedAt, p.Origin)
+		changed, err := deps.AttrsSink.ApplyRemoteSnapshot(p.Attrs)
 		if err != nil {
-			log.WithError(err).Warn("apply remote layout failed")
+			log.WithError(err).Warn("apply remote session-attrs snapshot failed")
+			return
+		}
+		if len(changed) > 0 && deps.BrowserHub != nil {
+			deps.BrowserHub.BroadcastJSON(map[string]interface{}{
+				"type":   "session-attrs-updated",
+				"origin": p.Origin,
+			})
+		}
+		log.WithField("origin", p.Origin).WithField("changed", len(changed)).Debug("applied remote session-attrs snapshot")
+
+	case MsgSessionAttrsDelta:
+		var p SessionAttrsDeltaPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid session-attrs-delta")
+			return
+		}
+		if p.Origin == deps.Identity.Fingerprint() || deps.AttrsSink == nil {
+			return
+		}
+		accepted, err := deps.AttrsSink.ApplyRemoteDelta(p.Key, p.Attr.Background, p.Attr.Hidden, p.Attr.UpdatedAt)
+		if err != nil {
+			log.WithError(err).Warn("apply remote session-attrs delta failed")
 			return
 		}
 		if !accepted {
 			return
 		}
-		// Tell our local browser tabs so the dashboard updates immediately.
 		if deps.BrowserHub != nil {
 			deps.BrowserHub.BroadcastJSON(map[string]interface{}{
-				"type":       "layout-updated",
-				"client_id":  p.Origin,
-				"updated_at": p.UpdatedAt,
-				"data":       p.Data,
+				"type":   "session-attrs-updated",
+				"origin": p.Origin,
+				"key":    p.Key,
 			})
 		}
-		log.WithField("origin", p.Origin).Debug("applied remote layout")
+		log.WithField("origin", p.Origin).WithField("key", p.Key).Debug("applied remote session-attrs delta")
 
 	default:
 		log.WithField("type", msg.Type).Debug("unknown session message")
