@@ -3,6 +3,7 @@
 This is a mixed Go + web project using chi for the HTTP router.
 
 High-impact files (most imported, changes here affect many other files):
+
 - path/filepath (imported by 17 files)
 - encoding/json (imported by 15 files)
 - crypto/rand (imported by 9 files)
@@ -13,6 +14,7 @@ High-impact files (most imported, changes here affect many other files):
 - os/exec (imported by 7 files)
 
 Required environment variables (no defaults):
+
 - PATH (pkg/commands/install/install.go)
 - SHELL (pkg/tmux/client.go)
 - TMPDIR (pkg/socket/socket.go)
