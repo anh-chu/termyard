@@ -15,3 +15,6 @@ node_modules
 logo.jpg
 build.sh
 notes/
+
+# codesight generated AI context
+.codesight/
