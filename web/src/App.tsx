@@ -422,6 +422,11 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     setNewSessionModalOpen(true)
   }, [])
 
+  const openNewSessionPlain = useCallback(() => {
+    splitTargetRef.current = null
+    setNewSessionModalOpen(true)
+  }, [])
+
   // Global keyboard shortcuts (tinykeys). $mod = Cmd on macOS, Ctrl elsewhere.
   useEffect(() => {
     const cycle = (dir: 1 | -1) => {
@@ -496,13 +501,15 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       }),
       // Quick Switcher: Cmd/Ctrl + Shift + K (K alone collides w/ Firefox search bar)
       '$mod+Shift+k': handler(() => setQuickSwitcherOpen(true)),
+      // New session: Cmd/Ctrl + Shift + Enter (N collides w/ browser private window)
+      '$mod+Shift+Enter': handler(() => openNewSessionPlain()),
       // Overview: Cmd/Ctrl + Shift + H (Shift+O collides w/ Firefox bookmarks)
       '$mod+Shift+h': handler(() => navigateTo(null)),
       // Cycle sessions: Cmd/Ctrl + Shift + Arrow (Shift+[ / ] switches browser tabs)
       '$mod+Shift+ArrowRight': handler(() => cycle(1)),
       '$mod+Shift+ArrowLeft': handler(() => cycle(-1)),
     }, { ignore })
-  }, [navigateTo, activeKey, openNewSessionModal])
+  }, [navigateTo, activeKey, openNewSessionModal, openNewSessionPlain])
 
   // Listen for state events via WebSocket
   const onEvent = useCallback((evt: any) => {

@@ -255,12 +255,13 @@ export function useTerminal(sessionName: string, hostId?: string) {
           }
         } else {
           // Shift family: help (/ or ?), split (\), quick switcher (k),
-          // overview (h), fullscreen (f), cycle sessions (arrows)
+          // new session (Enter), overview (h), fullscreen (f), cycle sessions (arrows)
           if (
             key === '/' ||
             key === '?' ||
             key === '\\' ||
             key === 'k' ||
+            key === 'enter' ||
             key === 'h' ||
             key === 'f' ||
             e.key === 'ArrowLeft' ||

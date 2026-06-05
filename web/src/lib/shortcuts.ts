@@ -13,6 +13,7 @@ export function getShortcuts(): ShortcutItem[] {
   return [
     { section: 'Navigation' },
     { keys: [`${mod}+Shift+K`], label: 'Quick Switcher' },
+    { keys: [`${mod}+Shift+Enter`], label: 'New session' },
     { keys: [`${mod}+Shift+→`, `${mod}+Shift+←`], label: 'Next / Previous session' },
     { keys: [`${mod}+Shift+H`], label: 'Overview / Dashboard' },
     { keys: [`${mod}+,`], label: 'Settings' },
