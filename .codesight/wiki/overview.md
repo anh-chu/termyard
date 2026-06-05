@@ -50,7 +50,7 @@
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `path/filepath` — imported by **23** files
+- `path/filepath` — imported by **24** files
 - `encoding/json` — imported by **22** files
 - `net/http` — imported by **11** files
 - `os/exec` — imported by **10** files
@@ -68,4 +68,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `XDG_RUNTIME_DIR` — `pkg/socket/socket.go`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-06-04_
+_Back to [index.md](./index.md) · Generated 2026-06-05_

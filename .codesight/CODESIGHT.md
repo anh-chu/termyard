@@ -3,8 +3,8 @@
 > **Stack:** chi | none | react | go
 
 > 89 routes | 0 models | 15 components | 62 lib files | 7 env vars | 1 middleware | 7% test coverage
-> **Token savings:** this file is ~5,800 tokens. Without it, AI exploration would cost ~77,500 tokens. **Saves ~71,700 tokens per conversation.**
-> **Last scanned:** 2026-06-04 04:35 — re-run after significant changes
+> **Token savings:** this file is ~5,900 tokens. Without it, AI exploration would cost ~77,500 tokens. **Saves ~71,700 tokens per conversation.**
+> **Last scanned:** 2026-06-05 14:55 — re-run after significant changes
 
 ---
 
@@ -369,7 +369,7 @@
 
 ## Most Imported Files (change these carefully)
 
-- `path/filepath` — imported by **23** files
+- `path/filepath` — imported by **24** files
 - `encoding/json` — imported by **22** files
 - `net/http` — imported by **11** files
 - `os/exec` — imported by **10** files
@@ -392,7 +392,7 @@
 
 ## Import Map (who imports what)
 
-- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/update/update.go` +18 more
+- `path/filepath` ← `pkg/agentcheck/agentcheck.go`, `pkg/auth/auth.go`, `pkg/auth/session_persist_test.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go` +19 more
 - `encoding/json` ← `pkg/auth/auth.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go`, `pkg/identity/identity.go` +17 more
 - `net/http` ← `pkg/auth/auth.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go`, `pkg/peer/bootstrap.go`, `pkg/peer/bootstrap_test.go` +6 more
 - `os/exec` ← `pkg/agentcheck/agentcheck.go`, `pkg/commands/agent-setup/agent_setup.go`, `pkg/commands/install/install.go`, `pkg/commands/notify/notify.go`, `pkg/commands/update/update.go` +5 more
@@ -408,7 +408,7 @@
 # Test Coverage
 
 > **7%** of routes and models are covered by tests
-> 12 test files found
+> 13 test files found
 
 ## Covered Routes
 

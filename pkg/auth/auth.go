@@ -91,19 +91,65 @@ func (ps *PasswordStore) Verify(password string) bool {
 	return bcrypt.CompareHashAndPassword(ps.hash, []byte(password)) == nil
 }
 
-// SessionManager manages in-memory session tokens with expiry.
+// SessionManager manages session tokens with expiry, persisted to disk so
+// they survive server restarts.
 type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]time.Time
 	ttl      time.Duration
+	path     string
 }
 
-// NewSessionManager creates a session manager with the given TTL.
+// NewSessionManager creates a session manager with the given TTL. Sessions are
+// persisted to ~/.config/guppi/sessions.json and reloaded on startup, with
+// already-expired entries pruned.
 func NewSessionManager(ttl time.Duration) *SessionManager {
-	return &SessionManager{
+	sm := &SessionManager{
 		sessions: make(map[string]time.Time),
 		ttl:      ttl,
 	}
+	if dir, err := configDir(); err == nil {
+		if err := os.MkdirAll(dir, 0o755); err == nil {
+			sm.path = filepath.Join(dir, "sessions.json")
+			sm.load()
+		}
+	}
+	return sm
+}
+
+// load reads persisted sessions from disk, dropping expired entries. Caller
+// must not hold the lock. Best-effort: a missing or corrupt file is ignored.
+func (sm *SessionManager) load() {
+	data, err := os.ReadFile(sm.path)
+	if err != nil {
+		return
+	}
+	var stored map[string]time.Time
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return
+	}
+	now := time.Now()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for token, expiry := range stored {
+		if now.Before(expiry) {
+			sm.sessions[token] = expiry
+		}
+	}
+}
+
+// save writes the current sessions to disk. Caller must hold sm.mu.
+// Best-effort: persistence failures are non-fatal (sessions still work
+// in-memory until the next restart).
+func (sm *SessionManager) save() {
+	if sm.path == "" {
+		return
+	}
+	data, err := json.Marshal(sm.sessions)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(sm.path, data, 0o600)
 }
 
 // Create generates a new session token.
@@ -116,6 +162,7 @@ func (sm *SessionManager) Create() (string, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessions[token] = time.Now().Add(sm.ttl)
+	sm.save()
 	return token, nil
 }
 
@@ -137,6 +184,7 @@ func (sm *SessionManager) Revoke(token string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	delete(sm.sessions, token)
+	sm.save()
 }
 
 // Cleanup removes expired sessions. Call periodically.
@@ -149,6 +197,7 @@ func (sm *SessionManager) Cleanup() {
 			delete(sm.sessions, token)
 		}
 	}
+	sm.save()
 }
 
 const cookieName = "guppi_session"
