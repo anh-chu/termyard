@@ -749,7 +749,15 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     navigateTo(null, 'settings')
   }, [navigateTo])
 
-  const handleCreateSession = useCallback(async (name: string, path: string, command: string, hostId?: string, worktreeBranch?: string, agentType?: string): Promise<string | null> => {
+  const handleCreateSession = useCallback(async (
+    name: string,
+    path: string,
+    command: string,
+    hostId?: string,
+    worktreeBranch?: string,
+    agentType?: string,
+    splitTarget?: { key: string; direction: 'h' | 'v'; newFirst?: boolean },
+  ): Promise<string | null> => {
     // For worktree sessions keep the modal open until we confirm success.
     if (!worktreeBranch) setNewSessionModalOpen(false)
     try {
@@ -771,7 +779,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         const resolvedName = payload?.name || name
         const sessKey = hostId ? `${hostId}/${resolvedName}` : resolvedName
         pendingSessionRef.current = sessKey
-        const target = splitTargetRef.current
+        // Direct parameter takes priority over ref (avoids race when drag fires twice)
+        const target = splitTarget ?? splitTargetRef.current
         splitTargetRef.current = null
         if (target) {
           setPaneTree(prev => {
@@ -823,13 +832,17 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       setSingleView(null)
     }
 
+    let splitTarget: { key: string; direction: 'h' | 'v'; newFirst?: boolean } | undefined
     if (key) {
       const direction: 'h' | 'v' = (edge === 'top' || edge === 'bottom') ? 'v' : 'h'
       const newFirst = edge === 'left' || edge === 'top'
-      splitTargetRef.current = { key, direction, newFirst }
+      splitTarget = { key, direction, newFirst }
+      // Also set ref for dissolve-effect guard; handleCreateSession prefers direct param
+      splitTargetRef.current = splitTarget
     }
     const { host } = key ? parseSessionKey(key) : { host: undefined }
-    handleCreateSession('shell', '~', '', host || undefined)
+    // Pass splitTarget directly — avoids ref race when event fires on both pane and container
+    handleCreateSession('shell', '~', '', host || undefined, undefined, undefined, splitTarget)
   }, [singleView, activeKey, activeGroupId, paneTree, handleCreateSession])
 
   const toggleFullscreen = useCallback(() => {
