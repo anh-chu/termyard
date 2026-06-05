@@ -9,6 +9,8 @@ import { toolColors, statusConfig } from '../theme'
 interface OverviewProps {
   sessions: Session[]
   hosts: Host[]
+  hiddenSet: Set<string>
+  backgroundSet: Set<string>
   onSessionSelect: (session: Session) => void
   getSessionEvents: (session: string) => ToolEvent[]
   getSessionActivity: (session: string) => ActivitySnapshot | undefined
@@ -242,6 +244,8 @@ function HostStatsSection({ host, totalPanes }: { host: Host; totalPanes: number
 export function Overview({
   sessions,
   hosts,
+  hiddenSet,
+  backgroundSet,
   onSessionSelect,
   getSessionEvents,
   getSessionActivity,
@@ -252,6 +256,13 @@ export function Overview({
   const [stats, setStats] = useState<Stats | null>(null)
   const { prefs } = usePreferences()
   const hasMultipleHosts = hosts.length > 1
+
+  // Only show foreground sessions (not hidden, not background)
+  const foregroundSessions = sessions.filter(s => {
+    const sk = sessionKey(s)
+    return !hiddenSet.has(sk) && !backgroundSet.has(sk)
+  })
+  const hiddenCount = sessions.length - foregroundSessions.length
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -349,14 +360,21 @@ export function Overview({
       )}
 
       {/* Sessions grid */}
-      {sessions.length === 0 && (
+      {foregroundSessions.length === 0 && (
         <div className="text-mute text-[13px] font-medium mb-10 ml-1">
-          No tmux sessions found. Start a tmux session to get started.
+          {sessions.length === 0
+            ? 'No tmux sessions found. Start a tmux session to get started.'
+            : 'All sessions are hidden or backgrounded.'}
+          {hiddenCount > 0 && (
+            <span className="text-mute/50">
+              {' '}({hiddenCount} hidden/backgrounded)
+            </span>
+          )}
         </div>
       )}
       {(() => {
         const groups = new Map<string, Session[]>()
-        for (const s of sessions) {
+        for (const s of foregroundSessions) {
           const label = hasMultipleHosts ? (s.host_name || 'Local') : 'Sessions'
           if (!groups.has(label)) groups.set(label, [])
           groups.get(label)!.push(s)

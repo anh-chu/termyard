@@ -1091,6 +1091,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             <Overview
               sessions={sessions}
               hosts={hosts}
+              hiddenSet={sessionAttrs.hidden}
+              backgroundSet={sessionAttrs.background}
               onSessionSelect={handleSessionSelect}
               getSessionEvents={getSessionEvents}
               getSessionActivity={getSessionActivity}
