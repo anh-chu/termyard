@@ -1,10 +1,6 @@
 # Project Context
 
-This is a mixed project using chi.
-
-The API has 70 routes. See .codesight/routes.md for the full route map with methods, paths, and tags.
-The UI has 13 components. See .codesight/components.md for the full list with props.
-Middleware includes: auth.
+This is a mixed Go + web project using chi for the HTTP router.
 
 High-impact files (most imported, changes here affect many other files):
 - path/filepath (imported by 17 files)
@@ -24,5 +20,4 @@ Required environment variables (no defaults):
 - XDG_DATA_HOME (pkg/webpush/vapid.go)
 - XDG_RUNTIME_DIR (pkg/socket/socket.go)
 
-Read .codesight/wiki/index.md for orientation (WHERE things live). Then read actual source files before implementing. Wiki articles are navigation aids, not implementation guides.
-Read .codesight/CODESIGHT.md for the complete AI context map including all routes, schema, components, libraries, config, middleware, and dependency graph.
+Read actual source files before implementing.
