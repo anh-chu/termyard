@@ -80,27 +80,49 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
     return uniqueSessionName(base)
   }, [path, worktreeMode, worktreeBranch, existingNames])
 
-  const recentPaths = useMemo(() => {
+  interface RecentLocation {
+    path: string
+    hostId: string   // value to assign to selectedHost
+    hostName: string
+    local: boolean
+  }
+
+  const recentLocations = useMemo<RecentLocation[]>(() => {
+    const localId = localHost?.id || ''
+    const onlineIds = new Set(onlineHosts.map(h => h.id))
+    const hostNameById = new Map(onlineHosts.map(h => [h.id, h.name]))
     const seen = new Set<string>()
     const sorted = [...sessions]
       .filter(s => s.project_path && s.project_path.trim())
       .sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime())
-    const unique: string[] = []
+    const unique: RecentLocation[] = []
     for (const s of sorted) {
-      if (s.project_path && !seen.has(s.project_path)) {
-        seen.add(s.project_path)
-        unique.push(s.project_path)
-        if (unique.length >= 10) break
-      }
+      const p = s.project_path!
+      const local = !s.host
+      const hostId = local ? localId : s.host!
+      // Skip locations whose host is offline/unknown (cannot create there)
+      if (!onlineIds.has(hostId)) continue
+      const key = `${hostId}::${p}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      unique.push({
+        path: p,
+        hostId,
+        hostName: local
+          ? (localHost?.name || s.host_name || 'Local')
+          : (hostNameById.get(s.host!) || s.host_name || s.host!),
+        local,
+      })
+      if (unique.length >= 10) break
     }
     return unique
-  }, [sessions])
+  }, [sessions, onlineHosts, localHost])
 
-  const filteredPaths = useMemo(() => {
-    if (!path) return recentPaths
+  const filteredLocations = useMemo(() => {
+    if (!path) return recentLocations
     const lower = path.toLowerCase()
-    return recentPaths.filter(p => p.toLowerCase().startsWith(lower))
-  }, [path, recentPaths])
+    return recentLocations.filter(l => l.path.toLowerCase().startsWith(lower))
+  }, [path, recentLocations])
 
   const handlePresetClick = (id: string) => {
     if (preset === id) {
@@ -112,23 +134,28 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
     }
   }
 
+  const selectLocation = (loc: RecentLocation) => {
+    setPath(loc.path)
+    setSelectedHost(loc.hostId)
+    setDropdownOpen(false)
+    setHighlightedIndex(-1)
+  }
+
   const handlePathKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (dropdownOpen && filteredPaths.length > 0) {
+    if (dropdownOpen && filteredLocations.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setHighlightedIndex(prev => (prev < filteredPaths.length - 1 ? prev + 1 : 0))
+        setHighlightedIndex(prev => (prev < filteredLocations.length - 1 ? prev + 1 : 0))
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setHighlightedIndex(prev => (prev > 0 ? prev - 1 : filteredPaths.length - 1))
+        setHighlightedIndex(prev => (prev > 0 ? prev - 1 : filteredLocations.length - 1))
         return
       }
       if (e.key === 'Enter' && highlightedIndex >= 0) {
         e.preventDefault()
-        setPath(filteredPaths[highlightedIndex])
-        setDropdownOpen(false)
-        setHighlightedIndex(-1)
+        selectLocation(filteredLocations[highlightedIndex])
         return
       }
       if (e.key === 'Escape') {
@@ -185,7 +212,7 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
 
   useEffect(() => {
     setHighlightedIndex(-1)
-  }, [filteredPaths])
+  }, [filteredLocations])
 
   const handleSubmit = async () => {
     const trimmedPath = path.trim() || '~'
@@ -227,22 +254,28 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
                   placeholder="~"
                   className="w-full text-[14px] text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none font-sans font-medium placeholder:text-mute/40 focus:border-primary/60 transition-colors"
                 />
-                {dropdownOpen && filteredPaths.length > 0 && (
+                {dropdownOpen && filteredLocations.length > 0 && (
                   <div className="absolute left-0 right-0 top-full mt-0.5 bg-surface border border-hairline rounded-sm shadow-lg z-10 overflow-hidden">
-                    {filteredPaths.map((p, i) => (
+                    {filteredLocations.map((loc, i) => (
                       <div
-                        key={p}
-                        onMouseDown={() => {
-                          setPath(p)
-                          setDropdownOpen(false)
-                          setHighlightedIndex(-1)
-                        }}
+                        key={`${loc.hostId}::${loc.path}`}
+                        onMouseDown={() => selectLocation(loc)}
                         className={cn(
-                          'px-3 py-2 text-[13px] font-mono text-ink cursor-pointer',
+                          'flex items-center justify-between gap-2 px-3 py-2 text-[13px] font-mono text-ink cursor-pointer',
                           i === highlightedIndex && 'bg-primary/10 text-primary'
                         )}
                       >
-                        {p}
+                        <span className="truncate">{loc.path}</span>
+                        <span
+                          className={cn(
+                            'shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-xs border',
+                            loc.local
+                              ? 'border-hairline text-mute/60'
+                              : 'border-primary/40 text-primary/80'
+                          )}
+                        >
+                          {loc.local ? 'Local' : loc.hostName}
+                        </span>
                       </div>
                     ))}
                   </div>
