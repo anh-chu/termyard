@@ -168,7 +168,7 @@ func setupClaudeDir(configDir, guppiBin string, resilient bool) error {
 	}
 
 	// Notify auto-discovers the unix socket, so no --server needed
-	notifyCmd := fmt.Sprintf("%s notify", guppiBin)
+	notifyCmd := fmt.Sprintf("'%s' notify", guppiBin)
 
 	suffix := ""
 	if resilient {
@@ -183,16 +183,28 @@ func setupClaudeDir(configDir, guppiBin string, resilient bool) error {
 	}
 
 	hooks := map[string]interface{}{
+		"SessionStart": []map[string]interface{}{
+			{
+				"matcher": "",
+				"hooks":   makeHook(notifyCmd + " -t claude -s active -m 'Session started'"),
+			},
+		},
+		"UserPromptSubmit": []map[string]interface{}{
+			{
+				"matcher": "",
+				"hooks":   makeHook(notifyCmd + " -t claude -s active -m 'Thinking' --stdin"),
+			},
+		},
 		"PreToolUse": []map[string]interface{}{
 			{
 				"matcher": "",
-				"hooks":   makeHook(notifyCmd + " -t claude -s active -m 'Using tool'"),
+				"hooks":   makeHook(notifyCmd + " -t claude --stdin"),
 			},
 		},
 		"PostToolUse": []map[string]interface{}{
 			{
 				"matcher": "",
-				"hooks":   makeHook(notifyCmd + " -t claude -s active -m 'Working'"),
+				"hooks":   makeHook(notifyCmd + " -t claude --stdin"),
 			},
 		},
 		"Notification": []map[string]interface{}{
@@ -208,7 +220,7 @@ func setupClaudeDir(configDir, guppiBin string, resilient bool) error {
 		"Stop": []map[string]interface{}{
 			{
 				"matcher": "",
-				"hooks":   makeHook(notifyCmd + " -t claude -s completed -m 'Task complete'"),
+				"hooks":   makeHook(notifyCmd + " -t claude -s completed --stdin"),
 			},
 		},
 	}
@@ -265,7 +277,7 @@ func setupCodexDir(configDir, guppiBin string, resilient bool) error {
 	if resilient {
 		// Wrap in bash to support || true — Codex appends event JSON as $1
 		notifyLine = fmt.Sprintf(
-			`notify = ["bash", "-c", "%s notify -t codex --event-data \"$1\" || true", "--"] # guppi-agent-hook`,
+			`notify = ["bash", "-c", "'%s' notify -t codex --event-data \"$1\" || true", "--"] # guppi-agent-hook`,
 			guppiBin,
 		)
 	} else {
@@ -359,7 +371,7 @@ func setupCopilotDir(configDir, guppiBin string, resilient bool) error {
 	}
 
 	hooksPath := filepath.Join(hooksDir, "guppi.json")
-	notifyCmd := fmt.Sprintf("%s notify", guppiBin)
+	notifyCmd := fmt.Sprintf("'%s' notify", guppiBin)
 
 	suffix := ""
 	if resilient {
@@ -379,9 +391,21 @@ func setupCopilotDir(configDir, guppiBin string, resilient bool) error {
 		"hooks": map[string]interface{}{
 			"sessionStart":        []map[string]interface{}{makeHook("active", "Session started")},
 			"sessionEnd":          []map[string]interface{}{makeHook("completed", "Session ended")},
-			"preToolUse":          []map[string]interface{}{makeHook("active", "Using tool")},
-			"postToolUse":         []map[string]interface{}{makeHook("active", "Working")},
-			"userPromptSubmitted": []map[string]interface{}{makeHook("active", "Thinking")},
+			"preToolUse": []map[string]interface{}{{
+				"type":    "command",
+				"bash":    fmt.Sprintf("%s -t copilot --stdin%s", notifyCmd, suffix),
+				"comment": "guppi agent hook",
+			}},
+			"postToolUse": []map[string]interface{}{{
+				"type":    "command",
+				"bash":    fmt.Sprintf("%s -t copilot --stdin%s", notifyCmd, suffix),
+				"comment": "guppi agent hook",
+			}},
+			"userPromptSubmitted": []map[string]interface{}{{
+				"type":    "command",
+				"bash":    fmt.Sprintf("%s -t copilot -s active -m 'Thinking' --stdin%s", notifyCmd, suffix),
+				"comment": "guppi agent hook",
+			}},
 			"errorOccurred":       []map[string]interface{}{makeHook("error", "Error occurred")},
 		},
 	}
@@ -423,6 +447,9 @@ func setupOpenCodeDir(configDir, guppiBin string) error {
 
 	// Bun's $ uses backtick template literals which conflict with Go raw strings,
 	// so we build the JS content via string concatenation.
+	// Note: tool.execute.before/after handlers receive no stdin payload with
+	// tool_name, so activity labels remain generic. Task capture via
+	// user prompt is unsupported until OpenCode exposes prompt metadata.
 	quotedBin := fmt.Sprintf("%q", guppiBin)
 	plugin := "export const GuppiPlugin = async ({ $ }) => {\n" +
 		"  const guppi = " + quotedBin + ";\n" +
@@ -436,8 +463,10 @@ func setupOpenCodeDir(configDir, guppiBin string) error {
 		"  };\n" +
 		"\n" +
 		"  return {\n" +
+		`    "permission.ask": async () => { await notify("waiting", "Permission needed"); },` + "\n" +
 		`    "permission.asked": async () => { await notify("waiting", "Permission needed"); },` + "\n" +
 		`    "permission.replied": async () => { await notify("active", "Working"); },` + "\n" +
+		`    "command.execute.before": async () => { await notify("active", "Running command"); },` + "\n" +
 		`    "tool.execute.before": async () => { await notify("active", "Using tool"); },` + "\n" +
 		`    "tool.execute.after": async () => { await notify("active", "Working"); },` + "\n" +
 		`    "session.idle": async () => { await notify("completed", "Idle"); },` + "\n" +
@@ -478,6 +507,15 @@ func setupPi(serverURL, guppiBin string, resilient bool, extraDirs []string) err
 			return err
 		}
 	}
+
+	// Register extension in settings.json
+	settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
+	if err := registerPiExtension(settingsPath, "extensions/guppi.ts"); err != nil {
+		fmt.Printf("  Warning: could not register extension in settings.json: %v\n", err)
+	} else {
+		fmt.Printf("  Registered extension in %s\n", settingsPath)
+	}
+
 	return nil
 }
 
@@ -496,6 +534,50 @@ func setupPiDir(configDir, guppiBin string, resilient bool) error {
 
 	fmt.Printf("  Wrote extension to %s\n", pluginFile)
 	return nil
+}
+
+// registerPiExtension adds an extension path to the packages array in settings.json
+func registerPiExtension(settingsPath, extensionPath string) error {
+	// Read existing settings
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		settings = make(map[string]interface{})
+	} else {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse %s: %w", settingsPath, err)
+		}
+	}
+
+	// Get or create packages array
+	var packages []interface{}
+	if pkgRaw, ok := settings["packages"]; ok {
+		if pkgSlice, ok := pkgRaw.([]interface{}); ok {
+			packages = pkgSlice
+		}
+	}
+
+	// Check if already registered
+	for _, pkg := range packages {
+		if pkgStr, ok := pkg.(string); ok && pkgStr == extensionPath {
+			return nil // Already registered
+		}
+	}
+
+	// Add extension
+	packages = append(packages, extensionPath)
+	settings["packages"] = packages
+
+	// Write back
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(settingsPath, out, 0o644)
 }
 
 func init() {

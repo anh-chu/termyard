@@ -16,8 +16,11 @@ type Session struct {
 	ProjectPath    string    `json:"project_path,omitempty"`
 	IsWorktree     bool      `json:"is_worktree,omitempty"`
 	AgentType      string    `json:"agent_type,omitempty"`
-	PromptPreview  string    `json:"prompt_preview,omitempty"`
-	AgentSessionID string    `json:"agent_session_id,omitempty"`
+	PromptPreview    string    `json:"prompt_preview,omitempty"`
+	AgentSessionID   string    `json:"agent_session_id,omitempty"`
+	TaskName         string    `json:"task_name,omitempty"`
+	UserPrompt       string    `json:"user_prompt,omitempty"`
+	LastAgentMessage string    `json:"last_agent_message,omitempty"`
 }
 
 // Window represents a tmux window

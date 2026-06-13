@@ -6,13 +6,13 @@ Guppi uses a multi-layered approach to detect AI coding agents running in tmux p
 
 There are five layers, from most precise to most general:
 
-| Layer | Mechanism | Latency | Accuracy |
-|-------|-----------|---------|----------|
-| **Hook-based** | Agent calls `guppi notify` via configured hooks | Instant | Exact |
-| **Process tree** | Scan `/proc` for known agent binaries | ~5s | High |
-| **Silence + capture-pane** | Detect quiet panes, inspect content for prompts | ~10-20s | Medium |
-| **Inactivity promoter** | Promote to "waiting" after 30s of no hook activity | ~30s | Low |
-| **Reconciler** | Clear stale events when agent process exits | ~3s | High |
+| Layer                      | Mechanism                                          | Latency | Accuracy |
+| -------------------------- | -------------------------------------------------- | ------- | -------- |
+| **Hook-based**             | Agent calls `guppi notify` via configured hooks    | Instant | Exact    |
+| **Process tree**           | Scan `/proc` for known agent binaries              | ~5s     | High     |
+| **Silence + capture-pane** | Detect quiet panes, inspect content for prompts    | ~10-20s | Medium   |
+| **Inactivity promoter**    | Promote to "waiting" after 30s of no hook activity | ~30s    | Low      |
+| **Reconciler**             | Clear stale events when agent process exits        | ~3s     | High     |
 
 Each layer fills gaps left by the ones above it. An agent with hooks configured gets instant, accurate tracking. An agent with no hooks still gets detected via process tree scanning, with prompt detection via pane content inspection.
 
@@ -23,11 +23,12 @@ Each layer fills gaps left by the ones above it. An agent with hooks configured 
 **Detection:** Hook-based (native waiting).
 
 **Hooks configured** (`~/.claude/settings.json`):
+
 - `PreToolUse` → `active` ("Using tool")
 - `PostToolUse` → `active` ("Working")
 - `Notification` (permission_prompt) → `waiting` ("Permission needed")
 - `Notification` (elicitation_dialog) → `waiting` ("Needs input")
-- `Stop` → `completed` ("Task complete")
+- `Stop` → `completed` (reads transcript, shows last assistant message)
 
 **Waiting detection:** Native — Claude sends explicit `waiting` events when it needs user approval or input. No fallback detection is used.
 
@@ -38,6 +39,7 @@ Each layer fills gaps left by the ones above it. An agent with hooks configured 
 **Detection:** Hybrid — hook for completion, process tree + silence monitor for waiting.
 
 **Hook configured** (`~/.codex/config.toml`):
+
 - `notify = ["guppi", "notify", "-t", "codex", "--event-data"]`
 - Fires on `agent-turn-complete` → `completed` status
 - Message extracted from `last-assistant-message` field (truncated to 200 chars)
@@ -51,6 +53,7 @@ Each layer fills gaps left by the ones above it. An agent with hooks configured 
 **Detection:** Hook-based for activity, silence monitor for waiting.
 
 **Hooks configured** (`~/.copilot/hooks/guppi.json`):
+
 - `sessionStart` → `active` ("Session started")
 - `sessionEnd` → `completed` ("Session ended")
 - `preToolUse` → `active` ("Using tool")
@@ -59,6 +62,7 @@ Each layer fills gaps left by the ones above it. An agent with hooks configured 
 - `errorOccurred` → `error` ("Error occurred")
 
 **Waiting detection:** Two mechanisms:
+
 1. **Inactivity promoter** — if hooks are firing but then go quiet for 30s, promotes to `waiting` ("May need attention")
 2. **Silence monitor** — if detected via process tree (no hooks), captures pane content after 10s of silence
 
@@ -71,6 +75,7 @@ Each layer fills gaps left by the ones above it. An agent with hooks configured 
 **Detection:** Hook-based (native waiting) via plugin system.
 
 **Plugin configured** (`~/.config/opencode/plugins/guppi.js`):
+
 - `permission.asked` → `waiting` ("Permission needed")
 - `permission.replied` → `active` ("Working")
 - `tool.execute.before` → `active` ("Using tool")
@@ -89,6 +94,7 @@ Each layer fills gaps left by the ones above it. An agent with hooks configured 
 Agents call `guppi notify` which sends an event to the server via unix socket (preferred) or HTTP fallback. The notify command auto-detects the tmux session, window, and pane from the `TMUX_PANE` environment variable.
 
 Event delivery path:
+
 ```
 Agent hook → guppi notify → unix socket → POST /api/tool-event → Tracker.Record() → WebSocket broadcast
 ```
@@ -98,6 +104,7 @@ The server stamps the local host identity on incoming events for multi-host navi
 ### Process Tree Detection
 
 The detector (`pkg/toolevents/detector.go`) runs every 5 seconds:
+
 1. Lists all tmux panes via `list-panes -a`
 2. For each pane, reads `/proc/<pid>/cmdline` for child processes
 3. Checks children and grandchildren against known agent patterns (handles `shell → node → agent` chains)
@@ -107,6 +114,7 @@ The detector (`pkg/toolevents/detector.go`) runs every 5 seconds:
 ### Silence Monitor + Capture-Pane
 
 The silence monitor (`pkg/toolevents/silence.go`) watches panes with agents that lack native waiting hooks (currently Codex and Copilot):
+
 1. Tracks last output time per pane via `%output` control mode notifications
 2. When a pane has been quiet for 10+ seconds, runs `tmux capture-pane -p` to get visible text
 3. Passes the last ~10 non-empty lines to `DetectPrompt()` which checks for:
@@ -120,6 +128,7 @@ The silence monitor (`pkg/toolevents/silence.go`) watches panes with agents that
 ### Inactivity Promoter
 
 For tools without native waiting hooks, the tracker watches for prolonged silence after hook-based `active` events:
+
 - If no new event arrives within 30 seconds, promotes to `waiting` ("May need attention")
 - Only applies to hook-based activity (not auto-detected events, since those can't distinguish working vs idle)
 - Acts as a fallback when silence monitor doesn't trigger (e.g., control mode not running)
@@ -127,6 +136,7 @@ For tools without native waiting hooks, the tracker watches for prolonged silenc
 ### Reconciler
 
 Runs every 3 seconds to clean up stale events:
+
 - Checks if the pane still exists
 - Checks if the foreground process is a shell (zsh, bash, fish, etc.) — meaning the agent exited
 - If either condition is true, clears the event with `completed` status

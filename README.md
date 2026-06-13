@@ -10,7 +10,7 @@ get notified when it matters
 
 guppi gives you a real-time web interface for your tmux sessions. It renders full terminal output in the browser using xterm.js backed by PTY connections, so you get the exact same view as your local terminal — borders, splits, colors, and all.
 
-It also tracks AI coding agents (Claude Code, Codex, Copilot, OpenCode) running inside your sessions, surfacing their status so you know when an agent needs input, hits an error, or finishes a task.
+It also tracks AI coding agents (Claude Code, Codex, Copilot, OpenCode, Pi) running inside your sessions, surfacing their status so you know when an agent needs input, hits an error, or finishes a task.
 
 ### Key features
 
@@ -88,6 +88,7 @@ This auto-detects which agents you have installed and configures their hooks:
 - **Codex** — `notify` command in `~/.codex/config.toml`
 - **GitHub Copilot CLI** — hooks in `~/.copilot/hooks/guppi.json`
 - **OpenCode** — plugin in `~/.config/opencode/plugins/guppi.js`
+- **Pi** — extension in `~/.pi/agent/extensions/guppi.ts`
 
 Run this on each machine where you use agents.
 
@@ -100,7 +101,7 @@ See [docs/agent-setup.md](docs/agent-setup.md) for manual setup instructions.
 Once hooks are configured, agent status shows up automatically:
 
 - The **Overview** page shows all sessions and any agents that need attention.
-- The **sidebar** badges sessions with active/waiting/errored agents.
+- The **sidebar** shows each session as `task — message`, with status badges for active/waiting/errored agents.
 - **Quick switcher** (`Ctrl+K` / `Cmd+K`) jumps between sessions and windows.
 - **Push notifications** alert you when an agent needs input, even with the tab closed (enable in Settings → Notifications).
 - **Splits** — drag a session onto another to tile them side-by-side; drop on an edge to choose orientation. Press `Ctrl+Shift+\` to split the active pane into a new session.

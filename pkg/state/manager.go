@@ -11,10 +11,13 @@ import (
 )
 
 type SessionMetadata struct {
-	ProjectPath    string
-	AgentType      string
-	PromptPreview  string
-	AgentSessionID string
+	ProjectPath      string
+	AgentType        string
+	PromptPreview    string
+	AgentSessionID   string
+	TaskName         string
+	UserPrompt       string // first user message; set once
+	LastAgentMessage string // last agent response; always updated
 }
 
 // Manager holds the central state tree
@@ -181,6 +184,15 @@ func (m *Manager) applyMetadata(session *tmux.Session) {
 	if meta.AgentSessionID != "" {
 		session.AgentSessionID = meta.AgentSessionID
 	}
+	if meta.TaskName != "" && session.TaskName == "" {
+		session.TaskName = meta.TaskName
+	}
+	if meta.UserPrompt != "" && session.UserPrompt == "" {
+		session.UserPrompt = meta.UserPrompt
+	}
+	if meta.LastAgentMessage != "" {
+		session.LastAgentMessage = meta.LastAgentMessage
+	}
 }
 
 // UpdateSessionMetadataFromEvent stores stable metadata derived from agent
@@ -206,7 +218,10 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 		}
 		meta.AgentType = tool
 	}
-	if evt.Message != "" {
+	// Only update PromptPreview from meaningful (non-transient) messages.
+	// Transient active-phase labels like "Working" / "Using tool" must not
+	// clobber the last meaningful agent message shown in the sidebar.
+	if evt.Message != "" && (meta.PromptPreview == "" || evt.Status != toolevents.StatusActive) {
 		if meta.PromptPreview != evt.Message {
 			changed = true
 		}
@@ -217,6 +232,20 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 			changed = true
 		}
 		meta.AgentSessionID = evt.AgentSessionID
+	}
+	if evt.Task != "" {
+		if meta.TaskName != evt.Task {
+			changed = true
+		}
+		meta.TaskName = evt.Task
+	}
+	if evt.UserPrompt != "" && meta.UserPrompt == "" {
+		meta.UserPrompt = evt.UserPrompt
+		changed = true
+	}
+	if evt.AgentMessage != "" && meta.LastAgentMessage != evt.AgentMessage {
+		meta.LastAgentMessage = evt.AgentMessage
+		changed = true
 	}
 
 	if !changed {
@@ -237,6 +266,15 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 		}
 		if meta.AgentSessionID != "" {
 			session.AgentSessionID = meta.AgentSessionID
+		}
+		if session.TaskName == "" && meta.TaskName != "" {
+			session.TaskName = meta.TaskName
+		}
+		if session.UserPrompt == "" && meta.UserPrompt != "" {
+			session.UserPrompt = meta.UserPrompt
+		}
+		if meta.LastAgentMessage != "" {
+			session.LastAgentMessage = meta.LastAgentMessage
 		}
 	}
 	m.mu.Unlock()

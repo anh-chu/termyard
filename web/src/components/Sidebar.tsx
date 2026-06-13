@@ -465,6 +465,12 @@ export function Sidebar({
       ? (hosts?.find(h => h.id === session.host)?.name ?? session.host_name ?? session.host ?? 'remote')
       : null
     const promptPreview = session.prompt_preview?.trim()
+    const taskName = session.task_name?.trim()
+    const truncTask = taskName && taskName.length > 30 ? taskName.slice(0, 30) + '\u2026' : taskName
+    const lastAgentMessage = session.last_agent_message?.trim()
+    const userPrompt = session.user_prompt?.trim()
+    // Right side of the em-dash: prefer live agent message, then user's original prompt, then terminal preview
+    const rightPreview = lastAgentMessage || userPrompt || promptPreview
     const projectName = pathLeaf(session.project_path)
     const agentType = session.agent_type || events[0]?.tool
     const allPanes = !collapsed
@@ -687,11 +693,11 @@ export function Sidebar({
               <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" title="attached" />
             )}
             {!collapsed && active && (
-              <span className="text-xs text-success font-semibold shrink-0">ACTIVE</span>
+              <span className="w-2 h-2 rounded-full bg-success animate-pulse shrink-0" title="active" />
             )}
           </div>
 
-          {!collapsed && (projectName || promptPreview || session.is_worktree) && (
+          {!collapsed && (projectName || truncTask || rightPreview || session.is_worktree) && (
             <div className="mt-1 flex items-center gap-2 text-xs text-mute font-medium">
               {session.is_worktree && (
                 <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 bg-surface-card/50 text-primary/70" title="git worktree">
@@ -703,9 +709,11 @@ export function Sidebar({
                   {projectName}
                 </span>
               )}
-              {promptPreview && (
-                <span className="min-w-0 truncate opacity-80" title={promptPreview}>
-                  {promptPreview}
+              {(truncTask || rightPreview) && (
+                <span className="min-w-0 truncate opacity-80" title={truncTask && rightPreview ? `${taskName}\n${rightPreview}` : (truncTask || rightPreview)}>
+                  {truncTask && <span className="font-medium text-ink/80">{truncTask}</span>}
+                  {truncTask && rightPreview && truncTask !== rightPreview && <span className="text-mute"> — </span>}
+                  {rightPreview && truncTask !== rightPreview && <span>{rightPreview}</span>}
                 </span>
               )}
             </div>

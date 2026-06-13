@@ -45,6 +45,9 @@ type Event struct {
 	AgentSessionID string    `json:"agent_session_id,omitempty"` // upstream agent session/thread id when available
 	Timestamp      time.Time `json:"timestamp"`
 	AutoDetected   bool      `json:"auto_detected,omitempty"` // true if detected via process tree (not hooks)
+	Task           string    `json:"task,omitempty"`           // persistent task label; sticky across events
+	UserPrompt     string    `json:"user_prompt,omitempty"`    // first user message for this session (set once)
+	AgentMessage   string    `json:"agent_message,omitempty"` // last agent response message (updates each turn)
 }
 
 // PaneKey uniquely identifies a tmux pane
@@ -56,10 +59,13 @@ type PaneKey struct {
 }
 
 type SessionMeta struct {
-	Tool           Tool
-	CWD            string
-	AgentSessionID string
-	Message        string
+	Tool             Tool
+	CWD              string
+	AgentSessionID   string
+	Message          string
+	Task             string
+	UserPrompt       string // first user message; set once, never overwritten
+	LastAgentMessage string // last agent response; updated each turn
 }
 
 // nativeWaitingTools is the set of tools that send explicit "waiting" events
@@ -200,6 +206,15 @@ func (t *Tracker) Record(evt *Event) {
 	}
 	if evt.Message != "" {
 		meta.Message = evt.Message
+	}
+	if evt.Task != "" {
+		meta.Task = evt.Task
+	}
+	if evt.UserPrompt != "" && meta.UserPrompt == "" {
+		meta.UserPrompt = evt.UserPrompt // set once
+	}
+	if evt.AgentMessage != "" {
+		meta.LastAgentMessage = evt.AgentMessage
 	}
 	if meta != (SessionMeta{}) {
 		t.sessionMeta[sessionKey] = meta

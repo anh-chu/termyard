@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -23,46 +24,135 @@ import (
 )
 
 // stdinEvent represents the JSON payload that agent hooks pass via stdin.
-// Supports Codex hook events (SessionStart, Stop) and can be extended for others.
+// Supports Codex hook events (SessionStart, Stop), Claude UserPromptSubmit,
+// Claude/Copilot PreToolUse/PostToolUse, and Copilot userPromptSubmitted.
 type stdinEvent struct {
 	HookEventName string `json:"hook_event_name"`
-	// Codex Stop hook fields
-	LastAssistantMessage *string `json:"last_assistant_message,omitempty"`
+	// Claude/Copilot PreToolUse/PostToolUse fields
+	ToolName string `json:"tool_name,omitempty"`
+	// Claude Stop / Codex agent-turn-complete
+	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
+	// Claude Code Stop hook transcript path
+	TranscriptPath string `json:"transcript_path,omitempty"`
+	// Claude UserPromptSubmit fields
+	Prompt *string `json:"prompt,omitempty"`
+	// Copilot userPromptSubmitted fields
+	UserInput *string `json:"userInput,omitempty"`
+	// Generic fields for agents that send explicit values (e.g. Pi extension)
+	UserPrompt   string `json:"user_prompt,omitempty"`
+	AgentMessage string `json:"agent_message,omitempty"`
 }
 
-// parseStdinEvent reads JSON from stdin and maps it to tool/status/message.
-// Returns the tool name, status, and message to use for the notification.
-func parseStdinEvent(tool string) (string, string, string, error) {
-	data, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to read stdin: %w", err)
+// toolNameToActivity maps an agent tool name to a human-readable activity label.
+func toolNameToActivity(toolName string) string {
+	switch strings.ToLower(toolName) {
+	// File reads
+	case "read", "read_file", "readfile", "cat", "view", "open_file":
+		return "reading files"
+
+	// File writes / edits
+	case "write", "write_file", "writefile", "edit", "multiedit", "patch", "insert", "str_replace", "str_replace_editor":
+		return "editing files"
+
+	// File listings / discovery
+	case "ls", "list", "list_dir", "list_directory", "glob":
+		return "listing files"
+
+	// Search
+	case "grep", "grep_search", "rg", "ripgrep", "find", "search", "websearch", "web_search", "semantic_search":
+		return "searching"
+
+	// Command execution
+	case "bash", "shell", "computer", "terminal", "run_command", "execute", "exec":
+		return "running commands"
+
+	// Web access
+	case "fetch", "web_fetch", "curl", "http", "browser", "navigate":
+		return "fetching web data"
+
+	// Code analysis
+	case "analyze", "lint", "type_check", "diagnostics":
+		return "analyzing code"
+
+	// Agent-specific
+	case "task":
+		return "running subagent"
+	case "ask_user", "ask_question":
+		return "waiting for input"
+
+	default:
+		return ""
+	}
+}
+
+// parseStdinEvent reads JSON from stdin and maps it to tool/status/message/task/userPrompt/agentMessage.
+func parseStdinEvent(tool string) (retTool, status, message, task, userPrompt, agentMessage string, err error) {
+	data, readErr := io.ReadAll(os.Stdin)
+	if readErr != nil {
+		return "", "", "", "", "", "", fmt.Errorf("failed to read stdin: %w", readErr)
 	}
 	if len(data) == 0 {
-		return "", "", "", fmt.Errorf("no input on stdin")
+		return "", "", "", "", "", "", fmt.Errorf("no input on stdin")
 	}
 
 	var evt stdinEvent
-	if err := json.Unmarshal(data, &evt); err != nil {
-		return "", "", "", fmt.Errorf("failed to parse stdin JSON: %w", err)
+	if jsonErr := json.Unmarshal(data, &evt); jsonErr != nil {
+		return "", "", "", "", "", "", fmt.Errorf("failed to parse stdin JSON: %w", jsonErr)
 	}
 
-	status := "active"
-	message := "Working"
+	status = "active"
+	message = "Working"
 
 	switch evt.HookEventName {
 	case "SessionStart":
 		status = "active"
 		message = "Session started"
+	case "PreToolUse", "preToolUse":
+		// Claude / Copilot pre-tool hook: map tool name to activity label
+		status = "active"
+		message = toolNameToActivity(evt.ToolName)
+	case "PostToolUse", "postToolUse":
+		// Claude / Copilot post-tool hook: retain activity label if available
+		status = "active"
+		message = toolNameToActivity(evt.ToolName)
+		if evt.ToolName == "" {
+			message = "working"
+		}
 	case "Stop":
 		status = "completed"
 		message = "Task complete"
-		if evt.LastAssistantMessage != nil && *evt.LastAssistantMessage != "" {
-			// Truncate to keep the notification concise
-			msg := *evt.LastAssistantMessage
-			if len(msg) > 100 {
-				msg = msg[:100] + "..."
+		if evt.LastAssistantMessage != "" {
+			message = truncate(evt.LastAssistantMessage, 300)
+			agentMessage = message
+		} else if evt.TranscriptPath != "" {
+			if msg := extractLastAssistantMessage(evt.TranscriptPath); msg != "" {
+				message = truncate(msg, 300)
+				agentMessage = message
 			}
-			message = msg
+		}
+	case "UserPromptSubmit":
+		// Claude: extract user prompt as task label and user_prompt field
+		status = "active"
+		message = "Thinking"
+		if evt.Prompt != nil && *evt.Prompt != "" {
+			t := *evt.Prompt
+			if len(t) > 200 {
+				t = t[:200]
+			}
+			task = t
+			userPrompt = t
+		}
+	case "userPromptSubmitted":
+		// Copilot: extract user input as task label and user_prompt field
+		status = "active"
+		message = "Thinking"
+		if evt.UserInput != nil && *evt.UserInput != "" {
+			t := *evt.UserInput
+			if len(t) > 200 {
+				t = t[:200]
+			}
+			task = t
+			userPrompt = t
 		}
 	default:
 		if evt.HookEventName != "" {
@@ -70,7 +160,87 @@ func parseStdinEvent(tool string) (string, string, string, error) {
 		}
 	}
 
-	return tool, status, message, nil
+	// Generic fields override event-derived values (used by Pi and future agents)
+	if evt.UserPrompt != "" {
+		userPrompt = evt.UserPrompt
+		if task == "" {
+			task = evt.UserPrompt
+		}
+	}
+	if evt.AgentMessage != "" {
+		agentMessage = evt.AgentMessage
+	}
+
+	return tool, status, message, task, userPrompt, agentMessage, nil
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// extractLastAssistantMessage reads Claude Code transcript JSONL and returns last assistant content.
+func extractLastAssistantMessage(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var lastAssistant string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var entry map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+
+		role, ok := entry["role"].(string)
+		if !ok || role != "assistant" {
+			continue
+		}
+
+		if content, ok := entry["content"].(string); ok {
+			lastAssistant = content
+			continue
+		}
+
+		contentArray, ok := entry["content"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		var texts []string
+		for _, item := range contentArray {
+			obj, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := obj["text"].(string); ok && text != "" {
+				texts = append(texts, text)
+			}
+		}
+		if len(texts) > 0 {
+			lastAssistant = strings.Join(texts, " ")
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return ""
+	}
+	return lastAssistant
 }
 
 // codexEvent represents the JSON payload Codex passes as argv[1] to notify
@@ -92,8 +262,9 @@ func parseCodexEvent(data string) (*codexEvent, error) {
 }
 
 // parseEventData parses a JSON string passed via --event-data (argv) and maps
-// it to status/message based on the tool type.
-func parseEventData(tool, data string) (string, string, error) {
+// it to status/message/agentMessage based on the tool type.
+// Returns (status, message, agentMessage, error).
+func parseEventData(tool, data string) (string, string, string, error) {
 	switch tool {
 	case "codex":
 		return parseCodexEventData(data)
@@ -101,38 +272,41 @@ func parseEventData(tool, data string) (string, string, error) {
 		// Generic: try to extract a status and message from the JSON
 		var generic map[string]interface{}
 		if err := json.Unmarshal([]byte(data), &generic); err != nil {
-			return "", "", fmt.Errorf("failed to parse event JSON: %w", err)
+			return "", "", "", fmt.Errorf("failed to parse event JSON: %w", err)
 		}
-		return "active", "Event received", nil
+		return "active", "Event received", "", nil
 	}
 }
 
 // parseCodexEventData parses Codex's notification JSON.
 // Currently only "agent-turn-complete" is emitted.
-func parseCodexEventData(data string) (string, string, error) {
+// Returns (status, message, agentMessage, error).
+func parseCodexEventData(data string) (string, string, string, error) {
 	evt, err := parseCodexEvent(data)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	switch evt.Type {
 	case "agent-turn-complete":
 		message := "Task complete"
+		agentMessage := ""
 		if evt.LastAssistantMessage != "" {
 			msg := evt.LastAssistantMessage
-			if len(msg) > 200 {
-				msg = msg[:200] + "..."
+			if len(msg) > 300 {
+				msg = msg[:300] + "..."
 			}
+			agentMessage = msg
 			message = msg
 		}
-		return "completed", message, nil
+		return "completed", message, agentMessage, nil
 	default:
 		// Unknown event type — treat as active
 		message := evt.Type
 		if message == "" {
 			message = "Event received"
 		}
-		return "active", message, nil
+		return "active", message, "", nil
 	}
 }
 
@@ -198,6 +372,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	tool := c.String("tool")
 	status := c.String("status")
 	message := c.String("message")
+	task := c.String("task")
+	userPrompt := c.String("user-prompt")
+	agentMessage := c.String("agent-message")
 	session := c.String("session")
 	window := int(c.Int("window"))
 	pane := c.String("pane")
@@ -217,7 +394,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		rawData := c.String("event-data")
 		log.WithField("raw_event_data", rawData).Trace("parsing --event-data")
 
-		evtStatus, evtMessage, err := parseEventData(tool, rawData)
+		evtStatus, evtMessage, evtAgentMsg, err := parseEventData(tool, rawData)
 		if err != nil {
 			return fmt.Errorf("event-data parse: %w", err)
 		}
@@ -231,6 +408,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		if !c.IsSet("message") {
 			message = evtMessage
 		}
+		if agentMessage == "" && evtAgentMsg != "" {
+			agentMessage = evtAgentMsg
+		}
 		if tool == "codex" {
 			codexEvt, err := parseCodexEvent(rawData)
 			if err != nil {
@@ -241,15 +421,17 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		}
 	}
 
-	// If --stdin is set, read event JSON from stdin and derive status/message
+	// If --stdin is set, read event JSON from stdin and derive status/message/task/userPrompt/agentMessage
 	if c.Bool("stdin") {
 		log.Trace("reading event from stdin")
-		stdinTool, stdinStatus, stdinMessage, err := parseStdinEvent(tool)
+		stdinTool, stdinStatus, stdinMessage, stdinTask, stdinUserPrompt, stdinAgentMsg, err := parseStdinEvent(tool)
 		if err != nil {
 			return fmt.Errorf("stdin parse: %w", err)
 		}
 		log.WithFields(logrus.Fields{
-			"parsed_tool": stdinTool, "parsed_status": stdinStatus, "parsed_message": stdinMessage,
+			"parsed_tool": stdinTool, "parsed_status": stdinStatus,
+			"parsed_message": stdinMessage, "parsed_task": stdinTask,
+			"parsed_user_prompt": stdinUserPrompt != "", "parsed_agent_message": stdinAgentMsg != "",
 		}).Trace("stdin event parsed")
 
 		tool = stdinTool
@@ -258,6 +440,15 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		}
 		if !c.IsSet("message") {
 			message = stdinMessage
+		}
+		if task == "" && stdinTask != "" {
+			task = stdinTask
+		}
+		if userPrompt == "" && stdinUserPrompt != "" {
+			userPrompt = stdinUserPrompt
+		}
+		if agentMessage == "" && stdinAgentMsg != "" {
+			agentMessage = stdinAgentMsg
 		}
 	}
 
@@ -297,6 +488,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		Message:        message,
 		CWD:            cwd,
 		AgentSessionID: agentSessionID,
+		Task:           task,
+		UserPrompt:     userPrompt,
+		AgentMessage:   agentMessage,
 	}
 
 	body, err := json.Marshal(evt)
@@ -377,6 +571,18 @@ func init() {
 		&cli.BoolFlag{
 			Name:  "stdin",
 			Usage: "read hook event JSON from stdin (for agent hooks that pass context via stdin)",
+		},
+		&cli.StringFlag{
+			Name:  "task",
+			Usage: "persistent task label (sticky across events; e.g. user prompt or git branch)",
+		},
+		&cli.StringFlag{
+			Name:  "user-prompt",
+			Usage: "user's first message for this session (set once, never overwritten)",
+		},
+		&cli.StringFlag{
+			Name:  "agent-message",
+			Usage: "agent's last response message (updated each turn)",
 		},
 		&cli.StringFlag{
 			Name:  "session",
