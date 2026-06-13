@@ -3,6 +3,7 @@ release:
   github:
     owner: anh-chu
     name: guppi
+  draft: false
   # Mark nightly-* tags as GitHub prereleases; v* tags become stable releases.
   prerelease: auto
   name_template: "{{ .Tag }}"
