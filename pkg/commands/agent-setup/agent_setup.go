@@ -342,6 +342,56 @@ func setupCodexNotify(configPath, guppiBin string, resilient bool) error {
 	newLines = append(newLines, lines[insertIdx:]...)
 	lines = newLines
 
+	// Ensure hooks are enabled in [features] section
+	hasFeaturesSection := false
+	hooksEnabled := false
+	inFeaturesSection := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "[features]" {
+			hasFeaturesSection = true
+			inFeaturesSection = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") && trimmed != "[features]" {
+			inFeaturesSection = false
+			continue
+		}
+		if inFeaturesSection && strings.HasPrefix(trimmed, "hooks") {
+			// Found hooks setting, ensure it's true
+			if strings.Contains(trimmed, "=") {
+				parts := strings.SplitN(trimmed, "=", 2)
+				value := strings.TrimSpace(parts[1])
+				if value == "true" {
+					hooksEnabled = true
+				} else {
+					// Change to true
+					lines[i] = parts[0] + "= true"
+					hooksEnabled = true
+				}
+			}
+		}
+	}
+
+	// If no features section or hooks not set, add/append it
+	if !hasFeaturesSection {
+		lines = append(lines, "", "[features]", "hooks = true")
+	} else if !hooksEnabled {
+		// Features section exists but hooks not set, add it
+		for i, line := range lines {
+			if strings.TrimSpace(line) == "[features]" {
+				// Insert hooks = true after [features]
+				newLines := make([]string, 0, len(lines)+1)
+				newLines = append(newLines, lines[:i+1]...)
+				newLines = append(newLines, "hooks = true")
+				newLines = append(newLines, lines[i+1:]...)
+				lines = newLines
+				break
+			}
+		}
+	}
+
 	content := strings.Join(lines, "\n")
 	// Ensure file ends with a newline
 	if !strings.HasSuffix(content, "\n") {
@@ -352,7 +402,7 @@ func setupCodexNotify(configPath, guppiBin string, resilient bool) error {
 		return err
 	}
 
-	fmt.Printf("  Updated %s\n", configPath)
+	fmt.Printf("  Updated %s (hooks enabled)\n", configPath)
 	return nil
 }
 
