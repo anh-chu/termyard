@@ -52,21 +52,41 @@ export default function (pi) {
     }
   };
 
-  pi.on("agent_start", async (event, ctx) => {
+  // Capture user prompt BEFORE agent starts (prompt field only exists here)
+  let currentTask = "";
+  let currentUserPrompt = "";
+  
+  pi.on("before_agent_start", async (event, ctx) => {
     const extraArgs = [];
     // Task = first user prompt (primary), git branch (fallback only)
     const data = getEvent(event);
     const prompt = safeString(data.prompt);
     if (prompt) {
       const truncated = prompt.slice(0, 300);
+      currentTask = truncated.slice(0, 60);
+      currentUserPrompt = truncated;
       extraArgs.push("--user-prompt", truncated);
-      extraArgs.push("--task", truncated.slice(0, 60));
+      extraArgs.push("--task", currentTask);
     } else {
       // Fallback to git branch only if no prompt available
       const branch = getGitBranch(ctx && ctx.cwd);
       if (branch) {
+        currentTask = branch;
         extraArgs.push("--task", branch);
       }
+    }
+    notify("active", "Thinking", extraArgs);
+  });
+
+  pi.on("agent_start", async (_event, _ctx) => {
+    // Prompt not available here - just signal working status
+    // Task/user-prompt already set in before_agent_start
+    const extraArgs = [];
+    if (currentTask) {
+      extraArgs.push("--task", currentTask);
+    }
+    if (currentUserPrompt) {
+      extraArgs.push("--user-prompt", currentUserPrompt);
     }
     notify("active", "Working", extraArgs);
   });
