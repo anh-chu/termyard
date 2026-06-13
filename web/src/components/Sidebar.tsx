@@ -496,6 +496,7 @@ export function Sidebar({
           role="button"
           tabIndex={0}
           draggable={!collapsed && !isRenaming}
+
           onDragStart={(e) => {
             e.dataTransfer.setData('text/plain', sk)
             setDraggingKey(sk)
@@ -620,7 +621,7 @@ export function Sidebar({
           className={cn(
             'relative flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink',
             'hover:bg-white/[0.05]',
-            isSelected && 'bg-white/[0.08] text-primary border border-white/20',
+            isSelected && 'bg-white/[0.08] !text-primary border border-white/20',
             needsAttention && !isSelected && 'border-l border-warning bg-warning/5',
             !isSelected && !needsAttention && 'border border-transparent',
             (isHiddenSection || isOffline) && 'opacity-60',
@@ -667,7 +668,7 @@ export function Sidebar({
             ) : (
               <span className={cn(
                 'text-[13px] font-medium tracking-tight flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left',
-                isSelected && 'text-primary',
+                isSelected && '!text-primary',
               )}>
                 {collapsed ? session.name.charAt(0).toUpperCase() : session.name}
               </span>
@@ -1206,7 +1207,7 @@ export function Sidebar({
                     className={cn(
                       'relative flex items-center gap-2 w-full px-2.5 py-1 rounded-sm transition-all duration-200 min-w-0',
                       'hover:bg-white/[0.05] cursor-pointer',
-                      isSelected && 'bg-white/[0.08] text-primary border border-white/20',
+                      isSelected && 'bg-white/[0.08] !text-primary border border-white/20',
                       !isSelected && 'border border-transparent',
                     )}
                   >
