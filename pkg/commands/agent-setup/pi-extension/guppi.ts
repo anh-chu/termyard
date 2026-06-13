@@ -13,7 +13,6 @@ export default function (pi) {
     const data = getEvent(event);
     return safeString(data.tool_name || data.toolName);
   };
-  const getMessage = (event) => safeString(getEvent(event).message, "unknown");
 
   const notify = (status, message, extraArgs = []) => {
     try {
@@ -53,16 +52,6 @@ export default function (pi) {
     }
   };
 
-  pi.on("session_start", async (event, _ctx) => {
-    const data = getEvent(event);
-    const reason = safeString(data.reason);
-    notify("active", reason === "resume" ? "Session resumed" : "Session started");
-  });
-
-  pi.on("before_agent_start", async (_event, _ctx) => {
-    notify("active", "Thinking");
-  });
-
   pi.on("agent_start", async (event, ctx) => {
     const extraArgs = [];
     // Task = first user prompt (primary), git branch (fallback only)
@@ -85,18 +74,6 @@ export default function (pi) {
   pi.on("tool_execution_start", async (event, _ctx) => {
     const data = getEvent(event);
     notifyWithToolName(getToolName(data));
-  });
-
-  pi.on("tool_execution_end", async (event, _ctx) => {
-    const message = safeString(getMessage(event), "Working");
-    notify("active", message || "Working");
-  });
-
-  pi.on("tool_result", async (event, _ctx) => {
-    const data = getEvent(event);
-    if (data.isError) {
-      notify("error", "Tool error");
-    }
   });
 
   pi.on("tool_call", async (event, _ctx) => {
@@ -150,9 +127,5 @@ export default function (pi) {
     const truncated = safeString(agentMsg).slice(0, 300);
     const extraArgs = truncated ? ["--agent-message", truncated] : [];
     notify("completed", truncated || "Task complete", extraArgs);
-  });
-
-  pi.on("session_shutdown", async (_event, _ctx) => {
-    notify("completed", "Session ended");
   });
 }
