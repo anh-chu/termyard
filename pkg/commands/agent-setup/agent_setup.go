@@ -628,6 +628,7 @@ func buildOpenCodePlugin(guppiBin string) (string, error) {
 		"}\n" +
 		"\n" +
 		"export default {\n" +
+		"  id: 'guppi',\n" +
 		"  server: async function GuppiPlugin() {\n" +
 		"    return {\n" +
 		"      'permission.ask': async () => {\n" +
