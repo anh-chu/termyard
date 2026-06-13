@@ -1,17 +1,11 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version_bump:
-        description: "Version bump type (major, minor, patch)"
-        required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
+  push:
+    branches:
+      - master
+    paths:
+      - "pkg/common/version.go"
 
 permissions:
   contents: write
@@ -25,6 +19,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,73 +27,38 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read version
+        id: version
+        run: |
+          version=$(grep -oP 'var VERSION = "\K[^"]+' pkg/common/version.go)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "Detected version: v${version}"
+
+      - name: Check tag does not exist
+        id: check
+        run: |
+          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.version.outputs.tag }} already exists, skipping release."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Configure Git
+        if: steps.check.outputs.exists == 'false'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-      - name: Read release type
-        id: release_type
-        run: |
-          if [ ! -f RELEASE ]; then
-            echo "No RELEASE file found, skipping"
-            exit 0
-          fi
-
-          bump_type=$(cat RELEASE | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
-
-          # Default to patch if empty or invalid
-          if [[ ! "$bump_type" =~ ^(major|minor|patch)$ ]]; then
-            bump_type="patch"
-          fi
-
-          echo "bump=$bump_type" >> "$GITHUB_OUTPUT"
-          echo "Release type: $bump_type"
-            major)
-              major=$((major + 1))
-              minor=0
-              patch=0
-              ;;
-            minor)
-              minor=$((minor + 1))
-              patch=0
-              ;;
-            patch)
-              patch=$((patch + 1))
-              ;;
-          esac
-
-          new_version="${major}.${minor}.${patch}"
-          echo "New version: $new_version"
-          echo "version=$new_version" >> "$GITHUB_OUTPUT"
-          echo "tag=v${new_version}" >> "$GITHUB_OUTPUT"
-
-          # Update version.go
-          sed -i "s/var SUMMARY = \"v${current_version}\"/var SUMMARY = \"v${new_version}\"/" pkg/common/version.go
-          sed -i "s/var VERSION = \"${current_version}\"/var VERSION = \"${new_version}\"/" pkg/common/version.go
-
-          # Update web/package.json
-          if [ -f web/package.json ]; then
-            sed -i "s/\"version\": \"${current_version}\"/\"version\": \"${new_version}\"/" web/package.json
-          fi
-
-          # Update release manifest
-          if [ -f .release-please-manifest.json ]; then
-            echo "{\".\":\"${new_version}\"}" > .release-please-manifest.json
-          fi
-
-          # Clear RELEASE file and commit
-          echo "" > RELEASE
-          git add pkg/common/version.go web/package.json .release-please-manifest.json RELEASE
-          git commit -m "chore(release): ${new_version} [skip ci]"
-          git push origin master
-
       - name: Set up Go
+        if: steps.check.outputs.exists == 'false'
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
       - name: Set up Node.js
+        if: steps.check.outputs.exists == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -106,17 +66,19 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
         env:
-          TAG: ${{ steps.bump.outputs.tag }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
 
       - name: Run GoReleaser
+        if: steps.check.outputs.exists == 'false'
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ steps.bump.outputs.tag }}
+          GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.tag }}
