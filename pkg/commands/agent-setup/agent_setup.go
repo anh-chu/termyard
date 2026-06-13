@@ -256,15 +256,31 @@ func setupCodex(serverURL, guppiBin string, resilient bool, extraDirs []string) 
 }
 
 // setupCodexDir configures a single Codex config directory.
-// Codex supports a `notify` key in config.toml that fires when the agent
-// needs user attention. The value is an argv array passed to execvp.
+// Codex has two hook mechanisms:
+// 1. Legacy `notify` key in config.toml (fires on agent-turn-complete)
+// 2. Modern hooks system in hooks.json (supports UserPromptSubmit, Stop, PreToolUse, etc.)
+// We use both: notify for backward compat, hooks.json for full lifecycle.
 func setupCodexDir(configDir, guppiBin string, resilient bool) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
 
+	// Configure legacy notify hook in config.toml
 	configPath := filepath.Join(configDir, "config.toml")
+	if err := setupCodexNotify(configPath, guppiBin, resilient); err != nil {
+		return err
+	}
 
+	// Configure modern hooks in hooks.json
+	hooksPath := filepath.Join(configDir, "hooks.json")
+	if err := setupCodexHooks(hooksPath, guppiBin, resilient); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func setupCodexNotify(configPath, guppiBin string, resilient bool) error {
 	// Codex passes the event JSON as argv[1] to the notify command.
 	// guppi notify --event-data parses it natively — no bash/jq needed.
 	var notifyLine string
@@ -337,6 +353,70 @@ func setupCodexDir(configDir, guppiBin string, resilient bool) error {
 	}
 
 	fmt.Printf("  Updated %s\n", configPath)
+	return nil
+}
+
+func setupCodexHooks(hooksPath, guppiBin string, resilient bool) error {
+	notifyCmd := fmt.Sprintf("'%s' notify", guppiBin)
+
+	suffix := ""
+	if resilient {
+		suffix = " || true"
+	}
+
+	makeHook := func(cmd string) []map[string]interface{} {
+		return []map[string]interface{}{
+			{"type": "command", "command": cmd + suffix},
+		}
+	}
+
+	// Codex hooks use the same format as Claude hooks
+	// stdin JSON contains event data (user prompt, tool name, etc.)
+	hooks := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"UserPromptSubmit": []map[string]interface{}{
+				{
+					"matcher": "",
+					"hooks":   makeHook(notifyCmd + " -t codex -s active -m 'Thinking' --stdin"),
+				},
+			},
+			"PreToolUse": []map[string]interface{}{
+				{
+					"matcher": "",
+					"hooks":   makeHook(notifyCmd + " -t codex --stdin"),
+				},
+			},
+			"PostToolUse": []map[string]interface{}{
+				{
+					"matcher": "",
+					"hooks":   makeHook(notifyCmd + " -t codex --stdin"),
+				},
+			},
+			"PermissionRequest": []map[string]interface{}{
+				{
+					"matcher": "",
+					"hooks":   makeHook(notifyCmd + " -t codex -s waiting -m 'Permission needed'"),
+				},
+			},
+			"Stop": []map[string]interface{}{
+				{
+					"matcher": "",
+					"hooks":   makeHook(notifyCmd + " -t codex -s completed --stdin"),
+				},
+			},
+		},
+	}
+
+	out, err := json.MarshalIndent(hooks, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(hooksPath, out, 0o644); err != nil {
+		return err
+	}
+
+	fmt.Printf("  Wrote hooks to %s\n", hooksPath)
 	return nil
 }
 
