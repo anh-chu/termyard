@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/ekristen/guppi/compare/v0.4.0...v0.5.0) (2026-06-13)
+
+
+### Bug Fixes
+
+* **sidebar:** use !important to ensure selected session text color overrides base ([fbfada9](https://github.com/ekristen/guppi/commit/fbfada9))
+
 ## [0.1.1-beta.2](https://github.com/ekristen/guppi/compare/v0.1.0-beta.2...v0.1.1-beta.2) (2026-03-15)
 
 
