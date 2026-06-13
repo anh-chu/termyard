@@ -19,8 +19,13 @@
 - [x] JSX em-dash fix in Sidebar.tsx <!-- pi-todo-md:id=7 -->
 - [x] Sidebar gate: check rightPreview not promptPreview <!-- pi-todo-md:id=8 -->
 - [x] enrichSessionsFromTracker: copy UserPrompt/LastAgentMessage <!-- pi-todo-md:id=9 -->
-- [ ] Task semantics: ensure set-once everywhere <!-- pi-todo-md:id=10 -->
+- [x] Task semantics: ensure set-once everywhere <!-- pi-todo-md:id=10 -->
 - [ ] Activity mapping: expand tool names <!-- pi-todo-md:id=11 -->
 - [ ] Hook path quoting for spaces <!-- pi-todo-md:id=12 -->
 - [ ] Pi extension null guards <!-- pi-todo-md:id=13 -->
 - [ ] Docs: fix inaccuracies <!-- pi-todo-md:id=14 -->
+
+## Fix agent test results
+- [x] Remove Copilot support from agent-setup <!-- pi-todo-md:id=15 -->
+- [x] Fix Codex user prompt detection <!-- pi-todo-md:id=16 -->
+- [x] Fix OpenCode hooks (both user prompt + last message broken) [focus] <!-- pi-todo-md:id=17 -->

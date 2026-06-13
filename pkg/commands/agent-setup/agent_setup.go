@@ -65,12 +65,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 			setup:  setupCodex,
 		},
 		{
-			name:   "GitHub Copilot CLI",
-			key:    "copilot",
-			binary: "copilot",
-			setup:  setupCopilot,
-		},
-		{
 			name:   "OpenCode",
 			key:    "opencode",
 			binary: "opencode",
@@ -125,7 +119,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}
 
 	if !anySetup {
-		fmt.Println("No supported agents found. Install one of: claude, codex, gh (copilot), opencode")
+		fmt.Println("No supported agents found. Install one of: claude, codex, opencode")
 		return nil
 	}
 
@@ -346,83 +340,6 @@ func setupCodexDir(configDir, guppiBin string, resilient bool) error {
 	return nil
 }
 
-// setupCopilot configures GitHub Copilot CLI hooks via ~/.copilot/hooks/guppi.json and any extra dirs
-func setupCopilot(serverURL, guppiBin string, resilient bool, extraDirs []string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-
-	dirs := append([]string{filepath.Join(homeDir, ".copilot")}, extraDirs...)
-	for _, dir := range dirs {
-		if err := setupCopilotDir(dir, guppiBin, resilient); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// setupCopilotDir configures a single Copilot config directory.
-// Copilot CLI supports global hooks in hooks/ as JSON files.
-func setupCopilotDir(configDir, guppiBin string, resilient bool) error {
-	hooksDir := filepath.Join(configDir, "hooks")
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return err
-	}
-
-	hooksPath := filepath.Join(hooksDir, "guppi.json")
-	notifyCmd := fmt.Sprintf("'%s' notify", guppiBin)
-
-	suffix := ""
-	if resilient {
-		suffix = " || true"
-	}
-
-	makeHook := func(status, message string) map[string]interface{} {
-		return map[string]interface{}{
-			"type":    "command",
-			"bash":    fmt.Sprintf("%s -t copilot -s %s -m '%s'%s", notifyCmd, status, message, suffix),
-			"comment": "guppi agent hook",
-		}
-	}
-
-	hooks := map[string]interface{}{
-		"version": 1,
-		"hooks": map[string]interface{}{
-			"sessionStart":        []map[string]interface{}{makeHook("active", "Session started")},
-			"sessionEnd":          []map[string]interface{}{makeHook("completed", "Session ended")},
-			"preToolUse": []map[string]interface{}{{
-				"type":    "command",
-				"bash":    fmt.Sprintf("%s -t copilot --stdin%s", notifyCmd, suffix),
-				"comment": "guppi agent hook",
-			}},
-			"postToolUse": []map[string]interface{}{{
-				"type":    "command",
-				"bash":    fmt.Sprintf("%s -t copilot --stdin%s", notifyCmd, suffix),
-				"comment": "guppi agent hook",
-			}},
-			"userPromptSubmitted": []map[string]interface{}{{
-				"type":    "command",
-				"bash":    fmt.Sprintf("%s -t copilot -s active -m 'Thinking' --stdin%s", notifyCmd, suffix),
-				"comment": "guppi agent hook",
-			}},
-			"errorOccurred":       []map[string]interface{}{makeHook("error", "Error occurred")},
-		},
-	}
-
-	out, err := json.MarshalIndent(hooks, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(hooksPath, out, 0o644); err != nil {
-		return err
-	}
-
-	fmt.Printf("  Wrote hooks to %s\n", hooksPath)
-	return nil
-}
-
 // setupOpenCode configures OpenCode via native plugin in ~/.config/opencode and any extra dirs
 func setupOpenCode(serverURL, guppiBin string, resilient bool, extraDirs []string) error {
 	homeDir, err := os.UserHomeDir()
@@ -440,48 +357,53 @@ func setupOpenCode(serverURL, guppiBin string, resilient bool, extraDirs []strin
 }
 
 func setupOpenCodeDir(configDir, guppiBin string) error {
-	pluginsDir := filepath.Join(configDir, "plugins")
-	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
 
-	// Bun's $ uses backtick template literals which conflict with Go raw strings,
-	// so we build the JS content via string concatenation.
-	// Note: tool.execute.before/after handlers receive no stdin payload with
-	// tool_name, so activity labels remain generic. Task capture via
-	// user prompt is unsupported until OpenCode exposes prompt metadata.
-	quotedBin := fmt.Sprintf("%q", guppiBin)
-	plugin := "export const GuppiPlugin = async ({ $ }) => {\n" +
-		"  const guppi = " + quotedBin + ";\n" +
-		"\n" +
-		"  const notify = async (status, message) => {\n" +
-		"    try {\n" +
-		"      await $`${guppi} notify -t opencode -s ${status} -m ${message}`.quiet();\n" +
-		"    } catch (e) {\n" +
-		"      // Silent - monitoring should never crash the host tool\n" +
-		"    }\n" +
-		"  };\n" +
-		"\n" +
-		"  return {\n" +
-		`    "permission.ask": async () => { await notify("waiting", "Permission needed"); },` + "\n" +
-		`    "permission.asked": async () => { await notify("waiting", "Permission needed"); },` + "\n" +
-		`    "permission.replied": async () => { await notify("active", "Working"); },` + "\n" +
-		`    "command.execute.before": async () => { await notify("active", "Running command"); },` + "\n" +
-		`    "tool.execute.before": async () => { await notify("active", "Using tool"); },` + "\n" +
-		`    "tool.execute.after": async () => { await notify("active", "Working"); },` + "\n" +
-		`    "session.idle": async () => { await notify("completed", "Idle"); },` + "\n" +
-		`    "session.error": async () => { await notify("error", "Error"); },` + "\n" +
-		"  };\n" +
-		"};\n"
-
-	pluginFile := filepath.Join(pluginsDir, "guppi.js")
-	if err := os.WriteFile(pluginFile, []byte(plugin), 0o644); err != nil {
+	pluginDir := filepath.Join(configDir, "node_modules", "guppi")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		return err
 	}
 
-	fmt.Printf("  Wrote plugin to %s\n", pluginFile)
+	packageJSON := map[string]interface{}{
+		"name":    "guppi",
+		"version": "1.0.0",
+		"type":    "module",
+		"main":    "index.js",
+		"private": true,
+	}
+	packageBytes, err := json.MarshalIndent(packageJSON, "", "  ")
+	if err != nil {
+		return err
+	}
+	packageBytes = append(packageBytes, '\n')
+	if err := os.WriteFile(filepath.Join(pluginDir, "package.json"), packageBytes, 0o644); err != nil {
+		return err
+	}
 
-	// Clean up legacy hook script if it exists
+	indexJS, err := buildOpenCodePlugin(guppiBin)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "index.js"), []byte(indexJS), 0o644); err != nil {
+		return err
+	}
+
+	pluginSpec := fmt.Sprintf("file://%s", filepath.ToSlash(pluginDir))
+	if err := registerOpenCodePlugin(filepath.Join(configDir, "opencode.json"), pluginSpec); err != nil {
+		return err
+	}
+
+	legacyPlugin := filepath.Join(configDir, "plugins", "guppi.js")
+	if _, err := os.Stat(legacyPlugin); err == nil {
+		if err := os.Remove(legacyPlugin); err != nil {
+			fmt.Printf("  Warning: could not remove legacy plugin %s: %v\n", legacyPlugin, err)
+		} else {
+			fmt.Printf("  Removed legacy plugin %s\n", legacyPlugin)
+		}
+	}
+
 	legacyHook := filepath.Join(configDir, "guppi-hook.sh")
 	if _, err := os.Stat(legacyHook); err == nil {
 		if err := os.Remove(legacyHook); err != nil {
@@ -491,6 +413,193 @@ func setupOpenCodeDir(configDir, guppiBin string) error {
 		}
 	}
 
+	fmt.Printf("  Wrote OpenCode plugin to %s\n", pluginDir)
+	return nil
+}
+
+func buildOpenCodePlugin(guppiBin string) (string, error) {
+	quotedBin, err := json.Marshal(guppiBin)
+	if err != nil {
+		return "", err
+	}
+
+	return "const guppi = " + string(quotedBin) + ";\n" +
+		"const sessions = new Map();\n" +
+		"\n" +
+		"function sessionState(sessionID) {\n" +
+		"  if (!sessions.has(sessionID)) {\n" +
+		"    sessions.set(sessionID, { userPromptSet: false });\n" +
+		"  }\n" +
+		"  return sessions.get(sessionID);\n" +
+		"}\n" +
+		"\n" +
+		"function compactText(value, maxLen = 240) {\n" +
+		"  if (typeof value !== 'string') return '';\n" +
+		"  const text = value.replace(/\\s+/g, ' ').trim();\n" +
+		"  if (!text) return '';\n" +
+		"  return text.length > maxLen ? `${text.slice(0, maxLen - 1)}…` : text;\n" +
+		"}\n" +
+		"\n" +
+		"function toolActivity(toolName) {\n" +
+		"  switch (String(toolName || '').toLowerCase()) {\n" +
+		"    case 'read':\n" +
+		"    case 'read_file':\n" +
+		"    case 'readfile':\n" +
+		"    case 'cat':\n" +
+		"    case 'view':\n" +
+		"    case 'open_file':\n" +
+		"      return 'reading files';\n" +
+		"    case 'write':\n" +
+		"    case 'write_file':\n" +
+		"    case 'writefile':\n" +
+		"    case 'edit':\n" +
+		"    case 'multiedit':\n" +
+		"    case 'multi_edit':\n" +
+		"    case 'patch':\n" +
+		"    case 'insert':\n" +
+		"    case 'replace':\n" +
+		"      return 'editing files';\n" +
+		"    case 'ls':\n" +
+		"    case 'list':\n" +
+		"    case 'glob':\n" +
+		"    case 'find':\n" +
+		"    case 'grep':\n" +
+		"    case 'search':\n" +
+		"    case 'rg':\n" +
+		"      return 'searching';\n" +
+		"    case 'bash':\n" +
+		"    case 'shell':\n" +
+		"    case 'command':\n" +
+		"    case 'exec':\n" +
+		"      return 'running commands';\n" +
+		"    case 'fetch':\n" +
+		"    case 'web_fetch':\n" +
+		"    case 'webfetch':\n" +
+		"    case 'browser':\n" +
+		"      return 'fetching web';\n" +
+		"    default:\n" +
+		"      return 'working';\n" +
+		"  }\n" +
+		"}\n" +
+		"\n" +
+		"function fire(args) {\n" +
+		"  try {\n" +
+		"    const proc = Bun.spawn([guppi, 'notify', ...args], {\n" +
+		"      stdin: 'ignore',\n" +
+		"      stdout: 'ignore',\n" +
+		"      stderr: 'ignore',\n" +
+		"    });\n" +
+		"    void proc.exited.catch(() => {});\n" +
+		"  } catch {}\n" +
+		"}\n" +
+		"\n" +
+		"function notify(status, message, extraArgs = []) {\n" +
+		"  fire(['-t', 'opencode', '-s', status, '-m', message, ...extraArgs]);\n" +
+		"}\n" +
+		"\n" +
+		"export default {\n" +
+		"  server: async function GuppiPlugin() {\n" +
+		"    return {\n" +
+		"      'permission.ask': async () => {\n" +
+		"        notify('waiting', 'Permission needed');\n" +
+		"      },\n" +
+		"      'command.execute.before': async () => {\n" +
+		"        notify('active', 'running commands');\n" +
+		"      },\n" +
+		"      'tool.execute.before': async ({ tool }) => {\n" +
+		"        notify('active', toolActivity(tool));\n" +
+		"      },\n" +
+		"      'tool.execute.after': async ({ tool }) => {\n" +
+		"        notify('active', toolActivity(tool));\n" +
+		"      },\n" +
+		"      event: async ({ event }) => {\n" +
+		"        if (!event || !event.type) return;\n" +
+		"\n" +
+		"        if (event.type === 'session.next.prompted') {\n" +
+		"          const sessionID = event.properties?.sessionID;\n" +
+		"          const prompt = compactText(event.properties?.prompt?.text);\n" +
+		"          if (!sessionID || !prompt) return;\n" +
+		"\n" +
+		"          const state = sessionState(sessionID);\n" +
+		"          if (state.userPromptSet) return;\n" +
+		"          state.userPromptSet = true;\n" +
+		"          notify('active', 'thinking', ['--task', prompt, '--user-prompt', prompt]);\n" +
+		"          return;\n" +
+		"        }\n" +
+		"\n" +
+		"        if (event.type === 'session.next.text.ended') {\n" +
+		"          const text = compactText(event.properties?.text);\n" +
+		"          if (!text) return;\n" +
+		"          notify('active', 'working', ['--agent-message', text]);\n" +
+		"          return;\n" +
+		"        }\n" +
+		"\n" +
+		"        if (event.type === 'session.idle') {\n" +
+		"          notify('completed', 'Task complete');\n" +
+		"          return;\n" +
+		"        }\n" +
+		"\n" +
+		"        if (event.type === 'session.error') {\n" +
+		"          notify('error', 'Error');\n" +
+		"        }\n" +
+		"      },\n" +
+		"    };\n" +
+		"  },\n" +
+		"};\n", nil
+}
+
+func registerOpenCodePlugin(configPath, pluginSpec string) error {
+	var config map[string]interface{}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		config = map[string]interface{}{
+			"$schema": "https://opencode.ai/config.json",
+		}
+	} else {
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("parse %s: %w", configPath, err)
+		}
+	}
+
+	plugins := make([]interface{}, 0)
+	if raw, ok := config["plugin"]; ok {
+		if existing, ok := raw.([]interface{}); ok {
+			plugins = append(plugins, existing...)
+		}
+	}
+
+	filtered := make([]interface{}, 0, len(plugins)+1)
+	for _, raw := range plugins {
+		switch entry := raw.(type) {
+		case string:
+			if entry == pluginSpec || entry == "guppi" {
+				continue
+			}
+		case []interface{}:
+			if len(entry) > 0 {
+				if spec, ok := entry[0].(string); ok && (spec == pluginSpec || spec == "guppi") {
+					continue
+				}
+			}
+		}
+		filtered = append(filtered, raw)
+	}
+
+	config["plugin"] = append(filtered, pluginSpec)
+
+	out, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(configPath, out, 0o644); err != nil {
+		return err
+	}
+
+	fmt.Printf("  Registered plugin in %s\n", configPath)
 	return nil
 }
 
@@ -611,7 +720,6 @@ to send status notifications to the guppi server.
 Supported agents:
   - Claude Code (claude)
   - Codex (codex)
-  - GitHub Copilot CLI (gh copilot)
   - OpenCode (opencode)
 
 Use --dry-run to preview changes without writing files.`,

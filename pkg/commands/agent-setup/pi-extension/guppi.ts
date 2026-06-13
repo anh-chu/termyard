@@ -86,46 +86,8 @@ export default function (pi) {
     }
   });
 
-  pi.on("agent_end", async (event, _ctx) => {
-    // Extract the last assistant message with actual text content
-    let agentMsg = "";
-    try {
-      const data = getEvent(event);
-      const messages = data.messages;
-      if (Array.isArray(messages)) {
-        // Iterate backwards to find the last assistant message with text
-        for (let i = messages.length - 1; i >= 0; i--) {
-          const msg = messages[i] || {};
-          if (msg.role === "assistant") {
-            const content = msg.content;
-            let foundText = "";
-            
-            if (typeof content === "string") {
-              foundText = content;
-            } else if (Array.isArray(content)) {
-              // Look for text blocks (skip toolCall blocks)
-              for (const block of content) {
-                if (block && block.type === "text" && typeof block.text === "string") {
-                  foundText = block.text;
-                  break;
-                }
-              }
-            }
-            
-            // Only use this message if we found actual text
-            if (foundText) {
-              agentMsg = foundText;
-              break;
-            }
-            // Otherwise continue to the previous message
-          }
-        }
-      }
-    } catch (e) {
-      // Never crash Pi
-    }
-    const truncated = safeString(agentMsg).slice(0, 300);
-    const extraArgs = truncated ? ["--agent-message", truncated] : [];
-    notify("completed", truncated || "Task complete", extraArgs);
+  pi.on("agent_end", async (_event, _ctx) => {
+    // Let terminal capture handle the last message
+    notify("completed", "Task complete");
   });
 }

@@ -91,9 +91,20 @@ func isCopilotConfigured(home string) bool {
 }
 
 func isOpenCodeConfigured(home string) bool {
-	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "guppi.js")
-	_, err := os.Stat(pluginPath)
-	return err == nil
+	pluginDir := filepath.Join(home, ".config", "opencode", "node_modules", "guppi")
+	if _, err := os.Stat(filepath.Join(pluginDir, "package.json")); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(pluginDir, "index.js")); err != nil {
+		return false
+	}
+
+	configPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "\"guppi\"")
 }
 
 func isPiConfigured(home string) bool {

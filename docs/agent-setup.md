@@ -161,66 +161,6 @@ The `agent-turn-complete` event maps to guppi's `waiting` status, which triggers
 
 No external dependencies required (no bash, no jq).
 
-### GitHub Copilot CLI
-
-**Auto-configured by `guppi agent-setup`.**
-
-Copilot CLI supports global hooks in `~/.copilot/hooks/` as JSON files. guppi writes `~/.copilot/hooks/guppi.json` covering session start/end, tool use, and error events. Hooks receive event context as JSON on stdin.
-
-**Note:** Repository-level hooks in `.github/copilot/hooks.json` take precedence over global hooks. Both run — values are concatenated across levels.
-
-**Manual setup:** Create `~/.copilot/hooks/guppi.json`:
-
-```json
-{
-  "version": 1,
-  "hooks": {
-    "sessionStart": [
-      {
-        "type": "command",
-        "bash": "guppi notify -t copilot -s active -m 'Session started' || true",
-        "comment": "guppi agent hook"
-      }
-    ],
-    "sessionEnd": [
-      {
-        "type": "command",
-        "bash": "guppi notify -t copilot -s completed -m 'Session ended' || true",
-        "comment": "guppi agent hook"
-      }
-    ],
-    "preToolUse": [
-      {
-        "type": "command",
-        "bash": "guppi notify -t copilot -s active -m 'Using tool' || true",
-        "comment": "guppi agent hook"
-      }
-    ],
-    "postToolUse": [
-      {
-        "type": "command",
-        "bash": "guppi notify -t copilot -s active -m 'Working' || true",
-        "comment": "guppi agent hook"
-      }
-    ],
-    "userPromptSubmitted": [
-      {
-        "type": "command",
-        "bash": "guppi notify -t copilot -s active -m 'Thinking' || true",
-        "comment": "guppi agent hook"
-      }
-    ],
-    "errorOccurred": [
-      {
-        "type": "command",
-        "bash": "guppi notify -t copilot -s error -m 'Error occurred' || true",
-        "comment": "guppi agent hook"
-      }
-    ]
-  }
-}
-```
-
 ### OpenCode
 
 **Auto-configured by `guppi agent-setup`.**
@@ -266,18 +206,16 @@ guppi writes a TypeScript extension to `~/.pi/agent/extensions/guppi.ts`.
 
 Quick reference for which status types each agent supports via hooks:
 
-| Agent                  | Session start      | Working / tool use                                       | Permission / waiting                     | Error              | Task complete               |
-| ---------------------- | ------------------ | -------------------------------------------------------- | ---------------------------------------- | ------------------ | --------------------------- |
-| **Claude Code**        | ✅ `SessionStart`  | ✅ `PreToolUse` / `PostToolUse`                          | ✅ `Notification`                        | ❌ no error hook   | ✅ `Stop`                   |
-| **GitHub Copilot CLI** | ✅ `sessionStart`  | ✅ `preToolUse` / `postToolUse`                          | ❌ no hook                               | ✅ `errorOccurred` | ✅ `sessionEnd`             |
-| **OpenCode**           | ❌ no hook         | ✅ `tool.execute.before/after`, `command.execute.before` | ✅ `permission.ask` / `permission.asked` | ✅ `session.error` | ✅ `session.idle`           |
-| **Codex**              | ❌ no hook         | ❌ no per-tool hook                                      | ❌ no hook                               | ❌ no hook         | ✅ `notify` (turn complete) |
-| **Pi**                 | ✅ `session_start` | ✅ `tool_execution_start/end`                            | ✅ `tool_call`                           | ✅ `tool_result`   | ✅ `agent_end`              |
+| Agent           | Session start      | Working / tool use                                       | Permission / waiting                     | Error              | Task complete               |
+| --------------- | ------------------ | -------------------------------------------------------- | ---------------------------------------- | ------------------ | --------------------------- |
+| **Claude Code** | ✅ `SessionStart`  | ✅ `PreToolUse` / `PostToolUse`                          | ✅ `Notification`                        | ❌ no error hook   | ✅ `Stop`                   |
+| **OpenCode**    | ❌ no hook         | ✅ `tool.execute.before/after`, `command.execute.before` | ✅ `permission.ask` / `permission.asked` | ✅ `session.error` | ✅ `session.idle`           |
+| **Codex**       | ❌ no hook         | ❌ no per-tool hook                                      | ❌ no hook                               | ❌ no hook         | ✅ `notify` (turn complete) |
+| **Pi**          | ✅ `session_start` | ✅ `tool_execution_start/end`                            | ✅ `tool_call`                           | ✅ `tool_result`   | ✅ `agent_end`              |
 
 **Gaps:**
 
 - **Claude Code** has no error hook; errors surface via inactivity detection or agent output.
-- **Copilot CLI** has no waiting/permission hook; uses inactivity-based detection (see below).
 - **OpenCode** has no session-start hook; first tool-use event is the earliest signal.
 - **Codex** only has one hook (`notify`) that fires on turn-complete. All other states (working, waiting, error) rely on inactivity detection.
 
@@ -297,23 +235,23 @@ echo '{"hook_event_name":"Stop","last_assistant_message":"Done"}' | guppi notify
 
 **Flags:**
 
-| Flag        | Alias | Description                                          |
-| ----------- | ----- | ---------------------------------------------------- |
-| `--tool`    | `-t`  | Agent name: `claude`, `codex`, `copilot`, `opencode` |
-| `--status`  | `-s`  | Status: `active`, `waiting`, `completed`, `error`    |
-| `--message` | `-m`  | Human-readable message                               |
-| `--stdin`   |       | Read hook event JSON from stdin                      |
-| `--session` |       | tmux session name (auto-detected)                    |
-| `--window`  |       | tmux window index (auto-detected)                    |
-| `--pane`    |       | tmux pane ID (auto-detected)                         |
-| `--server`  |       | guppi server URL (default: `http://localhost:7654`)  |
-| `--socket`  |       | Unix socket path (auto-detected)                     |
+| Flag        | Alias | Description                                         |
+| ----------- | ----- | --------------------------------------------------- |
+| `--tool`    | `-t`  | Agent name: `claude`, `codex`, `opencode`, `pi`     |
+| `--status`  | `-s`  | Status: `active`, `waiting`, `completed`, `error`   |
+| `--message` | `-m`  | Human-readable message                              |
+| `--stdin`   |       | Read hook event JSON from stdin                     |
+| `--session` |       | tmux session name (auto-detected)                   |
+| `--window`  |       | tmux window index (auto-detected)                   |
+| `--pane`    |       | tmux pane ID (auto-detected)                        |
+| `--server`  |       | guppi server URL (default: `http://localhost:7654`) |
+| `--socket`  |       | Unix socket path (auto-detected)                    |
 
 **Communication:** `guppi notify` tries the Unix socket first (zero-config when guppi server is running locally), then falls back to HTTP. Both use 1-second timeouts to minimize impact on agent performance.
 
 ## Inactivity-based waiting detection
 
-Claude Code sends explicit "waiting" events when it needs input (permission prompts, input dialogs). Other tools (Copilot, Codex, OpenCode) don't have equivalent hooks.
+Claude Code sends explicit "waiting" events when it needs input (permission prompts, input dialogs). Other tools (Codex, OpenCode) don't have equivalent hooks.
 
 To bridge this gap, guppi includes an **inactivity promoter**: if a non-Claude tool sends "active" events but then goes quiet for 30 seconds, guppi automatically generates a synthetic "waiting" event with the message "May need attention". This surfaces the alert in the UI and triggers push notifications, just like a native waiting event would.
 

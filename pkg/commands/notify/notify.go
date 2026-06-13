@@ -25,10 +25,10 @@ import (
 
 // stdinEvent represents the JSON payload that agent hooks pass via stdin.
 // Supports Codex hook events (SessionStart, Stop), Claude UserPromptSubmit,
-// Claude/Copilot PreToolUse/PostToolUse, and Copilot userPromptSubmitted.
+// and generic explicit values from other agents.
 type stdinEvent struct {
 	HookEventName string `json:"hook_event_name"`
-	// Claude/Copilot PreToolUse/PostToolUse fields
+	// Tool name for activity labels
 	ToolName string `json:"tool_name,omitempty"`
 	// Claude Stop / Codex agent-turn-complete
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
@@ -36,8 +36,6 @@ type stdinEvent struct {
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	// Claude UserPromptSubmit fields
 	Prompt *string `json:"prompt,omitempty"`
-	// Copilot userPromptSubmitted fields
-	UserInput *string `json:"userInput,omitempty"`
 	// Generic fields for agents that send explicit values (e.g. Pi extension)
 	UserPrompt   string `json:"user_prompt,omitempty"`
 	AgentMessage string `json:"agent_message,omitempty"`
@@ -108,11 +106,11 @@ func parseStdinEvent(tool string) (retTool, status, message, task, userPrompt, a
 		status = "active"
 		message = "Session started"
 	case "PreToolUse", "preToolUse":
-		// Claude / Copilot pre-tool hook: map tool name to activity label
+		// Pre-tool hook: map tool name to activity label
 		status = "active"
 		message = toolNameToActivity(evt.ToolName)
 	case "PostToolUse", "postToolUse":
-		// Claude / Copilot post-tool hook: retain activity label if available
+		// Post-tool hook: retain activity label if available
 		status = "active"
 		message = toolNameToActivity(evt.ToolName)
 		if evt.ToolName == "" {
@@ -136,18 +134,6 @@ func parseStdinEvent(tool string) (retTool, status, message, task, userPrompt, a
 		message = "Thinking"
 		if evt.Prompt != nil && *evt.Prompt != "" {
 			t := *evt.Prompt
-			if len(t) > 200 {
-				t = t[:200]
-			}
-			task = t
-			userPrompt = t
-		}
-	case "userPromptSubmitted":
-		// Copilot: extract user input as task label and user_prompt field
-		status = "active"
-		message = "Thinking"
-		if evt.UserInput != nil && *evt.UserInput != "" {
-			t := *evt.UserInput
 			if len(t) > 200 {
 				t = t[:200]
 			}
@@ -551,7 +537,7 @@ func init() {
 		&cli.StringFlag{
 			Name:     "tool",
 			Aliases:  []string{"t"},
-			Usage:    "tool name: claude, codex, copilot, opencode",
+			Usage:    "tool name: claude, codex, opencode",
 			Required: true,
 		},
 		&cli.StringFlag{

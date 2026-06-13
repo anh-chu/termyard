@@ -10,7 +10,7 @@ get notified when it matters
 
 guppi gives you a real-time web interface for your tmux sessions. It renders full terminal output in the browser using xterm.js backed by PTY connections, so you get the exact same view as your local terminal — borders, splits, colors, and all.
 
-It also tracks AI coding agents (Claude Code, Codex, Copilot, OpenCode, Pi) running inside your sessions, surfacing their status so you know when an agent needs input, hits an error, or finishes a task.
+It also tracks AI coding agents (Claude Code, Codex, OpenCode, Pi) running inside your sessions, surfacing their status so you know when an agent needs input, hits an error, or finishes a task.
 
 ### Key features
 
@@ -86,7 +86,6 @@ This auto-detects which agents you have installed and configures their hooks:
 
 - **Claude Code** — hooks in `~/.claude/settings.json`
 - **Codex** — `notify` command in `~/.codex/config.toml`
-- **GitHub Copilot CLI** — hooks in `~/.copilot/hooks/guppi.json`
 - **OpenCode** — plugin in `~/.config/opencode/plugins/guppi.js`
 - **Pi** — extension in `~/.pi/agent/extensions/guppi.ts`
 
