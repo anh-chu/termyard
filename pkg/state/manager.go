@@ -15,7 +15,6 @@ type SessionMetadata struct {
 	AgentType        string
 	PromptPreview    string
 	AgentSessionID   string
-	TaskName         string
 	UserPrompt       string // first user message; set once
 	LastAgentMessage string // last agent response; always updated
 }
@@ -184,9 +183,6 @@ func (m *Manager) applyMetadata(session *tmux.Session) {
 	if meta.AgentSessionID != "" {
 		session.AgentSessionID = meta.AgentSessionID
 	}
-	if meta.TaskName != "" && session.TaskName == "" {
-		session.TaskName = meta.TaskName
-	}
 	if meta.UserPrompt != "" && session.UserPrompt == "" {
 		session.UserPrompt = meta.UserPrompt
 	}
@@ -233,12 +229,6 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 		}
 		meta.AgentSessionID = evt.AgentSessionID
 	}
-	if evt.Task != "" {
-		if meta.TaskName != evt.Task {
-			changed = true
-		}
-		meta.TaskName = evt.Task
-	}
 	if evt.UserPrompt != "" && meta.UserPrompt == "" {
 		meta.UserPrompt = evt.UserPrompt
 		changed = true
@@ -266,9 +256,6 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 		}
 		if meta.AgentSessionID != "" {
 			session.AgentSessionID = meta.AgentSessionID
-		}
-		if session.TaskName == "" && meta.TaskName != "" {
-			session.TaskName = meta.TaskName
 		}
 		if session.UserPrompt == "" && meta.UserPrompt != "" {
 			session.UserPrompt = meta.UserPrompt

@@ -1336,9 +1336,6 @@ func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tra
 		if session.AgentSessionID == "" && meta.AgentSessionID != "" {
 			session.AgentSessionID = meta.AgentSessionID
 		}
-		if session.TaskName == "" && meta.Task != "" {
-			session.TaskName = meta.Task
-		}
 		if session.UserPrompt == "" && meta.UserPrompt != "" {
 			session.UserPrompt = meta.UserPrompt
 		}

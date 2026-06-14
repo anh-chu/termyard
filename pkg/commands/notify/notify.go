@@ -43,7 +43,7 @@ type stdinEvent struct {
 
 // stdinResult holds the parsed fields from a stdin hook event.
 type stdinResult struct {
-	Tool, Status, Message, Task, UserPrompt, AgentMessage string
+	Tool, Status, Message, UserPrompt, AgentMessage string
 }
 
 // toolNameToActivity maps an agent tool name to a human-readable activity label.
@@ -106,7 +106,6 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 	var (
 		status       = "active"
 		message      = "Working"
-		task         string
 		userPrompt   string
 		agentMessage string
 	)
@@ -142,7 +141,6 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 			}
 		}
 	case "UserPromptSubmit":
-		// Claude: extract user prompt as task label and user_prompt field
 		status = "active"
 		message = "Thinking"
 		if evt.Prompt != nil && *evt.Prompt != "" {
@@ -150,7 +148,6 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 			if len(t) > 200 {
 				t = t[:200]
 			}
-			task = t
 			userPrompt = t
 		}
 	default:
@@ -162,9 +159,6 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 	// Generic fields override event-derived values (used by Pi and future agents)
 	if evt.UserPrompt != "" {
 		userPrompt = evt.UserPrompt
-		if task == "" {
-			task = evt.UserPrompt
-		}
 	}
 	if evt.AgentMessage != "" {
 		agentMessage = evt.AgentMessage
@@ -174,7 +168,6 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 		Tool:         tool,
 		Status:       status,
 		Message:      message,
-		Task:         task,
 		UserPrompt:   userPrompt,
 		AgentMessage: agentMessage,
 	}, nil
@@ -378,7 +371,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	tool := c.String("tool")
 	status := c.String("status")
 	message := c.String("message")
-	task := c.String("task")
 	userPrompt := c.String("user-prompt")
 	agentMessage := c.String("agent-message")
 	session := c.String("session")
@@ -436,7 +428,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		}
 		log.WithFields(logrus.Fields{
 			"parsed_tool": res.Tool, "parsed_status": res.Status,
-			"parsed_message": res.Message, "parsed_task": res.Task,
+			"parsed_message": res.Message,
 			"parsed_user_prompt": res.UserPrompt != "", "parsed_agent_message": res.AgentMessage != "",
 		}).Trace("stdin event parsed")
 
@@ -446,9 +438,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		}
 		if !c.IsSet("message") {
 			message = res.Message
-		}
-		if task == "" && res.Task != "" {
-			task = res.Task
 		}
 		if userPrompt == "" && res.UserPrompt != "" {
 			userPrompt = res.UserPrompt
@@ -494,7 +483,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		Message:        message,
 		CWD:            cwd,
 		AgentSessionID: agentSessionID,
-		Task:           task,
 		UserPrompt:     userPrompt,
 		AgentMessage:   agentMessage,
 	}
@@ -577,10 +565,6 @@ func init() {
 		&cli.BoolFlag{
 			Name:  "stdin",
 			Usage: "read hook event JSON from stdin (for agent hooks that pass context via stdin)",
-		},
-		&cli.StringFlag{
-			Name:  "task",
-			Usage: "persistent task label (sticky across events; e.g. user prompt or git branch)",
 		},
 		&cli.StringFlag{
 			Name:  "user-prompt",

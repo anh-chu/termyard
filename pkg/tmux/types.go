@@ -18,7 +18,6 @@ type Session struct {
 	AgentType      string    `json:"agent_type,omitempty"`
 	PromptPreview    string    `json:"prompt_preview,omitempty"`
 	AgentSessionID   string    `json:"agent_session_id,omitempty"`
-	TaskName         string    `json:"task_name,omitempty"`
 	UserPrompt       string    `json:"user_prompt,omitempty"`
 	LastAgentMessage string    `json:"last_agent_message,omitempty"`
 }

@@ -38,7 +38,6 @@ export interface Session {
   agent_type?: string
   prompt_preview?: string
   agent_session_id?: string
-  task_name?: string
   user_prompt?: string
   last_agent_message?: string
 }
