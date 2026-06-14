@@ -39,6 +39,7 @@ type Context struct {
 	UserPrompt string   // first user message (agent kind only)
 	AgentMsg   string   // latest agent message (agent kind only)
 	Commands   []string // recent shell commands (shell kind only)
+	Current    string   // existing display name, if any; the model is nudged to keep it
 }
 
 // Config holds the endpoint settings. Endpoint + Model must be non-empty for
@@ -155,7 +156,9 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
-const systemPrompt = `You name terminal sessions. Reply with ONLY a short label, 2-4 words, kebab-case, lowercase, ASCII letters/digits/hyphens only. No quotes, no punctuation, no explanation. Examples: fix-auth-token, db-migration, docker-logs-debug, rebase-feature-branch.`
+const systemPrompt = `You name terminal sessions. Reply with ONLY a short label, 2-4 words, kebab-case, lowercase, ASCII letters/digits/hyphens only. No quotes, no punctuation, no explanation. Examples: fix-auth-token, db-migration, docker-logs-debug, rebase-feature-branch.
+
+Prefer a name that captures the session's overall purpose, not a single transient command. If a current name is provided and it still reasonably fits the work, reply with that exact same name unchanged. Only produce a new name when the session's focus has clearly and durably shifted.`
 
 // Generate synthesizes a sanitized session name from ctx. Returns ErrDisabled
 // if no endpoint is configured. On any network/parse error returns ("", err);
@@ -274,6 +277,9 @@ func extractContent(raw []byte) (string, error) {
 
 func buildUserPrompt(nc Context) string {
 	var b strings.Builder
+	if nc.Current != "" {
+		fmt.Fprintf(&b, "Current name: %s (keep it unless the focus has clearly changed)\n", nc.Current)
+	}
 	if nc.Workdir != "" {
 		fmt.Fprintf(&b, "Working directory: %s\n", nc.Workdir)
 	}

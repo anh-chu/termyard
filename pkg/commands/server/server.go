@@ -330,6 +330,17 @@ var shellNames = map[string]bool{
 	"-bash": true, "-zsh": true, "-sh": true, "login": true,
 }
 
+// trivialCmds are short-lived navigation/inspection commands that should never
+// drive a session rename on their own — they say nothing durable about the
+// session's purpose.
+var trivialCmds = map[string]bool{
+	"ls": true, "cd": true, "pwd": true, "cat": true, "less": true,
+	"more": true, "man": true, "clear": true, "echo": true, "which": true,
+	"sleep": true, "watch": true, "top": true, "htop": true, "ps": true,
+	"history": true, "env": true, "export": true, "head": true, "tail": true,
+	"touch": true, "mkdir": true, "rm": true, "cp": true, "mv": true,
+}
+
 // runShellNameWatcher polls active-pane foreground commands and, when a
 // non-agent session starts a new meaningful process, asks the AI namer to
 // refresh that session's display name. The actual eligibility gate (namer
@@ -340,7 +351,11 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 
 	lastCmd := make(map[string]string)
 	lastFire := make(map[string]time.Time)
-	const minInterval = 30 * time.Second
+	named := make(map[string]bool)
+	// First name is assigned quickly; after a session already has a name we back
+	// off hard so a meaningful label is not churned by later transient commands.
+	const firstInterval = 20 * time.Second
+	const renameInterval = 10 * time.Minute
 
 	for {
 		select {
@@ -355,14 +370,20 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 				prev := lastCmd[fg.Session]
 				lastCmd[fg.Session] = fg.Command
 				cmd := strings.TrimSpace(fg.Command)
-				if cmd == "" || shellNames[cmd] || cmd == prev {
+				if cmd == "" || shellNames[cmd] || trivialCmds[cmd] || cmd == prev {
 					continue
 				}
-				// New meaningful foreground process detected.
-				if t, ok := lastFire[fg.Session]; ok && time.Since(t) < minInterval {
+				// New meaningful foreground process detected. Use a long cooldown
+				// once the session already has a name so we don't churn it.
+				interval := firstInterval
+				if named[fg.Session] {
+					interval = renameInterval
+				}
+				if t, ok := lastFire[fg.Session]; ok && time.Since(t) < interval {
 					continue
 				}
 				lastFire[fg.Session] = time.Now()
+				named[fg.Session] = true
 
 				cmds := []string{cmd}
 				if pane := tmux.PrimaryPane(currentWindows(client, fg.Session)); pane != nil {

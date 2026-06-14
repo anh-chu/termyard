@@ -316,6 +316,7 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 		Agent:      meta.AgentType,
 		UserPrompt: meta.UserPrompt,
 		AgentMsg:   meta.LastAgentMessage,
+		Current:    meta.DisplayName,
 	}
 	alreadyNamed := meta.NameAssigned || meta.UserSetName
 	m.mu.RUnlock()
@@ -436,7 +437,7 @@ func (m *Manager) TriggerShellNaming(sessionName string, commands []string) {
 		return
 	}
 
-	nc := namer.Context{Kind: namer.KindShell, Workdir: projectPath, Commands: commands}
+	nc := namer.Context{Kind: namer.KindShell, Workdir: projectPath, Commands: commands, Current: meta.DisplayName}
 	if projectPath != "" {
 		if b, err := git.CurrentBranch(projectPath); err == nil {
 			nc.Branch = b
