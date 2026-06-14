@@ -133,10 +133,6 @@ function pathLeaf(path?: string): string {
   return parts[parts.length - 1] || trimmed
 }
 
-function shortSessionId(value?: string): string {
-  if (!value) return ''
-  return value.length > 8 ? value.slice(0, 8) : value
-}
 
 function formatUptime(created?: string): string {
   if (!created) return ''
@@ -466,11 +462,13 @@ export function Sidebar({
       : null
     const promptPreview = session.prompt_preview?.trim()
     const taskName = session.task_name?.trim()
-    const truncTask = taskName && taskName.length > 30 ? taskName.slice(0, 30) + '\u2026' : taskName
     const lastAgentMessage = session.last_agent_message?.trim()
     const userPrompt = session.user_prompt?.trim()
-    // Right side of the em-dash: prefer live agent message, then user's original prompt, then terminal preview
-    const rightPreview = lastAgentMessage || userPrompt || promptPreview
+    // Live activity label from the active tool event (e.g. "reading files", "running commands")
+    const activeEvent = events.find(e => e.status === 'active')
+    const activityLabel = activeEvent?.message
+    // Bottom row: live activity first, then last agent message, fallback to prompt if no task
+    const activityDisplay = activityLabel || lastAgentMessage || (!taskName ? (userPrompt || promptPreview) : undefined)
     const projectName = pathLeaf(session.project_path)
     const agentType = session.agent_type || events[0]?.tool
     const allPanes = !collapsed
@@ -649,7 +647,7 @@ export function Sidebar({
                 {bracketChar}
               </span>
             )}
-            {!collapsed && <AgentMark agentType={agentType} className="h-4.5 min-w-8 px-1.5 shrink-0" />}
+            {!collapsed && <AgentMark agentType={agentType} className="h-4 w-4 shrink-0" />}
             {!collapsed && stripeColor && (
               <span
                 className="w-2 h-2 rounded-full shrink-0 pointer-events-none"
@@ -672,48 +670,50 @@ export function Sidebar({
                 className="flex-1 text-sm text-ink bg-surface-elevated border border-primary rounded-sm px-1.5 py-0.5 outline-none font-sans font-medium"
               />
             ) : (
-              <span className={cn(
-                'text-[13px] font-medium tracking-tight flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left',
-                isSelected && '!text-primary',
-              )}>
+              <span
+                className={cn(
+                  'text-[12px] font-medium tracking-tight flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left',
+                  isSelected && '!text-primary',
+                )}
+                title={session.agent_session_id ? `${session.name} · ${session.agent_session_id}` : session.name}
+              >
                 {collapsed ? session.name.charAt(0).toUpperCase() : session.name}
               </span>
             )}
-            {!collapsed && session.agent_session_id && (
-              <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 text-xs text-mute font-mono" title={session.agent_session_id}>
-                {shortSessionId(session.agent_session_id)}
-              </span>
-            )}
             {!collapsed && (
-              <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 text-xs text-mute font-medium" title={`Uptime: ${formatUptime(session.created)}`}>
+              <span className="shrink-0 text-[10px] text-mute/50 font-medium tabular-nums" title={`Uptime: ${formatUptime(session.created)}`}>
                 {formatUptime(session.created)}
               </span>
             )}
             {!collapsed && session.attached && (
-              <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" title="attached" />
+              <span className="w-1.5 h-1.5 rounded-full bg-success/60 shrink-0" title="attached" />
             )}
             {!collapsed && active && (
-              <span className="w-2 h-2 rounded-full bg-success animate-pulse shrink-0" title="active" />
+              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse shrink-0" title="active" />
             )}
           </div>
 
-          {!collapsed && (projectName || truncTask || rightPreview || session.is_worktree) && (
-            <div className="mt-1 flex items-center gap-2 text-xs text-mute font-medium">
+          {!collapsed && taskName && (
+            <div className="mt-0.5 text-[11px] font-medium text-ink/70 truncate leading-tight" title={taskName}>
+              {taskName}
+            </div>
+          )}
+
+          {!collapsed && (activityDisplay || projectName || session.is_worktree) && (
+            <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
               {session.is_worktree && (
-                <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 bg-surface-card/50 text-primary/70" title="git worktree">
+                <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-primary/70" title="git worktree">
                   ⎇
                 </span>
               )}
-              {projectName && (
-                <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 bg-surface-card/50" title={session.project_path}>
+              {projectName && projectName !== session.name && (
+                <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-mute" title={session.project_path}>
                   {projectName}
                 </span>
               )}
-              {(truncTask || rightPreview) && (
-                <span className="min-w-0 truncate opacity-80" title={truncTask && rightPreview ? `${taskName}\n${rightPreview}` : (truncTask || rightPreview)}>
-                  {truncTask && <span className="font-medium text-ink/80">{truncTask}</span>}
-                  {truncTask && rightPreview && truncTask !== rightPreview && <span className="text-mute"> — </span>}
-                  {rightPreview && truncTask !== rightPreview && <span>{rightPreview}</span>}
+              {activityDisplay && (
+                <span className="min-w-0 truncate text-[10px] text-mute/70" title={activityDisplay}>
+                  {activityDisplay}
                 </span>
               )}
             </div>

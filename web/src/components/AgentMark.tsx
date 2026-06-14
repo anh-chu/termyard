@@ -43,8 +43,8 @@ export function AgentMark({ agentType, className }: { agentType?: string; classN
     <span
       title={agentType || 'custom'}
       className={cn(
-        'inline-flex items-center justify-center rounded-md border',
-        !iconPath && 'text-[10px] font-semibold tracking-wide',
+        'inline-flex items-center justify-center rounded border',
+        !iconPath && 'text-[9px] font-semibold tracking-wide',
         className,
       )}
       style={{
