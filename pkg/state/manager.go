@@ -2,6 +2,9 @@ package state
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -33,6 +36,11 @@ type Manager struct {
 	meta     map[string]SessionMetadata
 	namer    *namer.Namer
 
+	// namesPath persists name metadata across restarts so AI/manual display
+	// names survive a server reload (tmux session names persist on their own,
+	// but shell DisplayNames and non-renamed agent names live only in meta).
+	namesPath string
+
 	// Subscribers for state changes
 	subMu       sync.RWMutex
 	subscribers []chan StateEvent
@@ -49,10 +57,82 @@ type StateEvent struct {
 
 // NewManager creates a new state manager
 func NewManager(client *tmux.Client) *Manager {
-	return &Manager{
+	m := &Manager{
 		sessions: make(map[string]*tmux.Session),
 		client:   client,
 		meta:     make(map[string]SessionMetadata),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		m.namesPath = filepath.Join(home, ".config", "guppi", "session-names.json")
+		m.loadNames()
+	}
+	return m
+}
+
+// persistedName is the on-disk shape for name metadata that must survive a
+// server restart. Transient fields (prompts, agent messages) are intentionally
+// not persisted; hooks repopulate them.
+type persistedName struct {
+	DisplayName  string `json:"display_name"`
+	UserSetName  bool   `json:"user_set_name"`
+	NameAssigned bool   `json:"name_assigned"`
+}
+
+// loadNames seeds meta with persisted display names. Called once at startup
+// before any concurrent access, so it takes no lock.
+func (m *Manager) loadNames() {
+	if m.namesPath == "" {
+		return
+	}
+	raw, err := os.ReadFile(m.namesPath)
+	if err != nil {
+		return
+	}
+	var saved map[string]persistedName
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		logrus.WithError(err).Debug("session names: parse failed")
+		return
+	}
+	for name, pn := range saved {
+		meta := m.meta[name]
+		meta.DisplayName = pn.DisplayName
+		meta.UserSetName = pn.UserSetName
+		meta.NameAssigned = pn.NameAssigned
+		m.meta[name] = meta
+	}
+}
+
+// saveNames writes current name metadata to disk. Takes its own read lock, so
+// callers must NOT hold m.mu. Best-effort: errors are logged at debug.
+func (m *Manager) saveNames() {
+	if m.namesPath == "" {
+		return
+	}
+	m.mu.RLock()
+	snapshot := make(map[string]persistedName, len(m.meta))
+	for name, meta := range m.meta {
+		if meta.DisplayName == "" && !meta.UserSetName {
+			continue
+		}
+		snapshot[name] = persistedName{
+			DisplayName:  meta.DisplayName,
+			UserSetName:  meta.UserSetName,
+			NameAssigned: meta.NameAssigned,
+		}
+	}
+	m.mu.RUnlock()
+
+	raw, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		logrus.WithError(err).Debug("session names: marshal failed")
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(m.namesPath), 0o755); err != nil {
+		logrus.WithError(err).Debug("session names: mkdir failed")
+		return
+	}
+	if err := os.WriteFile(m.namesPath, raw, 0o644); err != nil {
+		logrus.WithError(err).Debug("session names: write failed")
 	}
 }
 
@@ -342,6 +422,27 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 	m.applyGeneratedName(sessionName, name, !attached)
 }
 
+// GenerateGroupName synthesizes a single label for a layout group from its
+// member session labels. Groups are a frontend-only concept, so this is a
+// stateless helper: it does not persist anything. Returns ErrDisabled when the
+// namer is off and an error on any network/parse failure; callers keep the
+// existing name on error.
+func (m *Manager) GenerateGroupName(members []string, current string) (string, error) {
+	m.mu.RLock()
+	n := m.namer
+	m.mu.RUnlock()
+	if n == nil || !n.Enabled() {
+		return "", namer.ErrDisabled
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	return n.Generate(ctx, namer.Context{
+		Kind:    namer.KindGroup,
+		Members: members,
+		Current: current,
+	})
+}
+
 // applyGeneratedName stores displayName for sessionName and marks NameAssigned.
 // When allowRename is true and the name is a valid, non-colliding tmux session
 // name, it also renames the tmux session and migrates state/meta keys.
@@ -382,12 +483,14 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	m.mu.Unlock()
 
 	if newName == "" {
+		m.saveNames()
 		m.broadcast(StateEvent{Type: "sessions-changed"})
 		return
 	}
 
 	if err := m.client.RenameSession(sessionName, newName); err != nil {
 		logrus.WithError(err).WithFields(logrus.Fields{"old": sessionName, "new": newName}).Warn("tmux rename for AI name failed")
+		m.saveNames()
 		m.broadcast(StateEvent{Type: "sessions-changed"})
 		return
 	}
@@ -405,6 +508,7 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	}
 	m.mu.Unlock()
 
+	m.saveNames()
 	m.broadcast(StateEvent{Type: "session-removed", Session: sessionName})
 	m.broadcast(StateEvent{Type: "session-added", Session: newName})
 	m.broadcast(StateEvent{Type: "sessions-changed"})
@@ -469,6 +573,7 @@ func (m *Manager) TriggerShellNaming(sessionName string, commands []string) {
 		s.DisplayName = name
 	}
 	m.mu.Unlock()
+	m.saveNames()
 	m.broadcast(StateEvent{Type: "sessions-changed"})
 }
 
@@ -488,6 +593,7 @@ func (m *Manager) SetDisplayName(sessionName, displayName string, userSet bool) 
 		sess.UserSetName = userSet
 	}
 	m.mu.Unlock()
+	m.saveNames()
 	m.broadcast(StateEvent{Type: "sessions-changed"})
 }
 
@@ -499,6 +605,7 @@ func (m *Manager) RemoveSession(name string) {
 	delete(m.sessions, name)
 	delete(m.meta, name)
 	m.mu.Unlock()
+	m.saveNames()
 	m.broadcast(StateEvent{Type: "session-removed", Session: name})
 	m.broadcast(StateEvent{Type: "sessions-changed"})
 }

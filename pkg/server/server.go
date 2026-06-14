@@ -668,6 +668,31 @@ func Run(ctx context.Context, opts *Options) error {
 				w.WriteHeader(http.StatusNoContent)
 			})
 
+			// AI-name a layout group from its member session labels. Groups are
+			// a frontend-only concept, so this is stateless: it returns a name,
+			// the client persists it.
+			r.Post("/group/name", func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Members []string `json:"members"`
+					Current string   `json:"current,omitempty"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Members) == 0 {
+					http.Error(w, "members is required", http.StatusBadRequest)
+					return
+				}
+				if opts.StateMgr == nil {
+					http.Error(w, "state manager unavailable", http.StatusInternalServerError)
+					return
+				}
+				name, err := opts.StateMgr.GenerateGroupName(req.Members, req.Current)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"name": name})
+			})
+
 			r.Post("/session/rename", func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
 					OldName string `json:"old_name"`

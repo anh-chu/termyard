@@ -10,6 +10,21 @@ import { cn } from '../lib/utils'
 import { hostColor } from '../lib/hostColor'
 import { AgentMark } from './AgentMark'
 
+function SparkleIcon({ spinning, size = 11 }: { spinning?: boolean; size?: number }) {
+  if (spinning) {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin text-primary">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+      </svg>
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2l1.6 5.2L19 9l-5.4 1.8L12 16l-1.6-5.2L5 9l5.4-1.8L12 2zM19 14l.8 2.6L22 17.5l-2.2.9L19 21l-.8-2.6L16 17.5l2.2-.9L19 14z" />
+    </svg>
+  )
+}
+
 interface SidebarProps {
   sessions: Session[]
   selectedSession: string | null
@@ -231,6 +246,7 @@ export function Sidebar({
   const [, setUptimeTick] = useState(0)
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null)
   const [groupRenameValue, setGroupRenameValue] = useState('')
+  const [aiNamingGroupId, setAiNamingGroupId] = useState<string | null>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const groupRenameInputRef = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLDivElement>(null)
@@ -417,6 +433,27 @@ export function Sidebar({
       console.error('Failed to rename session:', err)
     }
     setRenamingSession(null)
+  }
+
+  const aiNameGroup = async (groupId: string, sessions: Session[], current?: string) => {
+    const members = sessions.map(sessionLabel).filter(Boolean)
+    if (members.length === 0) return
+    setAiNamingGroupId(groupId)
+    try {
+      const res = await fetch('/api/group/name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ members, current: current || undefined }),
+      })
+      if (res.ok) {
+        const { name } = await res.json()
+        if (name) onRenameGroup?.(groupId, name)
+      }
+    } catch {
+      // keep existing name on failure
+    } finally {
+      setAiNamingGroupId(null)
+    }
   }
 
   const submitGroupRename = () => {
@@ -1096,6 +1133,18 @@ export function Sidebar({
                             {formatUptime(collapsedNewest.created)}
                           </span>
                         )}
+                        {/* AI name */}
+                        {!renamingGroupId && (
+                          <button
+                            type="button"
+                            title="AI name this group"
+                            disabled={aiNamingGroupId === group.id}
+                            onClick={(e) => { e.stopPropagation(); aiNameGroup(group.id, groupSessions, group.name) }}
+                            className="opacity-0 group-hover/collname:opacity-100 transition-opacity text-mute/40 hover:text-primary shrink-0 flex items-center disabled:opacity-100"
+                          >
+                            <SparkleIcon spinning={aiNamingGroupId === group.id} size={11} />
+                          </button>
+                        )}
                         {/* Rename pencil */}
                         {!renamingGroupId && (
                           <button
@@ -1147,6 +1196,15 @@ export function Sidebar({
                               )}>
                                 {group.name || 'unnamed'}
                               </span>
+                              <button
+                                type="button"
+                                title="AI name this group"
+                                disabled={aiNamingGroupId === group.id}
+                                onClick={(e) => { e.stopPropagation(); aiNameGroup(group.id, groupSessions, group.name) }}
+                                className="opacity-0 group-hover/gname:opacity-100 transition-opacity text-mute/40 hover:text-primary shrink-0 flex items-center disabled:opacity-100"
+                              >
+                                <SparkleIcon spinning={aiNamingGroupId === group.id} size={10} />
+                              </button>
                               <button
                                 type="button"
                                 title="Rename group"

@@ -27,6 +27,7 @@ type Kind string
 const (
 	KindAgent Kind = "agent"
 	KindShell Kind = "shell"
+	KindGroup Kind = "group"
 )
 
 // Context carries everything the namer may use to synthesize a name. Callers
@@ -39,6 +40,7 @@ type Context struct {
 	UserPrompt string   // first user message (agent kind only)
 	AgentMsg   string   // latest agent message (agent kind only)
 	Commands   []string // recent shell commands (shell kind only)
+	Members    []string // member session labels (group kind only)
 	Current    string   // existing display name, if any; the model is nudged to keep it
 }
 
@@ -307,6 +309,18 @@ func buildUserPrompt(nc Context) string {
 				}
 			}
 		}
+	case KindGroup:
+		if len(nc.Members) > 0 {
+			b.WriteString("Sessions in this group:\n")
+			for _, m := range nc.Members {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					fmt.Fprintf(&b, "  %s\n", truncate(m, 120))
+				}
+			}
+		}
+		b.WriteString("\nName this group by the shared theme of its sessions.")
+		return b.String()
 	}
 	b.WriteString("\nName this session.")
 	return b.String()
