@@ -83,15 +83,30 @@ func (r *Reconciler) Run(ctx context.Context) {
 // reconcile checks all tracked events and clears any whose pane no longer
 // has an agent running.
 func (r *Reconciler) reconcile() {
+	// Collect all events to check: stored waiting/error/stuck events plus
+	// hook-based active panes. Active events clear t.events, so without the
+	// second source the reconciler would miss agents that exit after sending
+	// only an active hook (e.g. on force-quit).
 	events := r.tracker.GetAll()
-	if len(events) == 0 {
+	activePaneEvents := r.tracker.GetActivePaneEvents()
+
+	all := append(events, activePaneEvents...)
+	if len(all) == 0 {
 		return
 	}
 
-	for _, evt := range events {
+	// Track processed panes to avoid double-clearing (t.events and activePanes
+	// are mutually exclusive by design, but guard defensively).
+	checked := make(map[string]bool, len(all))
+
+	for _, evt := range all {
 		if evt.Pane == "" {
 			continue
 		}
+		if checked[evt.Pane] {
+			continue
+		}
+		checked[evt.Pane] = true
 
 		ps := r.lookup(evt.Pane)
 

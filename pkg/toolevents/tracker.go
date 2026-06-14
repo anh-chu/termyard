@@ -236,6 +236,20 @@ func (t *Tracker) Record(evt *Event) {
 // because agents like Claude can wait for user input indefinitely.
 const StaleTimeout = 24 * time.Hour
 
+// GetActivePaneEvents returns events for locally-tracked hook-based active panes.
+// Active hook events clear t.events, so they are invisible to GetAll. This method
+// exposes them so the reconciler can detect process exits for panes that sent
+// an active hook but never sent a subsequent waiting/completed hook.
+func (t *Tracker) GetActivePaneEvents() []*Event {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	events := make([]*Event, 0, len(t.activePanes))
+	for _, as := range t.activePanes {
+		events = append(events, as.evt)
+	}
+	return events
+}
+
 // GetAll returns all currently tracked (non-completed) events, pruning stale ones.
 func (t *Tracker) GetAll() []*Event {
 	t.mu.Lock()
