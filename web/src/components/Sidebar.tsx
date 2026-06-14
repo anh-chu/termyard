@@ -86,6 +86,17 @@ function ToolBadge({ event }: { event: ToolEvent }) {
   )
 }
 
+const SHELL_COMMANDS = new Set(['zsh', 'bash', 'fish', 'sh', 'dash', 'ksh', 'tcsh', 'csh'])
+
+const statusBadgeConfig = {
+  working: { label: 'working', color: 'var(--accent-green)',  bg: 'rgba(89,212,153,0.12)',  pulse: true  },
+  waiting: { label: 'waiting', color: 'var(--accent-yellow)', bg: 'rgba(255,197,51,0.12)',  pulse: true  },
+  stuck:   { label: 'stuck',   color: 'var(--accent-red)',    bg: 'rgba(255,97,97,0.12)',   pulse: false },
+  idle:    { label: 'idle',    color: 'var(--mute)',          bg: 'transparent',            pulse: false },
+  process: { label: 'process', color: 'var(--accent-blue)',   bg: 'rgba(87,193,255,0.12)',  pulse: false },
+  shell:   { label: 'shell',   color: 'var(--mute)',          bg: 'transparent',            pulse: false },
+} as const
+
 function Sparkline({ data, height = 16 }: { data: number[]; height?: number }) {
   if (!data || data.length === 0) return null
   const max = Math.max(...data, 1)
@@ -453,7 +464,6 @@ export function Sidebar({
     const needsAttention = sessionNeedsAttention(sk)
     const events = getSessionEvents(sk)
     const act = getSessionActivity(sk)
-    const active = isSessionActive(session)
     const isRenaming = renamingSession?.key === sk
     const isOffline = session.host && session.host_online === false
     const stripeColor = hasMultipleHosts ? hostColor(session.host, localHostId) : null
@@ -474,6 +484,23 @@ export function Sidebar({
       ? (session.windows ?? []).flatMap(w => (w.panes ?? []).map(p => ({ ...p, windowIndex: w.index })))
       : []
     const showPanes = allPanes.length > 1
+
+    // Status badge: single text indicator replacing the two dot indicators
+    const statusBadge = (() => {
+      if (events.some(e => e.status === 'stuck'))   return 'stuck'   as const
+      if (events.some(e => e.status === 'waiting')) return 'waiting' as const
+      if (events.some(e => e.status === 'active'))  return 'working' as const
+      // No active events — was an agent here before?
+      if (userPrompt || lastAgentMessage) return 'idle' as const
+      // Plain terminal — check active pane command
+      const cmd = (() => {
+        for (const w of session.windows ?? []) {
+          for (const p of w.panes ?? []) { if (p.active) return p.current_command }
+        }
+        return session.windows?.[0]?.panes?.[0]?.current_command ?? ''
+      })()
+      return SHELL_COMMANDS.has(cmd) ? 'shell' as const : 'process' as const
+    })()
 
     const handleTouchStart = (e: React.TouchEvent) => {
       if (isRenaming) return
@@ -684,12 +711,17 @@ export function Sidebar({
                 {formatUptime(session.created)}
               </span>
             )}
-            {!collapsed && session.attached && (
-              <span className="w-1.5 h-1.5 rounded-full bg-success/60 shrink-0" title="attached" />
-            )}
-            {!collapsed && active && (
-              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse shrink-0" title="active" />
-            )}
+            {!collapsed && (() => {
+              const cfg = statusBadgeConfig[statusBadge]
+              return (
+                <span
+                  className={cn('shrink-0 text-[9px] font-medium px-1.5 py-px rounded-xs tabular-nums', cfg.pulse && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
+                  style={{ color: cfg.color, background: cfg.bg }}
+                >
+                  {cfg.label}
+                </span>
+              )
+            })()}
           </div>
 
           {!collapsed && userPrompt && (
