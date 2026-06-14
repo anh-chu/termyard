@@ -88,18 +88,11 @@ export default function (pi) {
   });
 
   pi.on("tool_execution_start", async (event, _ctx) => {
+    // tool_execution_start fires before tool_call for every tool, so this
+    // single handler covers activity/waiting labelling. Pi has no permission
+    // popups, so there is no separate confirmation event to hook.
     const data = getEvent(event);
     notifyWithToolName(getToolName(data));
-  });
-
-  pi.on("tool_call", async (event, _ctx) => {
-    const data = getEvent(event);
-    const toolName = getToolName(data);
-    if (data.requiresConfirmation) {
-      notify("waiting", "Permission needed");
-    } else {
-      notifyWithToolName(toolName);
-    }
   });
 
   pi.on("agent_end", async (event, _ctx) => {

@@ -80,10 +80,10 @@ func toolNameToActivity(toolName string) string {
 	// Agent-specific
 	case "task":
 		return "running subagent"
-	case "ask_user", "ask_question", "ask_user_question", "askuser", "askuserquestion", "question", "user_input", "request_input":
-		return "waiting for input"
-
 	default:
+		if toolNameIsInteractiveWait(toolName) {
+			return "waiting for input"
+		}
 		return ""
 	}
 }
