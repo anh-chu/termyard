@@ -456,7 +456,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
             <button
               onClick={onToggleFullscreen}
               title={fullscreen ? 'Exit fullscreen (Esc / Cmd+Shift+F)' : 'Fullscreen (Cmd+Shift+F)'}
-              className="absolute top-2.5 right-2.5 z-20 p-1.5 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-colors"
+              className="absolute top-2.5 right-2.5 z-20 p-1.5 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             >
               {fullscreen ? (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
