@@ -21,8 +21,19 @@ export function useToolEvents() {
     try {
       const res = await fetch('/api/tool-events')
       if (res.ok) {
-        const data = await res.json()
-        setEvents(data || [])
+        const serverData: ToolEvent[] = await res.json() || []
+        setEvents(prev => {
+          // Preserve locally-tracked active events — the server never persists them,
+          // so a full replace would clear "working" state mid-turn.
+          // Drop a local active only if the server has a newer event for the same pane.
+          const samePane = (a: ToolEvent, b: ToolEvent) =>
+            a.session === b.session && a.window === b.window &&
+            (a.pane || '') === (b.pane || '') && (a.host || '') === (b.host || '')
+          const localActives = prev.filter(e =>
+            e.status === 'active' && !serverData.some(s => samePane(s, e))
+          )
+          return [...localActives, ...serverData]
+        })
       }
     } catch (err) {
       console.error('Failed to fetch tool events:', err)
@@ -59,15 +70,13 @@ export function useToolEvents() {
       const filtered = prev.filter(
         e => !(e.session === toolEvt.session && e.window === toolEvt.window && (e.pane || '') === (toolEvt.pane || '') && (e.host || '') === (toolEvt.host || ''))
       )
-      // Don't persist completed events
+      // Don't persist completed events — they clear the pane's existing event
       if (toolEvt.status === 'completed') {
         return filtered
       }
-      // Keep auto-detected active events so they count toward agent totals;
-      // hook-based active events are transient and should be cleared
-      if (toolEvt.status === 'active' && !toolEvt.auto_detected) {
-        return filtered
-      }
+      // Keep all active events (hook-based and auto-detected).
+      // The deduplication filter above ensures only the latest event per pane is kept.
+      // Subsequent waiting/completed events will naturally replace the active one.
       return [...filtered, toolEvt]
     })
   }, [])
