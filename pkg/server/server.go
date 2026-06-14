@@ -1072,6 +1072,11 @@ func Run(ctx context.Context, opts *Options) error {
 				if prefs.AINaming.APIKey == preferences.APIKeyMask {
 					prefs.AINaming.APIKey = opts.PrefStore.Get().AINaming.APIKey
 				}
+				// Defensive: never persist the mask itself, even if the store was
+				// previously corrupted with it.
+				if prefs.AINaming.APIKey == preferences.APIKeyMask {
+					prefs.AINaming.APIKey = ""
+				}
 				if err := opts.PrefStore.Update(&prefs); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -1079,12 +1084,14 @@ func Run(ctx context.Context, opts *Options) error {
 				if opts.OnPrefsChanged != nil {
 					opts.OnPrefsChanged(&prefs)
 				}
-				// Re-mask before echoing the saved prefs back to the browser.
-				if prefs.AINaming.APIKey != "" {
-					prefs.AINaming.APIKey = preferences.APIKeyMask
+				// Echo a masked COPY; never mutate the stored struct (Update keeps
+				// the pointer, so mutating prefs here would corrupt the store).
+				echo := prefs
+				if echo.AINaming.APIKey != "" {
+					echo.AINaming.APIKey = preferences.APIKeyMask
 				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(&prefs)
+				json.NewEncoder(w).Encode(&echo)
 			})
 
 			// Session-attribute endpoints — server-authoritative, mesh-wide shared

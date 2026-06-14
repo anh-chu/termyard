@@ -164,6 +164,10 @@ func (s *Store) Get() *Preferences {
 func (s *Store) Update(prefs *Preferences) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data = prefs
+	// Store a copy so callers can't mutate our internal state via the pointer
+	// they passed in (e.g. masking an API key after Update).
+	cp := *prefs
+	cp.Notifications.Statuses = append([]string{}, prefs.Notifications.Statuses...)
+	s.data = &cp
 	return s.save()
 }
