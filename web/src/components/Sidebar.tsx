@@ -22,7 +22,6 @@ interface SidebarProps {
   onSessionRenamed?: (oldName: string, newName: string) => void
   getSessionEvents: (session: string) => ToolEvent[]
   sessionNeedsAttention: (session: string) => boolean
-  isSessionInActiveTurn: (session: string) => boolean
   getSessionActivity: (session: string) => ActivitySnapshot | undefined
   layoutGroups?: { id: string; leaves: string[]; isActive: boolean; activeKey: string | null; name: string | undefined }[]
   onSwitchGroup?: (groupId: string, focusKey?: string) => void
@@ -183,7 +182,6 @@ export function Sidebar({
   onSessionRenamed,
   getSessionEvents,
   sessionNeedsAttention,
-  isSessionInActiveTurn,
   getSessionActivity,
   layoutGroups,
   onSwitchGroup,
@@ -492,9 +490,8 @@ export function Sidebar({
     const statusBadge = (() => {
       if (events.some(e => e.status === 'stuck'))   return 'stuck'   as const
       if (events.some(e => e.status === 'waiting')) return 'waiting' as const
-      // Session-level turn flag: stays set between tool calls within a turn,
-      // only cleared on completed. Prevents idle flicker during gaps.
-      if (isSessionInActiveTurn(sk)) return 'working' as const
+      // Hook-based active: reliable working signal
+      if (events.some(e => e.status === 'active' && !e.auto_detected)) return 'working' as const
       // Auto-detected active: only treat as working when no hook history exists.
       // With hook history the process is just sitting at the REPL between turns.
       if (events.some(e => e.status === 'active' && e.auto_detected) && !hasHookHistory) return 'working' as const

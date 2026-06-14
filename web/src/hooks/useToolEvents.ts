@@ -15,12 +15,6 @@ export interface ToolEvent {
 
 export function useToolEvents() {
   const [events, setEvents] = useState<ToolEvent[]>([])
-  // Tracks sessions with an in-progress hook-based agent turn.
-  // Keyed the same as sessionKey() in useSessions: "session" or "host/session".
-  // Set on hook-based active events; cleared on completed.
-  // Outlives individual pane events so the badge doesn't flicker "idle"
-  // during the brief gaps between tool calls within a single turn.
-  const [activeSessions, setActiveSessions] = useState<Set<string>>(new Set())
 
   // Fetch initial state
   const refresh = useCallback(async () => {
@@ -71,15 +65,6 @@ export function useToolEvents() {
       auto_detected: evt.auto_detected,
     }
 
-    // Session-level turn tracking (hook-based only — not auto-detected).
-    // Both setEvents and setActiveSessions are batched into one render by React 18.
-    const sk = toolEvt.host ? `${toolEvt.host}/${toolEvt.session}` : toolEvt.session
-    if (toolEvt.status === 'active' && !toolEvt.auto_detected) {
-      setActiveSessions(prev => new Set([...prev, sk]))
-    } else if (toolEvt.status === 'completed') {
-      setActiveSessions(prev => { const next = new Set(prev); next.delete(sk); return next })
-    }
-
     setEvents(prev => {
       // Remove existing event for same host/session/window/pane
       // Normalize pane to handle undefined vs empty string
@@ -121,13 +106,6 @@ export function useToolEvents() {
     return events.some(e => e.session === name && e.host === host && needsAttn(e))
   }, [events])
 
-  // Returns true if the session has an in-progress hook-based agent turn.
-  // More stable than checking events directly — persists across the brief
-  // gaps between tool calls where no active event is in-flight.
-  const isSessionInActiveTurn = useCallback((key: string) => {
-    return activeSessions.has(key)
-  }, [activeSessions])
-
   // Dismiss a specific event (clear from server and local state)
   const dismissEvent = useCallback(async (evt: ToolEvent) => {
     try {
@@ -152,8 +130,7 @@ export function useToolEvents() {
       console.error('Failed to clear events:', err)
     }
     setEvents([])
-    setActiveSessions(new Set())
   }, [])
 
-  return { events, handleEvent, getSessionEvents, sessionNeedsAttention, isSessionInActiveTurn, dismissEvent, dismissAll, refresh }
+  return { events, handleEvent, getSessionEvents, sessionNeedsAttention, dismissEvent, dismissAll, refresh }
 }
