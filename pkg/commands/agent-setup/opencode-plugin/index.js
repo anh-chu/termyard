@@ -3,7 +3,7 @@ const sessions = new Map();
 
 function sessionState(sessionID) {
   if (!sessions.has(sessionID)) {
-    sessions.set(sessionID, { userPromptSet: false, messages: {}, questionPending: false });
+    sessions.set(sessionID, { userPromptSet: false, messages: {}, questionPending: false, agentSessionIDSent: false });
   }
   return sessions.get(sessionID);
 }
@@ -87,8 +87,12 @@ export default {
         // Track message roles: message.updated carries {info.id, info.role}
         if (event.type === 'message.updated') {
           const info = props.info;
+          const state = sessionState(sessionID);
+          if (!state.agentSessionIDSent) {
+            state.agentSessionIDSent = true;
+            notify('active', 'Working', ['--agent-session-id', sessionID]);
+          }
           if (info?.id && info?.role) {
-            const state = sessionState(sessionID);
             state.messages[info.id] = info.role;
           }
           return;

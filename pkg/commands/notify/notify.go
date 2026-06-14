@@ -37,13 +37,14 @@ type stdinEvent struct {
 	// Claude UserPromptSubmit fields
 	Prompt *string `json:"prompt,omitempty"`
 	// Generic fields for agents that send explicit values (e.g. Pi extension)
+	SessionID    string `json:"session_id,omitempty"`
 	UserPrompt   string `json:"user_prompt,omitempty"`
 	AgentMessage string `json:"agent_message,omitempty"`
 }
 
 // stdinResult holds the parsed fields from a stdin hook event.
 type stdinResult struct {
-	Tool, Status, Message, UserPrompt, AgentMessage string
+	Tool, Status, Message, UserPrompt, AgentMessage, AgentSessionID string
 }
 
 // toolNameToActivity maps an agent tool name to a human-readable activity label.
@@ -106,6 +107,17 @@ func toolNameIsInteractiveWait(toolName string) bool {
 	}
 }
 
+// chooseAgentSessionID applies precedence: flag > event-data > stdin.
+func chooseAgentSessionID(flagValue, eventValue, stdinValue string) string {
+	if strings.TrimSpace(flagValue) != "" {
+		return strings.TrimSpace(flagValue)
+	}
+	if strings.TrimSpace(eventValue) != "" {
+		return strings.TrimSpace(eventValue)
+	}
+	return strings.TrimSpace(stdinValue)
+}
+
 // parseStdinEvent reads JSON from stdin and maps it to a stdinResult.
 func parseStdinEvent(tool string) (stdinResult, error) {
 	data, readErr := io.ReadAll(os.Stdin)
@@ -122,10 +134,11 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 	}
 
 	var (
-		status       = "active"
-		message      = "Working"
-		userPrompt   string
-		agentMessage string
+		status         = "active"
+		message        = "Working"
+		userPrompt     string
+		agentMessage   string
+		agentSessionID string
 	)
 
 	switch evt.HookEventName {
@@ -182,6 +195,9 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 	}
 
 	// Generic fields override event-derived values (used by Pi and future agents)
+	if evt.SessionID != "" {
+		agentSessionID = evt.SessionID
+	}
 	if evt.UserPrompt != "" {
 		userPrompt = evt.UserPrompt
 	}
@@ -190,11 +206,12 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 	}
 
 	return stdinResult{
-		Tool:         tool,
-		Status:       status,
-		Message:      message,
-		UserPrompt:   userPrompt,
-		AgentMessage: agentMessage,
+		Tool:          tool,
+		Status:        status,
+		Message:       message,
+		UserPrompt:    userPrompt,
+		AgentMessage:  agentMessage,
+		AgentSessionID: agentSessionID,
 	}, nil
 }
 
@@ -403,7 +420,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	pane := c.String("pane")
 	serverURL := c.String("server")
 	cwd := ""
-	agentSessionID := ""
+	agentSessionID := c.String("agent-session-id")
 
 	log := logrus.WithField("component", "notify")
 
@@ -439,7 +456,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 			if err != nil {
 				return fmt.Errorf("event-data parse: %w", err)
 			}
-			agentSessionID = codexEvt.ThreadID
+			if agentSessionID == "" {
+				agentSessionID = codexEvt.ThreadID
+			}
 			cwd = codexEvt.CWD
 		}
 	}
@@ -470,6 +489,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		if agentMessage == "" && res.AgentMessage != "" {
 			agentMessage = res.AgentMessage
 		}
+		agentSessionID = chooseAgentSessionID(c.String("agent-session-id"), agentSessionID, res.AgentSessionID)
 	}
 
 	if status == "" {
@@ -598,6 +618,10 @@ func init() {
 		&cli.StringFlag{
 			Name:  "agent-message",
 			Usage: "agent's last response message (updated each turn)",
+		},
+		&cli.StringFlag{
+			Name:  "agent-session-id",
+			Usage: "agent session or thread id for recovery resume",
 		},
 		&cli.StringFlag{
 			Name:  "session",

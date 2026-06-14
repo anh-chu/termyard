@@ -13,11 +13,12 @@ import (
 	"github.com/ekristen/guppi/pkg/auth"
 	"github.com/ekristen/guppi/pkg/common"
 	"github.com/ekristen/guppi/pkg/identity"
-	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/peer"
 	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
+	"github.com/ekristen/guppi/pkg/recovery"
 	"github.com/ekristen/guppi/pkg/server"
+	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/state"
 	"github.com/ekristen/guppi/pkg/tmux"
 	"github.com/ekristen/guppi/pkg/toolevents"
@@ -37,6 +38,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	interval := time.Duration(c.Int("discovery-interval")) * time.Second
 	discovery := tmux.NewDiscovery(client, interval, func(sessions []*tmux.Session) {
 		stateMgr.UpdateSessions(sessions)
+		_ = recovery.TuneOomPanes(sessions)
 	})
 	go discovery.Run(ctx)
 
@@ -75,16 +77,40 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, client)
 	go silenceMonitor.Run(ctx)
 
+	var health *recovery.HealthPoller
+	if !c.Bool("no-recovery") {
+		snap := recovery.NewSnapshotter(stateMgr)
+		go snap.Run(ctx)
+
+		reb := recovery.NewRebuilder(client, stateMgr)
+		health = recovery.NewHealthPoller(client, 3*time.Second, func() {
+			logrus.Warn("tmux server gone, rebuilding from manifest")
+			if err := reb.Rebuild(ctx); err != nil {
+				logrus.WithError(err).Error("rebuild failed")
+			}
+			if sessions, err := client.ListSessions(); err == nil {
+				stateMgr.UpdateSessions(sessions)
+				_ = recovery.TuneOomPanes(sessions)
+			}
+			discovery.SetInterval(interval)
+		})
+		go health.Run(ctx)
+	}
+
 	if !c.Bool("no-control-mode") {
 		fallbackInterval := 30 * time.Second
 		ctrlMode := tmux.NewControlMode(client, func(sessions []*tmux.Session) {
 			stateMgr.UpdateSessions(sessions)
+			_ = recovery.TuneOomPanes(sessions)
 		},
 			tmux.WithOnConnect(func() {
 				discovery.SetInterval(fallbackInterval)
 			}),
 			tmux.WithOnDisconnect(func() {
 				discovery.SetInterval(interval)
+				if health != nil {
+					health.Hint()
+				}
 			}),
 			tmux.WithOnOutput(func(paneID string, dataLen int) {
 				session := stateMgr.SessionForPane(paneID)
@@ -248,6 +274,11 @@ func init() {
 			Name:    "no-auth",
 			Usage:   "Disable authentication (not recommended for remote access)",
 			Sources: cli.EnvVars("GUPPI_NO_AUTH"),
+		},
+		&cli.BoolFlag{
+			Name:    "no-recovery",
+			Usage:   "Disable tmux crash recovery loops",
+			Sources: cli.EnvVars("GUPPI_NO_RECOVERY"),
 		},
 	}
 

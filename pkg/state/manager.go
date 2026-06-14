@@ -363,3 +363,46 @@ func (m *Manager) GetSessions() []*tmux.Session {
 
 	return sessions
 }
+
+// SnapshotForManifest returns deep copies of current tracked sessions.
+func (m *Manager) SnapshotForManifest() []*tmux.Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]*tmux.Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s == nil || s.Name == tmux.ControlSessionName() {
+			continue
+		}
+		out = append(out, deepCopySession(s))
+	}
+	return out
+}
+
+func deepCopySession(s *tmux.Session) *tmux.Session {
+	if s == nil {
+		return nil
+	}
+	copySession := *s
+	if len(s.Windows) > 0 {
+		copySession.Windows = make([]*tmux.Window, 0, len(s.Windows))
+		for _, win := range s.Windows {
+			if win == nil {
+				continue
+			}
+			copyWin := *win
+			if len(win.Panes) > 0 {
+				copyWin.Panes = make([]*tmux.Pane, 0, len(win.Panes))
+				for _, pane := range win.Panes {
+					if pane == nil {
+						continue
+					}
+					copyPane := *pane
+					copyWin.Panes = append(copyWin.Panes, &copyPane)
+				}
+			}
+			copySession.Windows = append(copySession.Windows, &copyWin)
+		}
+	}
+	return &copySession
+}

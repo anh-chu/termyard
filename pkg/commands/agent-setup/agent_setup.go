@@ -183,7 +183,7 @@ func setupClaudeDir(configDir, guppiBin string, resilient bool) error {
 		"SessionStart": []map[string]interface{}{
 			{
 				"matcher": "",
-				"hooks":   makeHook(notifyCmd + " -t claude -s active -m 'Session started'"),
+				"hooks":   makeHook(notifyCmd + " -t claude -s active -m 'Session started' --stdin"),
 			},
 		},
 		"UserPromptSubmit": []map[string]interface{}{

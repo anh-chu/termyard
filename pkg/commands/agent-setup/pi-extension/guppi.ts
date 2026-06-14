@@ -59,6 +59,10 @@ export default function (pi) {
   pi.on("before_agent_start", async (event, ctx) => {
     currentUserPrompt = "";
     const extraArgs = [];
+    const sessionID = safeString(ctx && ctx.sessionId);
+    if (sessionID) {
+      extraArgs.push("--agent-session-id", sessionID);
+    }
     // Task = first user prompt (primary), git branch (fallback only)
     const data = getEvent(event);
     const prompt = safeString(data.prompt);
@@ -77,10 +81,14 @@ export default function (pi) {
     notify("active", "Thinking", extraArgs);
   });
 
-  pi.on("agent_start", async (_event, _ctx) => {
+  pi.on("agent_start", async (_event, ctx) => {
     // Prompt not available here - just signal working status.
     // user_prompt already captured in before_agent_start (set-once server-side).
     const extraArgs = [];
+    const sessionID = safeString(ctx && ctx.sessionId);
+    if (sessionID) {
+      extraArgs.push("--agent-session-id", sessionID);
+    }
     if (currentUserPrompt) {
       extraArgs.push("--user-prompt", currentUserPrompt);
     }

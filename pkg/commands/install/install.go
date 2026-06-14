@@ -16,14 +16,32 @@ import (
 
 const systemdUnit = `[Unit]
 Description=Guppi - Web dashboard for tmux sessions
-After=default.target
+Wants=guppi-tmux.service
+After=default.target guppi-tmux.service
 
 [Service]
 Type=simple
 ExecStart={{.ExecStart}}
 Restart=on-failure
 RestartSec=5
+OOMScoreAdjust=-600
 Environment=PATH={{.Path}}
+
+[Install]
+WantedBy=default.target
+`
+
+const tmuxServerUnit = `[Unit]
+Description=Guppi tmux server
+After=default.target
+
+[Service]
+Type=forking
+ExecStart={{.TmuxPath}} start-server
+ExecStop={{.TmuxPath}} kill-server
+Restart=on-failure
+RestartSec=5
+OOMScoreAdjust=-800
 
 [Install]
 WantedBy=default.target
@@ -62,6 +80,7 @@ type serviceConfig struct {
 	ExecStart  string
 	Path       string
 	LogDir     string
+	TmuxPath   string
 }
 
 func getBinaryPath() (string, error) {
@@ -81,6 +100,10 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("could not find tmux: %w", err)
+	}
 
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -89,6 +112,7 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 
 	unitDir := filepath.Join(configDir, "systemd", "user")
 	unitPath := filepath.Join(unitDir, "guppi.service")
+	tmuxUnitPath := filepath.Join(unitDir, "guppi-tmux.service")
 
 	if err := os.MkdirAll(unitDir, 0755); err != nil {
 		return fmt.Errorf("could not create systemd user directory: %w", err)
@@ -98,23 +122,30 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 		BinaryPath: binPath,
 		ExecStart:  binPath + " server",
 		Path:       os.Getenv("PATH"),
+		TmuxPath:   tmuxPath,
 	}
 
-	tmpl, err := template.New("systemd").Parse(systemdUnit)
-	if err != nil {
-		return fmt.Errorf("could not parse systemd template: %w", err)
+	writeUnit := func(path, tmplSrc string) error {
+		tmpl, err := template.New(filepath.Base(path)).Parse(tmplSrc)
+		if err != nil {
+			return err
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return tmpl.Execute(f, cfg)
 	}
 
-	f, err := os.Create(unitPath)
-	if err != nil {
-		return fmt.Errorf("could not create unit file: %w", err)
+	if err := writeUnit(tmuxUnitPath, tmuxServerUnit); err != nil {
+		return fmt.Errorf("could not write tmux unit: %w", err)
 	}
-	defer f.Close()
+	fmt.Printf("Wrote %s\n", tmuxUnitPath)
 
-	if err := tmpl.Execute(f, cfg); err != nil {
+	if err := writeUnit(unitPath, systemdUnit); err != nil {
 		return fmt.Errorf("could not write unit file: %w", err)
 	}
-
 	fmt.Printf("Wrote %s\n", unitPath)
 
 	// Reload and enable
@@ -122,13 +153,16 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("systemctl daemon-reload failed: %w", err)
 	}
 
+	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "guppi-tmux.service").Run(); err != nil {
+		return fmt.Errorf("systemctl enable tmux failed: %w", err)
+	}
 	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "guppi.service").Run(); err != nil {
 		return fmt.Errorf("systemctl enable failed: %w", err)
 	}
 
 	fmt.Println("Service enabled and started (systemctl --user)")
 	fmt.Println()
-	fmt.Println("  Status:   systemctl --user status guppi")
+	fmt.Println("  Status:   systemctl --user status guppi guppi-tmux")
 	fmt.Println("  Logs:     journalctl --user -u guppi -f")
 	fmt.Println("  Restart:  systemctl --user restart guppi")
 	fmt.Println("  Web UI:   https://localhost:7654")
@@ -208,18 +242,25 @@ func uninstallLinux(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("could not determine config directory: %w", err)
 	}
 
-	unitPath := filepath.Join(configDir, "systemd", "user", "guppi.service")
+	unitDir := filepath.Join(configDir, "systemd", "user")
+	unitPath := filepath.Join(unitDir, "guppi.service")
+	tmuxUnitPath := filepath.Join(unitDir, "guppi-tmux.service")
 
 	// Disable and stop
 	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "guppi.service").Run()
+	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "guppi-tmux.service").Run()
 
 	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("could not remove unit file: %w", err)
+	}
+	if err := os.Remove(tmuxUnitPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("could not remove tmux unit file: %w", err)
 	}
 
 	_ = exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").Run()
 
 	fmt.Printf("Removed %s\n", unitPath)
+	fmt.Printf("Removed %s\n", tmuxUnitPath)
 	fmt.Println("Service disabled and stopped")
 	return nil
 }

@@ -274,6 +274,50 @@ func (c *Client) SelectPane(target string) error {
 	return err
 }
 
+// SelectLayout applies a tmux window layout string to a target.
+func (c *Client) SelectLayout(target, layout string) error {
+	_, err := c.Exec("select-layout", "-t", target, layout)
+	return err
+}
+
+// NewWindow creates a new detached tmux window.
+func (c *Client) NewWindow(session, name, projectPath, command string) error {
+	args := []string{"new-window", "-d", "-t", session}
+	if name != "" {
+		args = append(args, "-n", name)
+	}
+	if projectPath = expandSessionPath(projectPath); projectPath != "" {
+		args = append(args, "-c", projectPath)
+	}
+	if command != "" {
+		args = append(args, wrapSessionCommand(command)...)
+	}
+	_, err := c.Exec(args...)
+	return err
+}
+
+// SplitWindow splits the active pane in a target window.
+func (c *Client) SplitWindow(target, projectPath, command string) error {
+	args := []string{"split-window", "-d", "-t", target}
+	if projectPath = expandSessionPath(projectPath); projectPath != "" {
+		args = append(args, "-c", projectPath)
+	}
+	if command != "" {
+		args = append(args, wrapSessionCommand(command)...)
+	}
+	_, err := c.Exec(args...)
+	return err
+}
+
+// ServerAlive reports whether tmux server is responding.
+func (c *Client) ServerAlive() bool {
+	_, err := c.Exec("list-sessions")
+	if err == nil {
+		return true
+	}
+	return !strings.Contains(err.Error(), "no server running")
+}
+
 // NewSession creates a new tmux session with the given name (detached).
 // Optional projectPath sets the initial working directory, and command starts
 // the requested agent or shell process inside the session.
