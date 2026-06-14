@@ -461,7 +461,6 @@ export function Sidebar({
       ? (hosts?.find(h => h.id === session.host)?.name ?? session.host_name ?? session.host ?? 'remote')
       : null
     const promptPreview = session.prompt_preview?.trim()
-    const taskName = session.task_name?.trim()
     const lastAgentMessage = session.last_agent_message?.trim()
     const userPrompt = session.user_prompt?.trim()
     // Live activity label from the active tool event (e.g. "reading files", "running commands")
@@ -693,9 +692,9 @@ export function Sidebar({
             )}
           </div>
 
-          {!collapsed && taskName && (
-            <div className="mt-0.5 text-[11px] font-medium text-ink/70 truncate leading-tight" title={taskName}>
-              {taskName}
+          {!collapsed && userPrompt && (
+            <div className="mt-0.5 text-[11px] font-medium text-ink/70 truncate leading-tight" title={userPrompt}>
+              {userPrompt}
             </div>
           )}
 
