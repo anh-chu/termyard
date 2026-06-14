@@ -1,6 +1,7 @@
+import { spawnSync } from "node:child_process";
+
 export default function (pi) {
   const guppiBin = process.env.GUPPI_BIN || "__GUPPI_BIN__";
-  const { spawnSync } = require("child_process");
 
   const safeString = (value, fallback = "") => {
     if (typeof value === "string") return value;
