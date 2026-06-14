@@ -30,6 +30,8 @@ interface SidebarProps {
   selectedSession: string | null
   collapsed: boolean
   collapseMode: 'small' | 'hidden'
+  width?: number
+  onWidthChange?: (width: number) => void
   hasMultipleHosts?: boolean
   localHostId?: string
   hosts?: Host[]
@@ -191,6 +193,8 @@ export function Sidebar({
   selectedSession,
   collapsed,
   collapseMode,
+  width = 288,
+  onWidthChange,
   hasMultipleHosts,
   localHostId,
   hosts,
@@ -223,6 +227,28 @@ export function Sidebar({
   const [confirmKillKey, setConfirmKillKey] = useState<string | null>(null)
   const [confirmWorktreeKillKey, setConfirmWorktreeKillKey] = useState<string | null>(null)
   const [filterOpen, setFilterOpen] = useState(false)
+  const [resizing, setResizing] = useState(false)
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setResizing(true)
+    const startX = e.clientX
+    const startW = width
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(560, Math.max(200, startW + (ev.clientX - startX)))
+      onWidthChange?.(next)
+    }
+    const onUp = () => {
+      setResizing(false)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [width, onWidthChange])
   const [hoveredBg, setHoveredBg] = useState<string | null>(null)
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const [pairTarget, setPairTarget] = useState<string | null>(null)
@@ -889,13 +915,25 @@ export function Sidebar({
   const canRenameContextTarget = Boolean(contextTargetSession)
 
   return (
-    <aside className={cn(
-      'flex flex-col h-full bg-canvas transition-[width] duration-300 font-sans text-sm font-medium',
+    <aside
+      style={!collapsed ? { width } : undefined}
+      className={cn(
+      'relative flex flex-col h-full bg-canvas font-sans text-sm font-medium',
+      !resizing && 'transition-[width] duration-300',
       collapsed
         ? collapseMode === 'hidden' ? 'w-0 overflow-hidden' : 'w-16'
-        : 'w-72',
+        : '',
       !isHidden && 'border-r border-hairline',
     )}>
+      {!collapsed && (
+        <div
+          onMouseDown={startResize}
+          className={cn(
+            'absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize hover:bg-primary/40',
+            resizing && 'bg-primary/60',
+          )}
+        />
+      )}
       {!collapsed && (
         <div className="px-2 pt-2" ref={filterRef}>
           <button

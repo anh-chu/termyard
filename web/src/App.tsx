@@ -149,6 +149,17 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('guppi:sidebar-collapsed') === 'true' } catch { return false }
   })
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('guppi:sidebar-width') || '', 10)
+      if (!Number.isNaN(v)) return Math.min(560, Math.max(200, v))
+    } catch {}
+    return 288
+  })
+  const handleSidebarWidth = useCallback((w: number) => {
+    setSidebarWidth(w)
+    try { localStorage.setItem('guppi:sidebar-width', String(w)) } catch {}
+  }, [])
   const [terminalFullscreen, setTerminalFullscreen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false)
@@ -939,6 +950,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             selectedSession={selectedSession}
             collapsed={sidebarCollapsed}
             collapseMode={(prefs.sidebar.collapse_mode || 'small') as 'small' | 'hidden'}
+            width={sidebarWidth}
+            onWidthChange={handleSidebarWidth}
             hasMultipleHosts={hasMultipleHosts}
             localHostId={localHostId}
             hosts={hosts}
