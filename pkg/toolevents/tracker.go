@@ -207,7 +207,7 @@ func (t *Tracker) Record(evt *Event) {
 	if evt.Message != "" {
 		meta.Message = evt.Message
 	}
-	if evt.Task != "" && meta.Task == "" {
+	if evt.Task != "" {
 		meta.Task = evt.Task
 	}
 	if evt.UserPrompt != "" && meta.UserPrompt == "" {

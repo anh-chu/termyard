@@ -233,9 +233,11 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 		}
 		meta.AgentSessionID = evt.AgentSessionID
 	}
-	if evt.Task != "" && meta.TaskName == "" {
+	if evt.Task != "" {
+		if meta.TaskName != evt.Task {
+			changed = true
+		}
 		meta.TaskName = evt.Task
-		changed = true
 	}
 	if evt.UserPrompt != "" && meta.UserPrompt == "" {
 		meta.UserPrompt = evt.UserPrompt
