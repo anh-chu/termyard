@@ -465,7 +465,7 @@ export function Sidebar({
     const lastAgentMessage = session.last_agent_message?.trim()
     const userPrompt = session.user_prompt?.trim()
     // Live activity label from the active tool event (e.g. "reading files", "running commands")
-    const activeEvent = events.find(e => e.status === 'active')
+    const activeEvent = events.find(e => e.status === 'active' && !e.auto_detected)
     const activityLabel = activeEvent?.message
     // Bottom row: live activity first, then last agent message, fallback to prompt if no task
     const activityDisplay = activityLabel || lastAgentMessage || (!taskName ? (userPrompt || promptPreview) : undefined)
