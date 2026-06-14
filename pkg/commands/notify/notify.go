@@ -41,6 +41,11 @@ type stdinEvent struct {
 	AgentMessage string `json:"agent_message,omitempty"`
 }
 
+// stdinResult holds the parsed fields from a stdin hook event.
+type stdinResult struct {
+	Tool, Status, Message, Task, UserPrompt, AgentMessage string
+}
+
 // toolNameToActivity maps an agent tool name to a human-readable activity label.
 func toolNameToActivity(toolName string) string {
 	switch strings.ToLower(toolName) {
@@ -83,38 +88,46 @@ func toolNameToActivity(toolName string) string {
 	}
 }
 
-// parseStdinEvent reads JSON from stdin and maps it to tool/status/message/task/userPrompt/agentMessage.
-func parseStdinEvent(tool string) (retTool, status, message, task, userPrompt, agentMessage string, err error) {
+// parseStdinEvent reads JSON from stdin and maps it to a stdinResult.
+func parseStdinEvent(tool string) (stdinResult, error) {
 	data, readErr := io.ReadAll(os.Stdin)
 	if readErr != nil {
-		return "", "", "", "", "", "", fmt.Errorf("failed to read stdin: %w", readErr)
+		return stdinResult{}, fmt.Errorf("failed to read stdin: %w", readErr)
 	}
 	if len(data) == 0 {
-		return "", "", "", "", "", "", fmt.Errorf("no input on stdin")
+		return stdinResult{}, fmt.Errorf("no input on stdin")
 	}
 
 	var evt stdinEvent
 	if jsonErr := json.Unmarshal(data, &evt); jsonErr != nil {
-		return "", "", "", "", "", "", fmt.Errorf("failed to parse stdin JSON: %w", jsonErr)
+		return stdinResult{}, fmt.Errorf("failed to parse stdin JSON: %w", jsonErr)
 	}
 
-	status = "active"
-	message = "Working"
+	var (
+		status       = "active"
+		message      = "Working"
+		task         string
+		userPrompt   string
+		agentMessage string
+	)
 
 	switch evt.HookEventName {
 	case "SessionStart":
 		status = "active"
 		message = "Session started"
 	case "PreToolUse", "preToolUse":
-		// Pre-tool hook: map tool name to activity label
 		status = "active"
-		message = toolNameToActivity(evt.ToolName)
+		if activity := toolNameToActivity(evt.ToolName); activity != "" {
+			message = activity
+		} else {
+			message = "Working"
+		}
 	case "PostToolUse", "postToolUse":
-		// Post-tool hook: retain activity label if available
 		status = "active"
-		message = toolNameToActivity(evt.ToolName)
-		if evt.ToolName == "" {
-			message = "working"
+		if activity := toolNameToActivity(evt.ToolName); activity != "" {
+			message = activity
+		} else {
+			message = "Working"
 		}
 	case "Stop":
 		status = "completed"
@@ -157,7 +170,14 @@ func parseStdinEvent(tool string) (retTool, status, message, task, userPrompt, a
 		agentMessage = evt.AgentMessage
 	}
 
-	return tool, status, message, task, userPrompt, agentMessage, nil
+	return stdinResult{
+		Tool:         tool,
+		Status:       status,
+		Message:      message,
+		Task:         task,
+		UserPrompt:   userPrompt,
+		AgentMessage: agentMessage,
+	}, nil
 }
 
 func truncate(s string, maxLen int) string {
@@ -410,31 +430,31 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	// If --stdin is set, read event JSON from stdin and derive status/message/task/userPrompt/agentMessage
 	if c.Bool("stdin") {
 		log.Trace("reading event from stdin")
-		stdinTool, stdinStatus, stdinMessage, stdinTask, stdinUserPrompt, stdinAgentMsg, err := parseStdinEvent(tool)
+		res, err := parseStdinEvent(tool)
 		if err != nil {
 			return fmt.Errorf("stdin parse: %w", err)
 		}
 		log.WithFields(logrus.Fields{
-			"parsed_tool": stdinTool, "parsed_status": stdinStatus,
-			"parsed_message": stdinMessage, "parsed_task": stdinTask,
-			"parsed_user_prompt": stdinUserPrompt != "", "parsed_agent_message": stdinAgentMsg != "",
+			"parsed_tool": res.Tool, "parsed_status": res.Status,
+			"parsed_message": res.Message, "parsed_task": res.Task,
+			"parsed_user_prompt": res.UserPrompt != "", "parsed_agent_message": res.AgentMessage != "",
 		}).Trace("stdin event parsed")
 
-		tool = stdinTool
+		tool = res.Tool
 		if !c.IsSet("status") {
-			status = stdinStatus
+			status = res.Status
 		}
 		if !c.IsSet("message") {
-			message = stdinMessage
+			message = res.Message
 		}
-		if task == "" && stdinTask != "" {
-			task = stdinTask
+		if task == "" && res.Task != "" {
+			task = res.Task
 		}
-		if userPrompt == "" && stdinUserPrompt != "" {
-			userPrompt = stdinUserPrompt
+		if userPrompt == "" && res.UserPrompt != "" {
+			userPrompt = res.UserPrompt
 		}
-		if agentMessage == "" && stdinAgentMsg != "" {
-			agentMessage = stdinAgentMsg
+		if agentMessage == "" && res.AgentMessage != "" {
+			agentMessage = res.AgentMessage
 		}
 	}
 

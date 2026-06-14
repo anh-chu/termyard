@@ -57,6 +57,8 @@ export default function (pi) {
   let currentUserPrompt = "";
   
   pi.on("before_agent_start", async (event, ctx) => {
+    currentTask = "";
+    currentUserPrompt = "";
     const extraArgs = [];
     // Task = first user prompt (primary), git branch (fallback only)
     const data = getEvent(event);
@@ -109,5 +111,7 @@ export default function (pi) {
   pi.on("agent_end", async (_event, _ctx) => {
     // Let terminal capture handle the last message
     notify("completed", "Task complete");
+    currentTask = "";
+    currentUserPrompt = "";
   });
 }

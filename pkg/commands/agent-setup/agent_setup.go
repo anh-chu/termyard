@@ -19,6 +19,9 @@ import (
 //go:embed pi-extension/guppi.ts
 var piExtensionTemplate string
 
+//go:embed opencode-plugin/index.js
+var openCodePluginTemplate string
+
 type agentConfig struct {
 	name     string
 	key      string
@@ -552,146 +555,9 @@ func buildOpenCodePlugin(guppiBin string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	return "const guppi = " + string(quotedBin) + ";\n" +
-		"const sessions = new Map();\n" +
-		"\n" +
-		"function sessionState(sessionID) {\n" +
-		"  if (!sessions.has(sessionID)) {\n" +
-		"    sessions.set(sessionID, { userPromptSet: false, messages: {} });\n" +
-		"  }\n" +
-		"  return sessions.get(sessionID);\n" +
-		"}\n" +
-		"\n" +
-		"function compactText(value, maxLen = 240) {\n" +
-		"  if (typeof value !== 'string') return '';\n" +
-		"  const text = value.replace(/\\s+/g, ' ').trim();\n" +
-		"  if (!text) return '';\n" +
-		"  return text.length > maxLen ? `${text.slice(0, maxLen - 1)}…` : text;\n" +
-		"}\n" +
-		"\n" +
-		"function toolActivity(toolName) {\n" +
-		"  switch (String(toolName || '').toLowerCase()) {\n" +
-		"    case 'read':\n" +
-		"    case 'read_file':\n" +
-		"    case 'readfile':\n" +
-		"    case 'cat':\n" +
-		"    case 'view':\n" +
-		"    case 'open_file':\n" +
-		"      return 'reading files';\n" +
-		"    case 'write':\n" +
-		"    case 'write_file':\n" +
-		"    case 'writefile':\n" +
-		"    case 'edit':\n" +
-		"    case 'multiedit':\n" +
-		"    case 'multi_edit':\n" +
-		"    case 'patch':\n" +
-		"    case 'insert':\n" +
-		"    case 'replace':\n" +
-		"      return 'editing files';\n" +
-		"    case 'ls':\n" +
-		"    case 'list':\n" +
-		"    case 'glob':\n" +
-		"    case 'find':\n" +
-		"    case 'grep':\n" +
-		"    case 'search':\n" +
-		"    case 'rg':\n" +
-		"      return 'searching';\n" +
-		"    case 'bash':\n" +
-		"    case 'shell':\n" +
-		"    case 'command':\n" +
-		"    case 'exec':\n" +
-		"      return 'running commands';\n" +
-		"    case 'fetch':\n" +
-		"    case 'web_fetch':\n" +
-		"    case 'webfetch':\n" +
-		"    case 'browser':\n" +
-		"      return 'fetching web';\n" +
-		"    default:\n" +
-		"      return 'working';\n" +
-		"  }\n" +
-		"}\n" +
-		"\n" +
-		"function fire(args) {\n" +
-		"  try {\n" +
-		"    const proc = Bun.spawn([guppi, 'notify', ...args], {\n" +
-		"      stdin: 'ignore',\n" +
-		"      stdout: 'ignore',\n" +
-		"      stderr: 'ignore',\n" +
-		"    });\n" +
-		"    void proc.exited.catch(() => {});\n" +
-		"  } catch {}\n" +
-		"}\n" +
-		"\n" +
-		"function notify(status, message, extraArgs = []) {\n" +
-		"  fire(['-t', 'opencode', '-s', status, '-m', message, ...extraArgs]);\n" +
-		"}\n" +
-		"\n" +
-		"export default {\n" +
-		"  id: 'guppi',\n" +
-		"  server: async function GuppiPlugin() {\n" +
-		"    return {\n" +
-		"      'permission.ask': async () => {\n" +
-		"        notify('waiting', 'Permission needed');\n" +
-		"      },\n" +
-		"      'command.execute.before': async () => {\n" +
-		"        notify('active', 'running commands');\n" +
-		"      },\n" +
-		"      'tool.execute.before': async ({ tool }) => {\n" +
-		"        notify('active', toolActivity(tool));\n" +
-		"      },\n" +
-		"      'tool.execute.after': async ({ tool }) => {\n" +
-		"        notify('active', toolActivity(tool));\n" +
-		"      },\n" +
-		"      event: async ({ event }) => {\n" +
-		"        if (!event || !event.type) return;\n" +
-		"        const props = event.properties;\n" +
-		"        if (!props) return;\n" +
-		"        const sessionID = props.sessionID;\n" +
-		"        if (!sessionID) return;\n" +
-		"\n" +
-		"        // Track message roles: message.updated carries {info.id, info.role}\n" +
-		"        if (event.type === 'message.updated') {\n" +
-		"          const info = props.info;\n" +
-		"          if (info?.id && info?.role) {\n" +
-		"            const state = sessionState(sessionID);\n" +
-		"            state.messages[info.id] = info.role;\n" +
-		"          }\n" +
-		"          return;\n" +
-		"        }\n" +
-		"\n" +
-		"        // message.part.updated with type=text carries the actual text content\n" +
-		"        if (event.type === 'message.part.updated') {\n" +
-		"          const part = props.part;\n" +
-		"          if (!part || part.type !== 'text' || !part.text || !part.messageID) return;\n" +
-		"\n" +
-		"          const state = sessionState(sessionID);\n" +
-		"          const role = state.messages[part.messageID];\n" +
-		"\n" +
-		"          if (role === 'user') {\n" +
-		"            if (state.userPromptSet) return;\n" +
-		"            state.userPromptSet = true;\n" +
-		"            const text = compactText(part.text);\n" +
-		"            if (text) notify('active', 'thinking', ['--task', text, '--user-prompt', text]);\n" +
-		"          } else if (role === 'assistant') {\n" +
-		"            const text = compactText(part.text);\n" +
-		"            if (text) notify('active', 'working', ['--agent-message', text]);\n" +
-		"          }\n" +
-		"          return;\n" +
-		"        }\n" +
-		"\n" +
-		"        if (event.type === 'session.idle') {\n" +
-		"          notify('completed', 'Task complete');\n" +
-		"          return;\n" +
-		"        }\n" +
-		"\n" +
-		"        if (event.type === 'session.error') {\n" +
-		"          notify('error', 'Error');\n" +
-		"        }\n" +
-		"      },\n" +
-		"    };\n" +
-		"  },\n" +
-		"};\n", nil
+	// Replace the __GUPPI_BIN__ token (including its surrounding quotes) with the
+	// JSON-encoded binary path so the result is a valid JS string literal.
+	return strings.ReplaceAll(openCodePluginTemplate, `"__GUPPI_BIN__"`, string(quotedBin)), nil
 }
 
 func registerOpenCodePlugin(configPath, pluginSpec string) error {
