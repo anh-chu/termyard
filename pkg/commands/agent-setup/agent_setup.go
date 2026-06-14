@@ -558,7 +558,7 @@ func buildOpenCodePlugin(guppiBin string) (string, error) {
 		"\n" +
 		"function sessionState(sessionID) {\n" +
 		"  if (!sessions.has(sessionID)) {\n" +
-		"    sessions.set(sessionID, { userPromptSet: false });\n" +
+		"    sessions.set(sessionID, { userPromptSet: false, messages: {} });\n" +
 		"  }\n" +
 		"  return sessions.get(sessionID);\n" +
 		"}\n" +
@@ -645,23 +645,38 @@ func buildOpenCodePlugin(guppiBin string) (string, error) {
 		"      },\n" +
 		"      event: async ({ event }) => {\n" +
 		"        if (!event || !event.type) return;\n" +
+		"        const props = event.properties;\n" +
+		"        if (!props) return;\n" +
+		"        const sessionID = props.sessionID;\n" +
+		"        if (!sessionID) return;\n" +
 		"\n" +
-		"        if (event.type === 'session.next.prompted') {\n" +
-		"          const sessionID = event.properties?.sessionID;\n" +
-		"          const prompt = compactText(event.properties?.prompt?.text);\n" +
-		"          if (!sessionID || !prompt) return;\n" +
-		"\n" +
-		"          const state = sessionState(sessionID);\n" +
-		"          if (state.userPromptSet) return;\n" +
-		"          state.userPromptSet = true;\n" +
-		"          notify('active', 'thinking', ['--task', prompt, '--user-prompt', prompt]);\n" +
+		"        // Track message roles: message.updated carries {info.id, info.role}\n" +
+		"        if (event.type === 'message.updated') {\n" +
+		"          const info = props.info;\n" +
+		"          if (info?.id && info?.role) {\n" +
+		"            const state = sessionState(sessionID);\n" +
+		"            state.messages[info.id] = info.role;\n" +
+		"          }\n" +
 		"          return;\n" +
 		"        }\n" +
 		"\n" +
-		"        if (event.type === 'session.next.text.ended') {\n" +
-		"          const text = compactText(event.properties?.text);\n" +
-		"          if (!text) return;\n" +
-		"          notify('active', 'working', ['--agent-message', text]);\n" +
+		"        // message.part.updated with type=text carries the actual text content\n" +
+		"        if (event.type === 'message.part.updated') {\n" +
+		"          const part = props.part;\n" +
+		"          if (!part || part.type !== 'text' || !part.text || !part.messageID) return;\n" +
+		"\n" +
+		"          const state = sessionState(sessionID);\n" +
+		"          const role = state.messages[part.messageID];\n" +
+		"\n" +
+		"          if (role === 'user') {\n" +
+		"            if (state.userPromptSet) return;\n" +
+		"            state.userPromptSet = true;\n" +
+		"            const text = compactText(part.text);\n" +
+		"            if (text) notify('active', 'thinking', ['--task', text, '--user-prompt', text]);\n" +
+		"          } else if (role === 'assistant') {\n" +
+		"            const text = compactText(part.text);\n" +
+		"            if (text) notify('active', 'working', ['--agent-message', text]);\n" +
+		"          }\n" +
 		"          return;\n" +
 		"        }\n" +
 		"\n" +
