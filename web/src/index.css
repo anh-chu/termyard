@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=VT323&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=VT323&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap");
 
 :root {
   --app-height: 100dvh;
@@ -14,8 +14,8 @@
 
   /* Raycast Design Tokens — Hairline */
   --hairline: #242728;
-  --hairline-soft: rgba(255,255,255,0.08);
-  --hairline-strong: rgba(255,255,255,0.16);
+  --hairline-soft: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.16);
 
   /* Raycast Design Tokens — Text */
   --ink: #f4f4f6;
@@ -25,7 +25,7 @@
   --ash: #6a6b6c;
   --stone: #434345;
   --on-dark: #ffffff;
-  --on-dark-mute: rgba(255,255,255,0.72);
+  --on-dark-mute: rgba(255, 255, 255, 0.72);
 
   /* Raycast Design Tokens — Brand */
   --primary: #ffffff;
@@ -35,13 +35,13 @@
 
   /* Raycast Design Tokens — Accent */
   --accent-blue: #57c1ff;
-  --accent-blue-soft: rgba(87,193,255,0.15);
+  --accent-blue-soft: rgba(87, 193, 255, 0.15);
   --accent-red: #ff6161;
-  --accent-red-soft: rgba(255,97,97,0.15);
+  --accent-red-soft: rgba(255, 97, 97, 0.15);
   --accent-green: #59d499;
-  --accent-green-soft: rgba(89,212,153,0.15);
+  --accent-green-soft: rgba(89, 212, 153, 0.15);
   --accent-yellow: #ffc533;
-  --accent-yellow-soft: rgba(255,197,51,0.15);
+  --accent-yellow-soft: rgba(255, 197, 51, 0.15);
   --hero-stripe-start: #ff5757;
   --hero-stripe-end: #a1131a;
   --key-bg-start: #121212;
@@ -81,8 +81,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -156,7 +156,9 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
-  html, body, #root {
+  html,
+  body,
+  #root {
     height: var(--app-height);
     width: var(--app-width);
     overflow: hidden;
@@ -183,20 +185,64 @@
   background: var(--muted-foreground);
 }
 
+/* xterm viewport: the FitAddon subtracts viewport.scrollBarWidth
+   (offsetWidth - clientWidth) when computing cols, so a reserved scrollbar
+   gutter makes .xterm-screen narrower than the viewport and clips content on
+   the right (~20px). Give the scrollbar zero reserved width so scrollBarWidth
+   resolves to 0 and the screen fills the full viewport. Wheel scrolling still
+   works. Also drop xterm's hardcoded #000 background. */
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+  scrollbar-width: none;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* FitAddon floors cols, so .xterm-screen (cols * cellWidth) is up to ~1 cell
+   narrower than .xterm. Left-aligned, that sub-cell remainder pools on the
+   right and full-width content (pi's rules, the tmux status bar) stops short of
+   the edge. Centering the text layer splits the remainder into a symmetric ~2px
+   themed gutter on both sides. Pure CSS keeps .xterm auto-sizing, so the
+   resize/fit path is untouched. */
+.xterm .xterm-screen {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
 /* Animations */
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 @keyframes slideIn {
-  from { opacity: 0; transform: translateX(20px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes alertSlideIn {
-  from { opacity: 0; transform: translateX(20px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .terminal-keybar-shell {
@@ -221,7 +267,7 @@
   border-radius: 0.35rem;
   background: color-mix(in oklch, var(--card) 82%, transparent);
   color: var(--foreground);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 0.7rem;
   font-weight: 700;
   line-height: 1;
@@ -276,7 +322,7 @@
   border: 0;
   background: transparent;
   color: var(--popover-foreground);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 0.7rem;
   font-weight: 700;
   text-align: left;

@@ -443,13 +443,13 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
 
   return (
     <div className="flex-1 overflow-hidden relative group bg-canvas">
-      <div className="h-full w-full flex flex-col">
+      <div className="h-full w-full flex flex-col p-[3px]">
         <div
           className="min-h-0 flex-1 relative"
         >
           <div
             ref={containerRef}
-            className="absolute inset-[3px] overflow-hidden"
+            className="absolute inset-0 overflow-hidden"
           />
         {/* Fullscreen toggle */}
           {onToggleFullscreen && (

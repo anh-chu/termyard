@@ -5,10 +5,25 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ClipboardAddon, type IClipboardProvider, type ClipboardSelectionType } from '@xterm/addon-clipboard'
 import { usePreferences } from './usePreferences'
 import { getXtermTheme } from '../theme'
-import '@xterm/xterm/css/xterm.css'
+// xterm CSS is imported in main.tsx (before index.css) so our overrides win.
 
 // Monotonically increasing ID to track which connection is "current"
 let nextConnId = 0
+
+// macOS overlay scrollbars reserve 0px, which xterm's viewport turns into a
+// 15px fallback (`offsetWidth - scrollArea.offsetWidth || 15`). FitAddon then
+// subtracts that 15px, clipping ~20px of content on the right. We hide the
+// scrollbar in CSS and force the internal scrollBarWidth back to 0 so the grid
+// uses the full pane width. Must run after term.open() and before each fit().
+type XtermWithCore = Terminal & {
+  _core?: { viewport?: { scrollBarWidth?: number } }
+}
+function neutralizeXtermScrollbarFallback(term: Terminal): void {
+  const viewport = (term as XtermWithCore)._core?.viewport
+  if (viewport && typeof viewport.scrollBarWidth === 'number') {
+    viewport.scrollBarWidth = 0
+  }
+}
 
 // Pending clipboard text to write on the next user interaction.
 // Clipboard API requires user activation; OSC 52 and selection events arrive
@@ -214,6 +229,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
     ;(window as any).__term = term
 
     term.open(container)
+    neutralizeXtermScrollbarFallback(term)
     const helperTextarea = container.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null
 
     // Request clipboard-write permission early so OSC 52 writes may work directly
@@ -353,6 +369,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
     const doFit = () => {
       try {
         if (container.clientWidth > 0 && container.clientHeight > 0) {
+          neutralizeXtermScrollbarFallback(term)
           fitAddon.fit()
         }
       } catch {}
@@ -361,6 +378,26 @@ export function useTerminal(sessionName: string, hostId?: string) {
     requestAnimationFrame(doFit)
     setTimeout(doFit, 100)
     setTimeout(doFit, 300)
+
+    // The terminal web fonts (Space Mono / JetBrains Mono) load asynchronously
+    // via Google Fonts with display=swap. xterm measures the cell width against
+    // the fallback font first, computes too many columns, then the real (wider)
+    // font swaps in and content overflows and is clipped on the right. Once the
+    // font is actually loaded, force xterm to re-measure the cell size and
+    // re-fit so the column count matches the rendered glyph width.
+    const remeasureAndFit = () => {
+      try {
+        ;(term as unknown as { _core?: { _charSizeService?: { measure?: () => void } } })
+          ._core?._charSizeService?.measure?.()
+      } catch {}
+      doFit()
+    }
+    if (typeof document !== 'undefined' && (document as Document).fonts) {
+      const fontSpec = `${prefs.terminal.font_size}px ${fontFamily}`
+      document.fonts.load(fontSpec).then(remeasureAndFit).catch(() => {})
+      document.fonts.load(`bold ${fontSpec}`).catch(() => {})
+      document.fonts.ready.then(remeasureAndFit).catch(() => {})
+    }
 
     // Get initial dimensions
     const cols = term.cols || 80
@@ -510,9 +547,11 @@ export function useTerminal(sessionName: string, hostId?: string) {
   }, [cleanupWs])
 
   const fit = useCallback(() => {
-    if (fitAddonRef.current && containerRef.current) {
+    const term = termRef.current
+    if (fitAddonRef.current && containerRef.current && term) {
       try {
         if (containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
+          neutralizeXtermScrollbarFallback(term)
           fitAddonRef.current.fit()
         }
       } catch {}
