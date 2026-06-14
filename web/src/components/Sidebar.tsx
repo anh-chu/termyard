@@ -467,8 +467,8 @@ export function Sidebar({
     // Live activity label from the active tool event (e.g. "reading files", "running commands")
     const activeEvent = events.find(e => e.status === 'active' && !e.auto_detected)
     const activityLabel = activeEvent?.message
-    // Bottom row: live activity first, then last agent message, fallback to prompt if no task
-    const activityDisplay = activityLabel || lastAgentMessage || (!taskName ? (userPrompt || promptPreview) : undefined)
+    // Bottom row: live activity → last agent message → terminal capture fallback
+    const activityDisplay = activityLabel || lastAgentMessage || promptPreview
     const projectName = pathLeaf(session.project_path)
     const agentType = session.agent_type || events[0]?.tool
     const allPanes = !collapsed
