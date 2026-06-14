@@ -160,7 +160,7 @@ type chatResponse struct {
 
 const systemPrompt = `You name terminal sessions. Reply with ONLY a short label, 2-4 words, kebab-case, lowercase, ASCII letters/digits/hyphens only. No quotes, no punctuation, no explanation. Examples: fix-auth-token, db-migration, docker-logs-debug, rebase-feature-branch.
 
-Prefer a name that captures the session's overall purpose, not a single transient command. If a current name is provided and it still reasonably fits the work, reply with that exact same name unchanged. Only produce a new name when the session's focus has clearly and durably shifted.`
+Prefer a name that captures the session's overall purpose, not a single transient command. If a current name is provided and it still fits the work, keep it. If the work has moved on to something different, give it a fresh name that fits the current focus.`
 
 // Generate synthesizes a sanitized session name from ctx. Returns ErrDisabled
 // if no endpoint is configured. On any network/parse error returns ("", err);

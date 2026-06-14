@@ -355,7 +355,7 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 	// First name is assigned quickly; after a session already has a name we back
 	// off hard so a meaningful label is not churned by later transient commands.
 	const firstInterval = 20 * time.Second
-	const renameInterval = 10 * time.Minute
+	const renameInterval = 3 * time.Minute
 
 	for {
 		select {
