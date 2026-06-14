@@ -90,7 +90,7 @@ export default {
             if (state.userPromptSet) return;
             state.userPromptSet = true;
             const text = compactText(part.text);
-            if (text) notify('active', 'Thinking', ['--task', text, '--user-prompt', text]);
+            if (text) notify('active', 'Thinking', ['--user-prompt', text]);
           } else if (role === 'assistant') {
             const text = compactText(part.text);
             if (text) notify('active', 'Working', ['--agent-message', text]);
