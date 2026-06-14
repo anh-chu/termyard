@@ -240,6 +240,21 @@ const StaleTimeout = 24 * time.Hour
 // Active hook events clear t.events, so they are invisible to GetAll. This method
 // exposes them so the reconciler can detect process exits for panes that sent
 // an active hook but never sent a subsequent waiting/completed hook.
+// RetainedWaitingForPane returns the retained waiting event for a local pane,
+// or nil if the pane has no outstanding waiting event. Used by the silence
+// monitor's reaper to clear stale native-agent waiting (e.g. Claude) once the
+// input dialog is dismissed, since some agents emit no hook on cancel.
+func (t *Tracker) RetainedWaitingForPane(paneID string) *Event {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, evt := range t.events {
+		if evt.Pane == paneID && evt.Status == StatusWaiting {
+			return evt
+		}
+	}
+	return nil
+}
+
 func (t *Tracker) GetActivePaneEvents() []*Event {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

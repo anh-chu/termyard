@@ -104,7 +104,14 @@ func isOpenCodeConfigured(home string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "\"guppi\"")
+	// agent-setup registers the plugin as a file:// URL pointing at the plugin
+	// dir (e.g. "file:///home/.../node_modules/guppi"), so a bare "guppi"
+	// substring will not match. Accept either the bare module name or the
+	// path-suffixed URL form.
+	cfg := string(data)
+	return strings.Contains(cfg, "\"guppi\"") ||
+		strings.Contains(cfg, "/guppi\"") ||
+		strings.Contains(cfg, "/node_modules/guppi")
 }
 
 func isPiConfigured(home string) bool {

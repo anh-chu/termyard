@@ -36,6 +36,12 @@ var (
 
 	// Matches "press enter" / "continue?" style prompts
 	continuePrompt = regexp.MustCompile(`(?i)(press enter|hit enter|press return|continue\??|proceed\??)\s*$`)
+
+	// Matches interactive selection/menu dialog navigation footers, e.g.
+	// "Enter to select · ↑/↓ to navigate · Esc to cancel" shown by Claude's
+	// AskUserQuestion and permission menus. Deliberately excludes the running
+	// state hint "esc to interrupt" so we only fire on genuine input dialogs.
+	selectionDialogFooter = regexp.MustCompile(`(?i)(enter to (select|confirm)|esc to (cancel|exit|go back|reject)|↑/↓ to navigate)`)
 )
 
 // DetectPrompt inspects the last ~10 lines of pane content and determines
@@ -62,6 +68,11 @@ func DetectPrompt(content string) PromptResult {
 
 	block := strings.Join(tail, "\n")
 	lastLine := tail[len(tail)-1]
+
+	// 0. Interactive selection/menu dialog footer — unambiguous nav hint.
+	if selectionDialogFooter.MatchString(block) {
+		return PromptResult{IsPrompt: true, Message: "Selection prompt detected"}
+	}
 
 	// 1. Explicit yes/no prompts — high confidence, standalone match
 	if yesNoPrompt.MatchString(block) {

@@ -3,7 +3,7 @@ const sessions = new Map();
 
 function sessionState(sessionID) {
   if (!sessions.has(sessionID)) {
-    sessions.set(sessionID, { userPromptSet: false, messages: {} });
+    sessions.set(sessionID, { userPromptSet: false, messages: {}, questionPending: false });
   }
   return sessions.get(sessionID);
 }
@@ -68,6 +68,22 @@ export default {
         const sessionID = props.sessionID;
         if (!sessionID) return;
 
+        // OpenCode's `question` tool (ask the user) is surfaced via dedicated
+        // events rather than a blocking tool result. question.asked means the
+        // agent is waiting on the user; replied/rejected resume the turn.
+        // We track questionPending so streaming assistant text below does not
+        // clobber the waiting status back to "working" while the prompt is up.
+        if (event.type === 'question.asked') {
+          sessionState(sessionID).questionPending = true;
+          notify('waiting', 'Needs input');
+          return;
+        }
+        if (event.type === 'question.replied' || event.type === 'question.rejected') {
+          sessionState(sessionID).questionPending = false;
+          notify('active', 'Working');
+          return;
+        }
+
         // Track message roles: message.updated carries {info.id, info.role}
         if (event.type === 'message.updated') {
           const info = props.info;
@@ -92,6 +108,8 @@ export default {
             const text = compactText(part.text);
             if (text) notify('active', 'Thinking', ['--user-prompt', text]);
           } else if (role === 'assistant') {
+            // Do not override a pending question prompt with "working".
+            if (state.questionPending) return;
             const text = compactText(part.text);
             if (text) notify('active', 'Working', ['--agent-message', text]);
           }
@@ -99,6 +117,7 @@ export default {
         }
 
         if (event.type === 'session.idle') {
+          sessionState(sessionID).questionPending = false;
           notify('completed', 'Task complete');
           return;
         }

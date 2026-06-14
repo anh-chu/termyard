@@ -22,6 +22,11 @@ const silenceThreshold = 10 * time.Second
 // until output resumes.
 const maxSilenceChecks = 2
 
+// staleWaitingGrace is how long a retained waiting event must have existed
+// before the reaper will clear it on a no-prompt capture. Guards against
+// clearing a freshly-set waiting before its dialog has rendered on screen.
+const staleWaitingGrace = 8 * time.Second
+
 // monitoredPane tracks state for a single monitored pane
 type monitoredPane struct {
 	tool          Tool
@@ -113,11 +118,11 @@ func (sm *SilenceMonitor) sync() {
 		"detected":        detected,
 	}).Trace("syncing monitored panes")
 
-	// Add new non-Claude panes
+	// Monitor every detected agent pane. Native-hook agents (Claude/Pi/
+	// OpenCode) are not silence-promoted to waiting (they self-report), but we
+	// still capture them so the reaper can clear a stale native waiting once
+	// its input dialog is dismissed — Claude emits no hook on cancel.
 	for paneID, tool := range detected {
-		if tool == ToolClaude {
-			continue // Claude has native waiting hooks
-		}
 		if _, already := sm.monitored[paneID]; already {
 			continue
 		}
@@ -197,6 +202,24 @@ func (sm *SilenceMonitor) checkSilentPanes() {
 		result := DetectPrompt(content)
 
 		if result.IsPrompt {
+			// Stop re-capturing this pane for the rest of the silence period.
+			sm.mu.Lock()
+			if mp, ok := sm.monitored[t.paneID]; ok {
+				mp.prompted = true
+			}
+			sm.mu.Unlock()
+
+			// Native-hook agents report their own waiting; capturing their
+			// dialog only confirms it is still on screen so the reaper below
+			// does not clear it prematurely. Do not synthesize a waiting event.
+			if nativeWaitingTools[t.tool] {
+				sm.log.WithFields(logrus.Fields{
+					"pane": t.paneID,
+					"tool": t.tool,
+				}).Trace("native prompt still present; not synthesizing waiting")
+				continue
+			}
+
 			sm.log.WithFields(logrus.Fields{
 				"pane":    t.paneID,
 				"tool":    t.tool,
@@ -214,17 +237,41 @@ func (sm *SilenceMonitor) checkSilentPanes() {
 				Message:      result.Message,
 				AutoDetected: true,
 			})
-
-			sm.mu.Lock()
-			if mp, ok := sm.monitored[t.paneID]; ok {
-				mp.prompted = true
-			}
-			sm.mu.Unlock()
 		} else {
+			// No input dialog on screen. A native-hook agent that emits no
+			// cancel hook (Claude) can be left with a stale retained waiting
+			// after the user dismisses its dialog. Clear it so the badge
+			// returns to idle. Scoped to Claude to avoid racing agents that
+			// clear their own waiting via active/completed on resume.
+			if t.tool == ToolClaude {
+				if w := sm.tracker.RetainedWaitingForPane(t.paneID); w != nil && time.Since(w.Timestamp) > staleWaitingGrace {
+					sm.log.WithFields(logrus.Fields{
+						"pane": t.paneID,
+						"tool": t.tool,
+					}).Debug("clearing stale claude waiting (input dialog dismissed)")
+					sm.tracker.Record(&Event{
+						Tool:         t.tool,
+						Status:       StatusCompleted,
+						Host:         sm.hostID,
+						HostName:     sm.hostName,
+						Session:      t.session,
+						Window:       t.window,
+						Pane:         t.paneID,
+						Message:      "Returned to prompt",
+						AutoDetected: true,
+					})
+				}
+			}
+
+			tail := content
+			if len(tail) > 300 {
+				tail = tail[len(tail)-300:]
+			}
 			sm.log.WithFields(logrus.Fields{
-				"pane": t.paneID,
-				"tool": t.tool,
-			}).Trace("no prompt detected")
+				"pane":         t.paneID,
+				"tool":         t.tool,
+				"content_tail": tail,
+			}).Trace("no prompt detected (silence miss)")
 		}
 	}
 }

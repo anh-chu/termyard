@@ -80,11 +80,29 @@ func toolNameToActivity(toolName string) string {
 	// Agent-specific
 	case "task":
 		return "running subagent"
-	case "ask_user", "ask_question":
+	case "ask_user", "ask_question", "ask_user_question", "askuser", "askuserquestion", "question", "user_input", "request_input":
 		return "waiting for input"
 
 	default:
 		return ""
+	}
+}
+
+// toolNameIsInteractiveWait reports whether a tool blocks the turn on user
+// input. When such a tool starts (PreToolUse), the agent is genuinely waiting
+// for the user, so the event status must be "waiting" rather than "active".
+// Kept in sync with the ask_user/ask_question cases in toolNameToActivity.
+func toolNameIsInteractiveWait(toolName string) bool {
+	// Normalize: lowercase and strip separators so ask_user / ask-user /
+	// askUser all collapse to the same key. Whole-name match only — substring
+	// matching is deliberately avoided because tool names like "task" contain
+	// "ask" and would false-trigger on every subagent spawn.
+	norm := strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(toolName))
+	switch norm {
+	case "askuser", "askquestion", "askuserquestion", "question", "userinput", "requestinput":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -120,6 +138,13 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 			message = activity
 		} else {
 			message = "Working"
+		}
+		// An interactive ask tool blocks the turn on the user. Surface it as
+		// "waiting" so the sidebar flags it for attention; a later PostToolUse
+		// (user answered) or agent_end emits active/completed and clears it.
+		if toolNameIsInteractiveWait(evt.ToolName) {
+			status = "waiting"
+			message = "Needs input"
 		}
 	case "PostToolUse", "postToolUse":
 		status = "active"

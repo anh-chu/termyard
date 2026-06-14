@@ -154,6 +154,26 @@ func TestDetectPrompt(t *testing.T) {
 			wantHit: true,
 			wantMsg: "Input prompt detected",
 		},
+		{
+			// Claude AskUserQuestion dialog footer (real capture).
+			name:    "claude selection dialog footer",
+			content: "  3. SQLite\n  4. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n",
+			wantHit: true,
+			wantMsg: "Selection prompt detected",
+		},
+		{
+			// Claude idle composer after cancel must NOT read as a prompt, so the
+			// reaper can clear stale waiting. Real capture.
+			name:    "claude idle composer not a prompt",
+			content: "  sil@devvm:/home/sil [CAVEMAN] | Opus 4.8 (1M context) | ctx:97%\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n                            ○ low · /effort\n",
+			wantHit: false,
+		},
+		{
+			// "esc to interrupt" is the running-state hint, not an input dialog.
+			name:    "esc to interrupt is not a prompt",
+			content: "Running build...\n  esc to interrupt",
+			wantHit: false,
+		},
 	}
 
 	for _, tt := range tests {
