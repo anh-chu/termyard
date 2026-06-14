@@ -58,7 +58,7 @@ function getViewFromPath(): { view: View; sessionKey: string | null } {
 
 function AppInner({ onLogout }: { onLogout?: () => void }) {
   const { sessions, refresh } = useSessions()
-  const { events: allToolEvents, handleEvent: handleToolEvent, getSessionEvents, sessionNeedsAttention, dismissEvent, dismissAll: dismissAllEvents } = useToolEvents()
+  const { events: allToolEvents, handleEvent: handleToolEvent, getSessionEvents, sessionNeedsAttention, isSessionInActiveTurn, dismissEvent, dismissAll: dismissAllEvents } = useToolEvents()
   const { getSessionActivity, handleActivityEvent } = useActivity()
   const { pushState, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications()
   const { processToolEvent } = useNotifications(pushState === 'subscribed')
@@ -959,6 +959,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             }}
             getSessionEvents={getSessionEvents}
             sessionNeedsAttention={sessionNeedsAttention}
+            isSessionInActiveTurn={isSessionInActiveTurn}
             getSessionActivity={getSessionActivity}
             layoutGroups={groupOrder
               .map(id => {
