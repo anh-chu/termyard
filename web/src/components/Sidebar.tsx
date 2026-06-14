@@ -486,12 +486,17 @@ export function Sidebar({
     const showPanes = allPanes.length > 1
 
     // Status badge: single text indicator replacing the two dot indicators
+    const hasHookHistory = !!(userPrompt || lastAgentMessage)
     const statusBadge = (() => {
       if (events.some(e => e.status === 'stuck'))   return 'stuck'   as const
       if (events.some(e => e.status === 'waiting')) return 'waiting' as const
-      if (events.some(e => e.status === 'active'))  return 'working' as const
+      // Hook-based active: reliable working signal
+      if (events.some(e => e.status === 'active' && !e.auto_detected)) return 'working' as const
+      // Auto-detected active: only treat as working when no hook history exists.
+      // With hook history the process is just sitting at the REPL between turns.
+      if (events.some(e => e.status === 'active' && e.auto_detected) && !hasHookHistory) return 'working' as const
       // No active events — was an agent here before?
-      if (userPrompt || lastAgentMessage) return 'idle' as const
+      if (hasHookHistory) return 'idle' as const
       // Plain terminal — check active pane command
       const cmd = (() => {
         for (const w of session.windows ?? []) {
