@@ -54,11 +54,9 @@ export default function (pi) {
   };
 
   // Capture user prompt BEFORE agent starts (prompt field only exists here)
-  let currentTask = "";
   let currentUserPrompt = "";
-  
+
   pi.on("before_agent_start", async (event, ctx) => {
-    currentTask = "";
     currentUserPrompt = "";
     const extraArgs = [];
     // Task = first user prompt (primary), git branch (fallback only)
@@ -66,28 +64,23 @@ export default function (pi) {
     const prompt = safeString(data.prompt);
     if (prompt) {
       const truncated = prompt.slice(0, 300);
-      currentTask = truncated.slice(0, 60);
       currentUserPrompt = truncated;
       extraArgs.push("--user-prompt", truncated);
-      extraArgs.push("--task", currentTask);
     } else {
       // Fallback to git branch only if no prompt available
       const branch = getGitBranch(ctx && ctx.cwd);
       if (branch) {
-        currentTask = branch;
-        extraArgs.push("--task", branch);
+        currentUserPrompt = branch;
+        extraArgs.push("--user-prompt", branch);
       }
     }
     notify("active", "Thinking", extraArgs);
   });
 
   pi.on("agent_start", async (_event, _ctx) => {
-    // Prompt not available here - just signal working status
-    // Task/user-prompt already set in before_agent_start
+    // Prompt not available here - just signal working status.
+    // user_prompt already captured in before_agent_start (set-once server-side).
     const extraArgs = [];
-    if (currentTask) {
-      extraArgs.push("--task", currentTask);
-    }
     if (currentUserPrompt) {
       extraArgs.push("--user-prompt", currentUserPrompt);
     }
@@ -109,10 +102,35 @@ export default function (pi) {
     }
   });
 
-  pi.on("agent_end", async (_event, _ctx) => {
-    // Let terminal capture handle the last message
-    notify("completed", "Task complete");
-    currentTask = "";
+  pi.on("agent_end", async (event, _ctx) => {
+    // Extract the last assistant text message so the sidebar has an agent
+    // message (and hook history) for the completed turn.
+    let agentMsg = "";
+    try {
+      const messages = getEvent(event).messages;
+      if (Array.isArray(messages)) {
+        for (let i = messages.length - 1; i >= 0 && !agentMsg; i--) {
+          const msg = messages[i] || {};
+          if (msg.role !== "assistant") continue;
+          const content = msg.content;
+          if (typeof content === "string") {
+            agentMsg = content;
+          } else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block && block.type === "text" && typeof block.text === "string" && block.text) {
+                agentMsg = block.text;
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Never crash Pi
+    }
+    const truncated = safeString(agentMsg).slice(0, 300);
+    const extraArgs = truncated ? ["--agent-message", truncated] : [];
+    notify("completed", truncated || "Task complete", extraArgs);
     currentUserPrompt = "";
   });
 }
