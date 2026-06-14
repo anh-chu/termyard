@@ -36,3 +36,17 @@ func TestDedup(t *testing.T) {
 		t.Errorf("Dedup empty = %q, want empty", got)
 	}
 }
+
+func TestExtractContent(t *testing.T) {
+	json := []byte(`{"choices":[{"message":{"role":"assistant","content":"auth-bug-fix"}}]}`)
+	if got, err := extractContent(json); err != nil || got != "auth-bug-fix" {
+		t.Fatalf("json: got %q err %v", got, err)
+	}
+	sse := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"auth\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\"-bug-\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\"fix\"}}]}\n\n" +
+		"data: [DONE]\n")
+	if got, err := extractContent(sse); err != nil || got != "auth-bug-fix" {
+		t.Fatalf("sse: got %q err %v", got, err)
+	}
+}

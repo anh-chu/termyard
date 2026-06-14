@@ -333,9 +333,10 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 	defer cancel()
 	name, err := n.Generate(ctx, nc)
 	if err != nil {
-		logrus.WithError(err).WithField("session", sessionName).Debug("agent session naming failed")
+		logrus.WithError(err).WithField("session", sessionName).Warn("agent session naming failed")
 		return
 	}
+	logrus.WithFields(logrus.Fields{"session": sessionName, "name": name}).Info("agent session named")
 
 	m.applyGeneratedName(sessionName, name, !attached)
 }
@@ -446,9 +447,10 @@ func (m *Manager) TriggerShellNaming(sessionName string, commands []string) {
 	defer cancel()
 	name, err := n.Generate(ctx, nc)
 	if err != nil {
-		logrus.WithError(err).WithField("session", sessionName).Debug("shell session naming failed")
+		logrus.WithError(err).WithField("session", sessionName).Warn("shell session naming failed")
 		return
 	}
+	logrus.WithFields(logrus.Fields{"session": sessionName, "name": name}).Info("shell session named")
 
 	m.mu.Lock()
 	meta = m.meta[sessionName]

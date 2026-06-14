@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -139,11 +140,15 @@ type chatRequest struct {
 	Messages    []chatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
 	MaxTokens   int           `json:"max_tokens"`
+	Stream      bool          `json:"stream"`
 }
 
+// chatResponse covers both the non-streaming shape (choices[].message.content)
+// and a single streaming chunk (choices[].delta.content).
 type chatResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
+		Delta   chatMessage `json:"delta"`
 	} `json:"choices"`
 	Error *struct {
 		Message string `json:"message"`
@@ -173,6 +178,7 @@ func (n *Namer) Generate(ctx context.Context, nc Context) (string, error) {
 		},
 		Temperature: 0.3,
 		MaxTokens:   24,
+		Stream:      false,
 	}
 	buf, err := json.Marshal(reqBody)
 	if err != nil {
@@ -195,25 +201,75 @@ func (n *Namer) Generate(ctx context.Context, nc Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	var out chatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("namer: decode response: %w", err)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("namer: read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		if out.Error != nil {
-			return "", fmt.Errorf("namer: endpoint error (%d): %s", resp.StatusCode, out.Error.Message)
-		}
-		return "", fmt.Errorf("namer: endpoint status %d", resp.StatusCode)
-	}
-	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("namer: empty response")
+		return "", fmt.Errorf("namer: endpoint status %d: %s", resp.StatusCode, truncate(string(raw), 200))
 	}
 
-	name := Sanitize(out.Choices[0].Message.Content)
+	content, err := extractContent(raw)
+	if err != nil {
+		return "", err
+	}
+
+	name := Sanitize(content)
 	if name == "" {
 		return "", fmt.Errorf("namer: model returned unusable name")
 	}
 	return name, nil
+}
+
+// extractContent pulls the assistant text out of a response body that may be
+// either a single JSON chat completion or a streamed text/event-stream of
+// `data: {...}` chunks (some OpenAI-compatible gateways stream by default).
+func extractContent(raw []byte) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+
+	// Non-streaming: a single JSON object.
+	if bytes.HasPrefix(trimmed, []byte("{")) {
+		var out chatResponse
+		if err := json.Unmarshal(trimmed, &out); err != nil {
+			return "", fmt.Errorf("namer: decode response: %w", err)
+		}
+		if out.Error != nil {
+			return "", fmt.Errorf("namer: endpoint error: %s", out.Error.Message)
+		}
+		if len(out.Choices) == 0 {
+			return "", fmt.Errorf("namer: empty response")
+		}
+		return out.Choices[0].Message.Content, nil
+	}
+
+	// Streaming: accumulate delta (or message) content across `data:` lines.
+	var sb strings.Builder
+	for _, line := range strings.Split(string(trimmed), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var chunk chatResponse
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+		if c := chunk.Choices[0].Delta.Content; c != "" {
+			sb.WriteString(c)
+		} else if c := chunk.Choices[0].Message.Content; c != "" {
+			sb.WriteString(c)
+		}
+	}
+	if sb.Len() == 0 {
+		return "", fmt.Errorf("namer: empty streamed response")
+	}
+	return sb.String(), nil
 }
 
 func buildUserPrompt(nc Context) string {
