@@ -489,6 +489,23 @@ export function Sidebar({
 
     // Status badge: single text indicator replacing the two dot indicators
     const hasHookHistory = !!(userPrompt || lastAgentMessage)
+    // Live foreground command of the active pane. This is the reliable signal
+    // for whether an agent is still running in the pane right now: while an
+    // agent runs it shows as node/pi/claude/etc, and the moment it exits the
+    // command reverts to the shell. Hook history (user_prompt/agent_message)
+    // persists on the session for its whole tmux lifetime, so it cannot tell us
+    // the agent left — only the live command can.
+    const activeCmd = (() => {
+      for (const w of session.windows ?? []) {
+        for (const p of w.panes ?? []) { if (p.active) return p.current_command }
+      }
+      return session.windows?.[0]?.panes?.[0]?.current_command ?? ''
+    })()
+    const cmdIsShell = SHELL_COMMANDS.has(activeCmd)
+    // Agent is considered present while its process is foregrounded in the pane.
+    // Once it exits to a shell, the per-session metadata (icon/prompt/message)
+    // is stale and must not linger, so we suppress it in the row below.
+    const agentPresent = !cmdIsShell
     const statusBadge = (() => {
       if (events.some(e => e.status === 'stuck'))   return 'stuck'   as const
       if (events.some(e => e.status === 'waiting')) return 'waiting' as const
@@ -498,16 +515,12 @@ export function Sidebar({
       // Auto-detected active: only treat as working when no hook history exists.
       // With hook history the process is just sitting at the REPL between turns.
       if (events.some(e => e.status === 'active' && e.auto_detected) && !hasHookHistory) return 'working' as const
-      // No active events — was an agent here before?
-      if (hasHookHistory) return 'idle' as const
-      // Plain terminal — check active pane command
-      const cmd = (() => {
-        for (const w of session.windows ?? []) {
-          for (const p of w.panes ?? []) { if (p.active) return p.current_command }
-        }
-        return session.windows?.[0]?.panes?.[0]?.current_command ?? ''
-      })()
-      return SHELL_COMMANDS.has(cmd) ? 'shell' as const : 'process' as const
+      // Agent ran here before AND is still foregrounded (not back at a shell):
+      // it's sitting at its REPL between turns -> idle. Once it exits to a shell
+      // the command reverts and we fall through to the shell badge below.
+      if (hasHookHistory && !cmdIsShell) return 'idle' as const
+      // Plain terminal (or agent has exited) — badge from the live pane command.
+      return cmdIsShell ? 'shell' as const : 'process' as const
     })()
 
     const handleTouchStart = (e: React.TouchEvent) => {
@@ -681,7 +694,7 @@ export function Sidebar({
                 {bracketChar}
               </span>
             )}
-            {!collapsed && <AgentMark agentType={agentType} className="h-4 w-4 shrink-0" />}
+            {!collapsed && <AgentMark agentType={agentPresent ? agentType : undefined} className="h-4 w-4 shrink-0" />}
             {!collapsed && stripeColor && (
               <span
                 className="w-2 h-2 rounded-full shrink-0 pointer-events-none"
@@ -732,13 +745,13 @@ export function Sidebar({
             })()}
           </div>
 
-          {!collapsed && userPrompt && (
+          {!collapsed && agentPresent && userPrompt && (
             <div className="mt-0.5 text-[11px] font-medium text-ink/70 truncate leading-tight" title={userPrompt}>
               {userPrompt}
             </div>
           )}
 
-          {!collapsed && (activityDisplay || projectName || session.is_worktree) && (
+          {!collapsed && ((agentPresent && activityDisplay) || projectName || session.is_worktree) && (
             <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
               {session.is_worktree && (
                 <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-primary/70" title="git worktree">
@@ -750,7 +763,7 @@ export function Sidebar({
                   {projectName}
                 </span>
               )}
-              {activityDisplay && (
+              {agentPresent && activityDisplay && (
                 <span className="min-w-0 truncate text-[10px] text-mute/70" title={activityDisplay}>
                   {activityDisplay}
                 </span>

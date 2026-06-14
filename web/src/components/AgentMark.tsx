@@ -28,6 +28,7 @@ const agentLabels: Record<string, string> = {
 
 function normalizeAgent(agentType?: string) {
   const key = (agentType || '').toLowerCase()
+  if (!key) return 'shell'
   if (key in agentIconPaths) return key
   if (key in agentLabels) return key
   return 'custom'
@@ -35,16 +36,17 @@ function normalizeAgent(agentType?: string) {
 
 export function AgentMark({ agentType, className }: { agentType?: string; className?: string }) {
   const key = normalizeAgent(agentType)
-  const color = toolColors[key] || 'var(--primary)'
+  const isShell = key === 'shell'
+  const color = isShell ? 'var(--mute)' : (toolColors[key] || 'var(--primary)')
   const iconPath = agentIconPaths[key]
   const label = agentLabels[key]
 
   return (
     <span
-      title={agentType || 'custom'}
+      title={isShell ? 'shell' : (agentType || 'custom')}
       className={cn(
         'inline-flex items-center justify-center rounded border',
-        !iconPath && 'text-[9px] font-semibold tracking-wide',
+        !iconPath && !isShell && 'text-[9px] font-semibold tracking-wide',
         className,
       )}
       style={{
@@ -53,7 +55,22 @@ export function AgentMark({ agentType, className }: { agentType?: string; classN
         background: `${color}18`,
       }}
     >
-      {iconPath ? (
+      {isShell ? (
+        // Terminal prompt glyph (Lucide "terminal"): chevron + command line.
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.25"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          className="w-3 h-3 shrink-0"
+        >
+          <polyline points="5 8 9 12 5 16" />
+          <line x1="12" y1="16" x2="18" y2="16" />
+        </svg>
+      ) : iconPath ? (
         <svg
           viewBox="0 0 24 24"
           fill="currentColor"

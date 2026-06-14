@@ -30,19 +30,6 @@ type PaneInfo struct {
 // PaneListFunc returns all currently known panes.
 type PaneListFunc func() []PaneInfo
 
-// shells is the set of commands that indicate no agent is running
-var shells = map[string]bool{
-	"zsh":  true,
-	"bash": true,
-	"fish": true,
-	"sh":   true,
-	"dash": true,
-	"tcsh": true,
-	"csh":  true,
-	"ksh":  true,
-	"pwsh": true,
-}
-
 // Reconciler periodically checks tracked tool events against actual tmux pane
 // state, clearing events whose agent process is no longer running.
 type Reconciler struct {
@@ -50,6 +37,17 @@ type Reconciler struct {
 	lookup   PaneLookupFunc
 	interval time.Duration
 	log      *logrus.Entry
+	hostID   string // local host fingerprint (for multi-host)
+	hostName string // local host display name
+}
+
+// SetHost sets the local host identity for multi-host event stamping.
+// Without this the synthetic completed events carry no host, so the frontend
+// keys them as bare "session" instead of "host/session" and fails to clear
+// session-level active-turn tracking, leaving the badge stuck on "working".
+func (r *Reconciler) SetHost(id, name string) {
+	r.hostID = id
+	r.hostName = name
 }
 
 // NewReconciler creates a reconciler that checks tracked events against pane state.
@@ -110,27 +108,36 @@ func (r *Reconciler) reconcile() {
 
 		ps := r.lookup(evt.Pane)
 
+		// Simple, robust rule: an event is only valid while the agent process
+		// is still running in the pane. The moment the pane's process tree no
+		// longer contains a known agent (it exited back to a shell, or the pane
+		// is gone), clear the event. This replaces the old shell-name whitelist,
+		// which missed shells not in the map and misread wrapper commands like
+		// "node" as "still an agent".
 		shouldClear := false
 		if !ps.Exists {
 			r.log.WithField("pane", evt.Pane).Debug("pane no longer exists, clearing event")
 			shouldClear = true
-		} else if shells[ps.CurrentCommand] {
+		} else if _, found := DetectAgentInProcessTree(ps.PID); !found {
 			r.log.WithFields(logrus.Fields{
 				"pane":    evt.Pane,
 				"command": ps.CurrentCommand,
-			}).Debug("pane foreground is shell, clearing event")
+				"pid":     ps.PID,
+			}).Debug("no agent in pane process tree, clearing event")
 			shouldClear = true
 		}
 
 		if shouldClear {
 			// Record a synthetic completed event to clear tracking and notify subscribers
 			r.tracker.Record(&Event{
-				Tool:    evt.Tool,
-				Status:  StatusCompleted,
-				Session: evt.Session,
-				Window:  evt.Window,
-				Pane:    evt.Pane,
-				Message: "auto-cleared: agent no longer running",
+				Tool:     evt.Tool,
+				Status:   StatusCompleted,
+				Host:     r.hostID,
+				HostName: r.hostName,
+				Session:  evt.Session,
+				Window:   evt.Window,
+				Pane:     evt.Pane,
+				Message:  "auto-cleared: agent no longer running",
 			})
 		}
 	}

@@ -170,6 +170,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	detector.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 	silenceMonitor.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
+	reconciler.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 
 	ptyRelay := peer.NewPTYRelay()
 	ptyManager := peer.NewPTYManager(client.TmuxPath(), actTracker)
