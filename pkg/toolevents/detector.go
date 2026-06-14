@@ -130,8 +130,17 @@ func (d *Detector) detect() {
 			Pane:    pane.PaneID,
 		}
 
-		// Skip panes with hook-based tracking
+		// Skip panes with hook-based tracking, but keep them in stillPresent
+		// if previously auto-detected so the cleanup doesn't remove d.seen[key].
+		// Without this, the entry is removed and the next cycle re-detects and
+		// re-emits, causing a spurious "working" flash after a turn ends.
 		if tracked[key] {
+			d.mu.Lock()
+			_, wasSeen := d.seen[key]
+			d.mu.Unlock()
+			if wasSeen {
+				stillPresent[key] = true
+			}
 			continue
 		}
 
@@ -172,17 +181,39 @@ func (d *Detector) detect() {
 		})
 	}
 
-	// Clean up panes where the agent is no longer detected
+	// Clean up panes where the agent is no longer detected.
+	// Send a completed event so the frontend clears any lingering auto-detected
+	// active event for the pane.
 	d.mu.Lock()
-	for key := range d.seen {
+	var toRemove []struct {
+		key  PaneKey
+		tool Tool
+	}
+	for key, tool := range d.seen {
 		if !stillPresent[key] {
 			d.log.WithFields(logrus.Fields{
 				"session": key.Session,
 				"window":  key.Window,
 				"pane":    key.Pane,
 			}).Debug("agent no longer detected in pane")
+			toRemove = append(toRemove, struct {
+				key  PaneKey
+				tool Tool
+			}{key, tool})
 			delete(d.seen, key)
 		}
 	}
 	d.mu.Unlock()
+	for _, entry := range toRemove {
+		d.tracker.Record(&Event{
+			Tool:     entry.tool,
+			Status:   StatusCompleted,
+			Host:     d.hostID,
+			HostName: d.hostName,
+			Session:  entry.key.Session,
+			Window:   entry.key.Window,
+			Pane:     entry.key.Pane,
+			Message:  "agent exited",
+		})
+	}
 }

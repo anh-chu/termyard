@@ -23,14 +23,15 @@ export function useToolEvents() {
       if (res.ok) {
         const serverData: ToolEvent[] = await res.json() || []
         setEvents(prev => {
-          // Preserve locally-tracked active events — the server never persists them,
+          // Preserve hook-based active events — the server never persists them,
           // so a full replace would clear "working" state mid-turn.
-          // Drop a local active only if the server has a newer event for the same pane.
+          // Auto-detected active events are NOT preserved: the detector now sends
+          // a completed event when the process exits, which clears them properly.
           const samePane = (a: ToolEvent, b: ToolEvent) =>
             a.session === b.session && a.window === b.window &&
             (a.pane || '') === (b.pane || '') && (a.host || '') === (b.host || '')
           const localActives = prev.filter(e =>
-            e.status === 'active' && !serverData.some(s => samePane(s, e))
+            e.status === 'active' && !e.auto_detected && !serverData.some(s => samePane(s, e))
           )
           return [...localActives, ...serverData]
         })
