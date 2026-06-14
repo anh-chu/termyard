@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Session, sessionKey } from '../hooks/useSessions'
+import { Session, sessionKey, sessionLabel } from '../hooks/useSessions'
 import type { SessionAttrSets } from '../hooks/useSessionAttrs'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
@@ -392,6 +392,14 @@ export function Sidebar({
         }),
       })
       if (res.ok) {
+        // Mark the name as user-set so the AI namer never overwrites it.
+        if (!renamingSession.host) {
+          fetch('/api/session/display-name', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: nextName, display_name: '', clear: false }),
+          }).catch(() => {})
+        }
         // Migrate server-authoritative attributes onto the new key: clear the
         // old key and set the new one with the same bits.
         const wasHidden = hiddenSet.has(oldKey)
@@ -722,9 +730,9 @@ export function Sidebar({
                   'text-[12px] font-medium tracking-tight flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left',
                   isSelected && '!text-primary',
                 )}
-                title={session.agent_session_id ? `${session.name} · ${session.agent_session_id}` : session.name}
+                title={session.agent_session_id ? `${sessionLabel(session)} · ${session.agent_session_id}` : (sessionLabel(session) !== session.name ? `${sessionLabel(session)} (${session.name})` : session.name)}
               >
-                {collapsed ? session.name.charAt(0).toUpperCase() : session.name}
+                {collapsed ? sessionLabel(session).charAt(0).toUpperCase() : sessionLabel(session)}
               </span>
             )}
             {!collapsed && (
@@ -1281,7 +1289,7 @@ export function Sidebar({
                       title={active ? 'running' : 'idle'}
                     />
                     <span className="text-[12px] font-medium tracking-tight shrink-0 text-mute">
-                      {session.name}
+                      {sessionLabel(session)}
                     </span>
                     {cmdLabel && (
                       <span

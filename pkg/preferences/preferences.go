@@ -26,6 +26,21 @@ type AgentBanner struct {
 	AutoDismissSeconds int `json:"auto_dismiss_seconds"`
 }
 
+// APIKeyMask is the placeholder returned in place of a stored AI naming API
+// key on reads, so the secret is never sent to the browser. On write, a value
+// equal to this mask means "keep the existing key".
+const APIKeyMask = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+
+// AINaming configures the optional AI session namer. When Enabled is false the
+// namer is off regardless of endpoint. Empty Endpoint/Model fall back to
+// GUPPI_NAMER_* / GUPPI_OPENAI_* environment variables.
+type AINaming struct {
+	Enabled  bool   `json:"enabled"`
+	Endpoint string `json:"endpoint"`
+	APIKey   string `json:"api_key"`
+	Model    string `json:"model"`
+}
+
 type Preferences struct {
 	Terminal                Terminal          `json:"terminal"`
 	Theme                   string            `json:"theme"`
@@ -42,6 +57,7 @@ type Preferences struct {
 	LockBackgroundMinutes   int               `json:"lock_background_minutes"`
 	FullscreenHideAlerts    bool              `json:"fullscreen_hide_alerts"`
 	DefaultAgent            string            `json:"default_agent"`
+	AINaming                AINaming          `json:"ai_naming"`
 }
 
 func Default() *Preferences {
@@ -51,8 +67,8 @@ func Default() *Preferences {
 			FontFamily: "Space Mono",
 			Scrollback: 5000,
 		},
-		Theme:        "raycast",
-		CustomTheme:  map[string]string{},
+		Theme:       "raycast",
+		CustomTheme: map[string]string{},
 		Sidebar: Sidebar{
 			DefaultCollapsed: false,
 			CollapseMode:     "small",
@@ -72,6 +88,10 @@ func Default() *Preferences {
 		LockBackgroundMinutes:   10,
 		FullscreenHideAlerts:    true,
 		DefaultAgent:            "claude",
+		AINaming: AINaming{
+			Enabled: false,
+			Model:   "gpt-4o-mini",
+		},
 	}
 }
 

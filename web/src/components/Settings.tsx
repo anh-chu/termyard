@@ -62,7 +62,7 @@ const customizableVars = [
   { key: '--destructive', label: 'Destructive' },
 ]
 
-const sectionIds = ['appearance', 'terminal', 'interface', 'shortcuts', 'notifications', 'agents', 'peers', 'security'] as const
+const sectionIds = ['appearance', 'terminal', 'interface', 'naming', 'shortcuts', 'notifications', 'agents', 'peers', 'security'] as const
 
 function Section({ id, title, description, children }: { id: string; title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -119,6 +119,23 @@ function NumberInput({ value, onChange, min, max, step }: { value: number; onCha
       max={max}
       step={step}
       className="bg-surface-elevated border border-hairline rounded-sm px-3 py-1.5 text-[13px] font-medium text-ink outline-none focus:border-primary/60 w-[80px] text-right"
+    />
+  )
+}
+
+function TextInput({ value, onChange, placeholder, type = 'text', wide }: { value: string; onChange: (v: string) => void; placeholder?: string; type?: string; wide?: boolean }) {
+  return (
+    <input
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      autoComplete="off"
+      spellCheck={false}
+      className={cn(
+        'bg-surface-elevated border border-hairline rounded-sm px-3 py-1.5 text-[13px] font-medium text-ink outline-none focus:border-primary/60 transition-colors',
+        wide ? 'min-w-[280px]' : 'min-w-[180px]',
+      )}
     />
   )
 }
@@ -193,6 +210,7 @@ const sectionLabels: Record<typeof sectionIds[number], string> = {
   appearance: 'Appearance',
   terminal: 'Terminal',
   interface: 'Interface',
+  naming: 'AI Naming',
   shortcuts: 'Shortcuts',
   notifications: 'Notifications',
   agents: 'Agents',
@@ -611,6 +629,46 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 onChange={(v) => update({ sparklines_visible: v })}
               />
             </Row>
+          </Section>
+
+          {/* ── AI Naming ── */}
+          <Section id="naming" title="AI Session Naming" description="Auto-generate friendly session names from context via an OpenAI-compatible endpoint. Manually renamed sessions are never overwritten.">
+            <Row label="Enable" description="Synthesize names from prompt, workdir, branch, agent, and shell activity">
+              <Toggle
+                checked={prefs.ai_naming.enabled}
+                onChange={(v) => updateNested('ai_naming', { enabled: v })}
+                label={prefs.ai_naming.enabled ? 'ON' : 'OFF'}
+              />
+            </Row>
+            {prefs.ai_naming.enabled && (
+              <>
+                <Divider />
+                <Row label="Endpoint" description="Base URL, e.g. https://api.openai.com/v1 (falls back to GUPPI_NAMER_ENDPOINT)">
+                  <TextInput
+                    value={prefs.ai_naming.endpoint}
+                    onChange={(v) => updateNested('ai_naming', { endpoint: v })}
+                    placeholder="https://api.openai.com/v1"
+                    wide
+                  />
+                </Row>
+                <Row label="API Key" description="Bearer token (optional for local endpoints; falls back to env)">
+                  <TextInput
+                    type="password"
+                    value={prefs.ai_naming.api_key}
+                    onChange={(v) => updateNested('ai_naming', { api_key: v })}
+                    placeholder="sk-…"
+                    wide
+                  />
+                </Row>
+                <Row label="Model" description="Chat completion model name">
+                  <TextInput
+                    value={prefs.ai_naming.model}
+                    onChange={(v) => updateNested('ai_naming', { model: v })}
+                    placeholder="gpt-4o-mini"
+                  />
+                </Row>
+              </>
+            )}
           </Section>
 
           {/* ── Shortcuts ── */}

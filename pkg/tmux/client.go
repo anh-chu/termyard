@@ -218,6 +218,40 @@ func (c *Client) ListAllPanes() ([]*Pane, error) {
 	return panes, nil
 }
 
+// SessionForeground describes the foreground command of a session's active pane.
+type SessionForeground struct {
+	Session string
+	Command string
+	PID     int
+}
+
+// ListForegroundCommands returns the active pane's foreground command for each
+// session, keyed by session name. Used by the shell session namer to detect
+// new processes.
+func (c *Client) ListForegroundCommands() ([]SessionForeground, error) {
+	out, err := c.Exec("list-panes", "-a", "-F",
+		"#{session_name}:#{pane_active}:#{pane_current_command}:#{pane_pid}")
+	if err != nil {
+		if strings.Contains(err.Error(), "no server running") || strings.Contains(err.Error(), "no sessions") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var res []SessionForeground
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 4)
+		if len(parts) < 4 || parts[1] != "1" {
+			continue
+		}
+		pid, _ := strconv.Atoi(parts[3])
+		res = append(res, SessionForeground{Session: parts[0], Command: parts[2], PID: pid})
+	}
+	return res, nil
+}
+
 // HasSession checks if a session exists
 func (c *Client) HasSession(name string) bool {
 	_, err := c.Exec("has-session", "-t", name)

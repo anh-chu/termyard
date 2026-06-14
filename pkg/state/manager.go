@@ -1,11 +1,14 @@
 package state
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/ekristen/guppi/pkg/git"
+	"github.com/ekristen/guppi/pkg/namer"
 	"github.com/ekristen/guppi/pkg/tmux"
 	"github.com/ekristen/guppi/pkg/toolevents"
 )
@@ -17,6 +20,9 @@ type SessionMetadata struct {
 	AgentSessionID   string
 	UserPrompt       string // first user message; set once
 	LastAgentMessage string // last agent response; always updated
+	DisplayName      string // AI-generated friendly label
+	UserSetName      bool   // user manually set DisplayName; AI must not overwrite
+	NameAssigned     bool   // AI naming already ran for this session (one-shot for agent tmux rename)
 }
 
 // Manager holds the central state tree
@@ -25,6 +31,7 @@ type Manager struct {
 	sessions map[string]*tmux.Session
 	client   *tmux.Client
 	meta     map[string]SessionMetadata
+	namer    *namer.Namer
 
 	// Subscribers for state changes
 	subMu       sync.RWMutex
@@ -47,6 +54,14 @@ func NewManager(client *tmux.Client) *Manager {
 		client:   client,
 		meta:     make(map[string]SessionMetadata),
 	}
+}
+
+// SetNamer attaches an optional AI session namer. Safe to pass a disabled
+// namer or call with nil; naming becomes a no-op.
+func (m *Manager) SetNamer(n *namer.Namer) {
+	m.mu.Lock()
+	m.namer = n
+	m.mu.Unlock()
 }
 
 // Subscribe returns a channel that receives state events
@@ -189,6 +204,10 @@ func (m *Manager) applyMetadata(session *tmux.Session) {
 	if meta.LastAgentMessage != "" {
 		session.LastAgentMessage = meta.LastAgentMessage
 	}
+	if meta.DisplayName != "" {
+		session.DisplayName = meta.DisplayName
+	}
+	session.UserSetName = meta.UserSetName
 }
 
 // UpdateSessionMetadataFromEvent stores stable metadata derived from agent
@@ -229,9 +248,13 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 		}
 		meta.AgentSessionID = evt.AgentSessionID
 	}
+	firstPrompt := false
 	if evt.UserPrompt != "" && meta.UserPrompt == "" {
 		meta.UserPrompt = evt.UserPrompt
 		changed = true
+		if !meta.NameAssigned && !meta.UserSetName {
+			firstPrompt = true
+		}
 	}
 	if evt.AgentMessage != "" && meta.LastAgentMessage != evt.AgentMessage {
 		meta.LastAgentMessage = evt.AgentMessage
@@ -266,6 +289,202 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 	}
 	m.mu.Unlock()
 
+	m.broadcast(StateEvent{Type: "sessions-changed"})
+
+	if firstPrompt {
+		go m.triggerAgentNaming(evt.Session)
+	}
+}
+
+// triggerAgentNaming runs the AI namer for an agent session on its first user
+// prompt. On success it stores a DisplayName and, when the gate passes (session
+// not attached, name available), also renames the underlying tmux session.
+// One-shot: guarded by meta.NameAssigned.
+func (m *Manager) triggerAgentNaming(sessionName string) {
+	m.mu.RLock()
+	n := m.namer
+	meta := m.meta[sessionName]
+	sess := m.sessions[sessionName]
+	attached := sess != nil && sess.Attached
+	projectPath := meta.ProjectPath
+	if sess != nil && sess.ProjectPath != "" {
+		projectPath = sess.ProjectPath
+	}
+	nc := namer.Context{
+		Kind:       namer.KindAgent,
+		Workdir:    projectPath,
+		Agent:      meta.AgentType,
+		UserPrompt: meta.UserPrompt,
+		AgentMsg:   meta.LastAgentMessage,
+	}
+	alreadyNamed := meta.NameAssigned || meta.UserSetName
+	m.mu.RUnlock()
+
+	if n == nil || !n.Enabled() || alreadyNamed {
+		return
+	}
+	if projectPath != "" {
+		if branch, err := git.CurrentBranch(projectPath); err == nil {
+			nc.Branch = branch
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	name, err := n.Generate(ctx, nc)
+	if err != nil {
+		logrus.WithError(err).WithField("session", sessionName).Debug("agent session naming failed")
+		return
+	}
+
+	m.applyGeneratedName(sessionName, name, !attached)
+}
+
+// applyGeneratedName stores displayName for sessionName and marks NameAssigned.
+// When allowRename is true and the name is a valid, non-colliding tmux session
+// name, it also renames the tmux session and migrates state/meta keys.
+func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRename bool) {
+	if displayName == "" {
+		return
+	}
+	m.mu.Lock()
+	meta, ok := m.meta[sessionName]
+	if !ok {
+		meta = SessionMetadata{}
+	}
+	if meta.UserSetName || meta.NameAssigned {
+		m.mu.Unlock()
+		return
+	}
+	meta.DisplayName = displayName
+	meta.NameAssigned = true
+	m.meta[sessionName] = meta
+	if sess := m.sessions[sessionName]; sess != nil {
+		sess.DisplayName = displayName
+	}
+
+	// Decide tmux rename inside the lock to avoid collision races.
+	newName := ""
+	if allowRename && displayName != sessionName {
+		if tmux.ValidateSessionName(displayName) == nil {
+			taken := make(map[string]bool, len(m.sessions))
+			for n := range m.sessions {
+				taken[n] = true
+			}
+			cand := namer.Dedup(displayName, taken)
+			if tmux.ValidateSessionName(cand) == nil && !taken[cand] {
+				newName = cand
+			}
+		}
+	}
+	m.mu.Unlock()
+
+	if newName == "" {
+		m.broadcast(StateEvent{Type: "sessions-changed"})
+		return
+	}
+
+	if err := m.client.RenameSession(sessionName, newName); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"old": sessionName, "new": newName}).Warn("tmux rename for AI name failed")
+		m.broadcast(StateEvent{Type: "sessions-changed"})
+		return
+	}
+
+	// Migrate meta + sessions keys to the new name.
+	m.mu.Lock()
+	if meta, ok := m.meta[sessionName]; ok {
+		delete(m.meta, sessionName)
+		m.meta[newName] = meta
+	}
+	if sess, ok := m.sessions[sessionName]; ok {
+		delete(m.sessions, sessionName)
+		sess.Name = newName
+		m.sessions[newName] = sess
+	}
+	m.mu.Unlock()
+
+	m.broadcast(StateEvent{Type: "session-removed", Session: sessionName})
+	m.broadcast(StateEvent{Type: "session-added", Session: newName})
+	m.broadcast(StateEvent{Type: "sessions-changed"})
+}
+
+// TriggerShellNaming runs the AI namer for a non-agent shell session and stores
+// the result as DisplayName. Unlike agent naming this never renames the tmux
+// session and is not one-shot — it refreshes on each new detected process.
+// No-ops if the session has an agent type, the name is user-set, or the namer
+// is disabled.
+func (m *Manager) TriggerShellNaming(sessionName string, commands []string) {
+	m.mu.RLock()
+	n := m.namer
+	meta := m.meta[sessionName]
+	sess := m.sessions[sessionName]
+	projectPath := meta.ProjectPath
+	agentType := meta.AgentType
+	if sess != nil {
+		if sess.ProjectPath != "" {
+			projectPath = sess.ProjectPath
+		}
+		if sess.AgentType != "" {
+			agentType = sess.AgentType
+		}
+	}
+	userSet := meta.UserSetName
+	m.mu.RUnlock()
+
+	if n == nil || !n.Enabled() || sess == nil || userSet || agentType != "" || len(commands) == 0 {
+		return
+	}
+
+	nc := namer.Context{Kind: namer.KindShell, Workdir: projectPath, Commands: commands}
+	if projectPath != "" {
+		if b, err := git.CurrentBranch(projectPath); err == nil {
+			nc.Branch = b
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	name, err := n.Generate(ctx, nc)
+	if err != nil {
+		logrus.WithError(err).WithField("session", sessionName).Debug("shell session naming failed")
+		return
+	}
+
+	m.mu.Lock()
+	meta = m.meta[sessionName]
+	if meta.UserSetName {
+		m.mu.Unlock()
+		return
+	}
+	if meta.DisplayName == name {
+		m.mu.Unlock()
+		return
+	}
+	meta.DisplayName = name
+	m.meta[sessionName] = meta
+	if s := m.sessions[sessionName]; s != nil {
+		s.DisplayName = name
+	}
+	m.mu.Unlock()
+	m.broadcast(StateEvent{Type: "sessions-changed"})
+}
+
+// SetDisplayName stores a manual display name for a session and flags it so the
+// AI namer never overwrites it. Pass userSet=false to clear the manual flag.
+func (m *Manager) SetDisplayName(sessionName, displayName string, userSet bool) {
+	m.mu.Lock()
+	meta := m.meta[sessionName]
+	meta.DisplayName = displayName
+	meta.UserSetName = userSet
+	if userSet {
+		meta.NameAssigned = true
+	}
+	m.meta[sessionName] = meta
+	if sess := m.sessions[sessionName]; sess != nil {
+		sess.DisplayName = displayName
+		sess.UserSetName = userSet
+	}
+	m.mu.Unlock()
 	m.broadcast(StateEvent{Type: "sessions-changed"})
 }
 

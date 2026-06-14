@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -13,6 +14,7 @@ import (
 	"github.com/ekristen/guppi/pkg/auth"
 	"github.com/ekristen/guppi/pkg/common"
 	"github.com/ekristen/guppi/pkg/identity"
+	"github.com/ekristen/guppi/pkg/namer"
 	"github.com/ekristen/guppi/pkg/peer"
 	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
@@ -76,6 +78,8 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, client)
 	go silenceMonitor.Run(ctx)
+
+	go runShellNameWatcher(ctx, client, stateMgr)
 
 	var health *recovery.HealthPoller
 	if !c.Bool("no-recovery") {
@@ -141,6 +145,23 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		logrus.WithError(err).Warn("failed to load preferences, using defaults")
 		prefStore = nil
+	}
+
+	// applyNamerFromPrefs (re)builds the AI session namer from preferences,
+	// falling back to env vars. Called at startup and whenever preferences are
+	// updated via the API.
+	applyNamerFromPrefs := func(p *preferences.Preferences) {
+		cfg := namer.Configure(p.AINaming.Enabled, p.AINaming.Endpoint, p.AINaming.APIKey, p.AINaming.Model)
+		n := namer.New(cfg)
+		stateMgr.SetNamer(n)
+		if n.Enabled() {
+			logrus.Info("AI session namer enabled")
+		} else {
+			logrus.Debug("AI session namer disabled")
+		}
+	}
+	if prefStore != nil {
+		applyNamerFromPrefs(prefStore.Get())
 	}
 
 	attrsStore, err := sessionattrs.NewStore()
@@ -240,6 +261,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		LinkSupervisor:   supervisor,
 		Detector:         detector,
 		PortForwardStore: portforward.NewStore(),
+		OnPrefsChanged:   applyNamerFromPrefs,
 	}
 
 	return server.Run(ctx, opts)
@@ -300,4 +322,97 @@ func init() {
 	}
 
 	common.RegisterCommand(cmd)
+}
+
+// shellNames lists foreground commands treated as "no meaningful process".
+var shellNames = map[string]bool{
+	"bash": true, "zsh": true, "sh": true, "fish": true, "tmux": true,
+	"-bash": true, "-zsh": true, "-sh": true, "login": true,
+}
+
+// runShellNameWatcher polls active-pane foreground commands and, when a
+// non-agent session starts a new meaningful process, asks the AI namer to
+// refresh that session's display name. The actual eligibility gate (namer
+// enabled, no agent, not user-set) lives in TriggerShellNaming.
+func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Manager) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	lastCmd := make(map[string]string)
+	lastFire := make(map[string]time.Time)
+	const minInterval = 30 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fgs, err := client.ListForegroundCommands()
+			if err != nil {
+				continue
+			}
+			for _, fg := range fgs {
+				prev := lastCmd[fg.Session]
+				lastCmd[fg.Session] = fg.Command
+				cmd := strings.TrimSpace(fg.Command)
+				if cmd == "" || shellNames[cmd] || cmd == prev {
+					continue
+				}
+				// New meaningful foreground process detected.
+				if t, ok := lastFire[fg.Session]; ok && time.Since(t) < minInterval {
+					continue
+				}
+				lastFire[fg.Session] = time.Now()
+
+				cmds := []string{cmd}
+				if pane := tmux.PrimaryPane(currentWindows(client, fg.Session)); pane != nil {
+					if content, err := client.CapturePaneHistory(pane.ID, -100); err == nil {
+						cmds = recentCommands(content, cmd)
+					}
+				}
+				go mgr.TriggerShellNaming(fg.Session, cmds)
+			}
+		}
+	}
+}
+
+func currentWindows(client *tmux.Client, session string) []*tmux.Window {
+	wins, err := client.ListWindows(session)
+	if err != nil {
+		return nil
+	}
+	for _, w := range wins {
+		if panes, err := client.ListPanes(w.ID); err == nil {
+			w.Panes = panes
+		}
+	}
+	return wins
+}
+
+// recentCommands extracts up to a handful of recent input lines from captured
+// pane content as a hint for naming. Falls back to [foreground] if nothing
+// useful is found.
+func recentCommands(content, foreground string) []string {
+	lines := strings.Split(content, "\n")
+	var out []string
+	for i := len(lines) - 1; i >= 0 && len(out) < 6; i-- {
+		l := strings.TrimSpace(lines[i])
+		if l == "" {
+			continue
+		}
+		// Strip common prompt prefixes ($, #, %, >).
+		l = strings.TrimLeft(l, "$#%> ")
+		if l == "" {
+			continue
+		}
+		out = append(out, l)
+	}
+	if len(out) == 0 {
+		return []string{foreground}
+	}
+	// reverse to chronological order
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
 }

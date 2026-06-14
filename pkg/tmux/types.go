@@ -20,6 +20,8 @@ type Session struct {
 	AgentSessionID   string    `json:"agent_session_id,omitempty"`
 	UserPrompt       string    `json:"user_prompt,omitempty"`
 	LastAgentMessage string    `json:"last_agent_message,omitempty"`
+	DisplayName      string    `json:"display_name,omitempty"`  // AI-generated friendly label; frontend shows this || Name
+	UserSetName      bool      `json:"user_set_name,omitempty"` // user manually set DisplayName; AI must not overwrite
 }
 
 // Window represents a tmux window

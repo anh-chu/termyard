@@ -21,6 +21,20 @@ func IsWorktree(path string) (bool, error) {
 	return strings.Contains(out, ".git/worktrees/"), nil
 }
 
+// CurrentBranch returns the short branch name for the repo at path, or ""
+// with an error if detached/unavailable.
+func CurrentBranch(path string) (string, error) {
+	out, err := run(path, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	branch := strings.TrimSpace(out)
+	if branch == "HEAD" {
+		return "", nil // detached
+	}
+	return branch, nil
+}
+
 // FindMainWorktreeRoot returns the root directory of the main worktree for
 // any path inside a git repository (main or linked).
 func FindMainWorktreeRoot(path string) (string, error) {

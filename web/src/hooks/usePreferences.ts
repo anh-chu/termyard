@@ -27,6 +27,12 @@ export interface Preferences {
   lock_background_minutes: number
   fullscreen_hide_alerts: boolean
   default_agent: string
+  ai_naming: {
+    enabled: boolean
+    endpoint: string
+    api_key: string
+    model: string
+  }
 }
 
 export const defaultPreferences: Preferences = {
@@ -56,6 +62,12 @@ export const defaultPreferences: Preferences = {
   lock_background_minutes: 10,
   fullscreen_hide_alerts: true,
   default_agent: 'claude',
+  ai_naming: {
+    enabled: false,
+    endpoint: '',
+    api_key: '',
+    model: 'gpt-4o-mini',
+  },
 }
 
 interface PreferencesContextValue {

@@ -29,20 +29,20 @@ import (
 	wp "github.com/SherClockHolmes/webpush-go"
 
 	"github.com/ekristen/guppi/pkg/activity"
-	"github.com/ekristen/guppi/pkg/git"
-	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/agentcheck"
 	"github.com/ekristen/guppi/pkg/auth"
 	"github.com/ekristen/guppi/pkg/common"
+	"github.com/ekristen/guppi/pkg/git"
 	"github.com/ekristen/guppi/pkg/identity"
 	"github.com/ekristen/guppi/pkg/peer"
+	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
+	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/socket"
 	"github.com/ekristen/guppi/pkg/state"
 	"github.com/ekristen/guppi/pkg/stats"
 	"github.com/ekristen/guppi/pkg/tmux"
 	"github.com/ekristen/guppi/pkg/toolevents"
-	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/webpush"
 	"github.com/ekristen/guppi/pkg/ws"
 )
@@ -57,6 +57,7 @@ type Options struct {
 	PushKeys         *webpush.VAPIDKeys
 	PushStore        *webpush.Store
 	PrefStore        *preferences.Store
+	OnPrefsChanged   func(*preferences.Preferences)
 	AttrsStore       *sessionattrs.Store
 	AuthEnabled      bool
 	PasswordStore    *auth.PasswordStore
@@ -398,8 +399,8 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, port int, path strin
 
 	// Tunnel bidirectionally
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(backend, conn); done <- struct{}{} }()    //nolint:errcheck
-	go func() { io.Copy(conn, backend); done <- struct{}{} }()    //nolint:errcheck
+	go func() { io.Copy(backend, conn); done <- struct{}{} }() //nolint:errcheck
+	go func() { io.Copy(conn, backend); done <- struct{}{} }() //nolint:errcheck
 	<-done
 }
 
@@ -648,6 +649,25 @@ func Run(ctx context.Context, opts *Options) error {
 				json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
 			})
 
+			r.Post("/session/display-name", func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Session     string `json:"session"`
+					DisplayName string `json:"display_name"`
+					Clear       bool   `json:"clear,omitempty"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Session == "" {
+					http.Error(w, "session is required", http.StatusBadRequest)
+					return
+				}
+				if opts.StateMgr == nil {
+					http.Error(w, "state manager unavailable", http.StatusInternalServerError)
+					return
+				}
+				// clear=true resets to AI/auto naming; otherwise mark user-set.
+				opts.StateMgr.SetDisplayName(req.Session, req.DisplayName, !req.Clear)
+				w.WriteHeader(http.StatusNoContent)
+			})
+
 			r.Post("/session/rename", func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
 					OldName string `json:"old_name"`
@@ -747,9 +767,9 @@ func Run(ctx context.Context, opts *Options) error {
 
 			r.Post("/session/kill", func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
-					ID            string `json:"id,omitempty"`
-					Name          string `json:"name"`
-					Host          string `json:"host,omitempty"`
+					ID             string `json:"id,omitempty"`
+					Name           string `json:"name"`
+					Host           string `json:"host,omitempty"`
 					RemoveWorktree bool   `json:"remove_worktree,omitempty"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -1028,6 +1048,11 @@ func Run(ctx context.Context, opts *Options) error {
 				} else {
 					prefs = preferences.Default()
 				}
+				// Never leak the stored API key to the browser; send a mask
+				// placeholder when one is set.
+				if prefs.AINaming.APIKey != "" {
+					prefs.AINaming.APIKey = preferences.APIKeyMask
+				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(prefs)
 			})
@@ -1042,9 +1067,21 @@ func Run(ctx context.Context, opts *Options) error {
 					http.Error(w, "invalid JSON", http.StatusBadRequest)
 					return
 				}
+				// A masked API key means "keep the existing one"; restore it from
+				// the store so the masked placeholder is never persisted.
+				if prefs.AINaming.APIKey == preferences.APIKeyMask {
+					prefs.AINaming.APIKey = opts.PrefStore.Get().AINaming.APIKey
+				}
 				if err := opts.PrefStore.Update(&prefs); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
+				}
+				if opts.OnPrefsChanged != nil {
+					opts.OnPrefsChanged(&prefs)
+				}
+				// Re-mask before echoing the saved prefs back to the browser.
+				if prefs.AINaming.APIKey != "" {
+					prefs.AINaming.APIKey = preferences.APIKeyMask
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(&prefs)
@@ -1110,10 +1147,10 @@ func Run(ctx context.Context, opts *Options) error {
 					return
 				}
 				var req struct {
-					Port         int                `json:"port"`
-					Label        string             `json:"label"`
-					Mode         portforward.Mode   `json:"mode"`
-					ExternalPort int                `json:"external_port"`
+					Port         int              `json:"port"`
+					Label        string           `json:"label"`
+					Mode         portforward.Mode `json:"mode"`
+					ExternalPort int              `json:"external_port"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Port < 1 || req.Port > 65535 {
 					http.Error(w, "port (1-65535) required", http.StatusBadRequest)
@@ -1196,7 +1233,6 @@ func Run(ctx context.Context, opts *Options) error {
 	if opts.PeerHandler != nil {
 		r.Get("/ws/peer", opts.PeerHandler.HandlePeer)
 	}
-
 
 	// Port-forward proxy — exposes localhost-bound services through guppi's URL.
 	// Requires auth (same rule as other protected routes) so remote users can't
