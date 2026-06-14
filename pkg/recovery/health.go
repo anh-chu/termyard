@@ -15,14 +15,17 @@ type serverProbe interface {
 }
 
 // HealthPoller watches tmux server liveness and triggers recovery.
+//
+// Recovery fires only on tmux server death (a crash). It deliberately does NOT
+// rebuild individual sessions that go missing while the server is alive: those
+// are intentional kills, and resurrecting them is the auto-recovery respawn bug.
 type HealthPoller struct {
-	client           serverProbe
-	interval         time.Duration
-	onGone           func()
-	wasAlive         bool
-	missingTriggered bool
-	hintCh           chan struct{}
-	log              *logrus.Entry
+	client   serverProbe
+	interval time.Duration
+	onGone   func()
+	wasAlive bool
+	hintCh   chan struct{}
+	log      *logrus.Entry
 }
 
 func NewHealthPoller(client serverProbe, interval time.Duration, onGone func()) *HealthPoller {
@@ -75,7 +78,6 @@ func (h *HealthPoller) probe() {
 	if !alive {
 		if h.wasAlive {
 			h.wasAlive = false
-			h.missingTriggered = false
 			if manifestHasSessions() {
 				h.maybeTrigger()
 			}
@@ -84,25 +86,6 @@ func (h *HealthPoller) probe() {
 	}
 
 	h.wasAlive = true
-	manifest, err := Load()
-	if err != nil || manifest == nil || len(manifest.Sessions) == 0 {
-		h.missingTriggered = false
-		return
-	}
-
-	sessions, err := h.client.ListSessions()
-	if err != nil {
-		return
-	}
-	if sessionsMissing(manifest.Sessions, sessions) {
-		if !h.missingTriggered {
-			h.missingTriggered = true
-			h.maybeTrigger()
-		}
-		return
-	}
-
-	h.missingTriggered = false
 }
 
 func (h *HealthPoller) maybeTrigger() {
@@ -115,26 +98,4 @@ func (h *HealthPoller) maybeTrigger() {
 func manifestHasSessions() bool {
 	m, err := Load()
 	return err == nil && m != nil && len(m.Sessions) > 0
-}
-
-func sessionsMissing(manifest []SessionSnapshot, current []*tmux.Session) bool {
-	if len(manifest) == 0 {
-		return false
-	}
-	currentByName := make(map[string]struct{}, len(current))
-	for _, session := range current {
-		if session == nil || session.Name == "" {
-			continue
-		}
-		currentByName[session.Name] = struct{}{}
-	}
-	for _, session := range manifest {
-		if session.Name == "" {
-			continue
-		}
-		if _, ok := currentByName[session.Name]; !ok {
-			return true
-		}
-	}
-	return false
 }

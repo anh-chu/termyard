@@ -88,6 +88,42 @@ func Load() (*Manifest, error) {
 	return &m, nil
 }
 
+// ForgetSession removes a session from the persisted manifest synchronously.
+//
+// Call this on an intentional kill so the crash-recovery rebuilder cannot
+// resurrect it. The periodic Snapshotter would eventually drop it (~8s), but a
+// faster recovery probe (or a last-session kill that takes the tmux server down
+// with it) can rebuild from a stale manifest before that. Removing it here
+// closes that race.
+func ForgetSession(name string) error {
+	if name == "" {
+		return nil
+	}
+	m, err := Load()
+	if err != nil {
+		return err
+	}
+	if m == nil || len(m.Sessions) == 0 {
+		return nil
+	}
+	filtered := m.Sessions[:0]
+	removed := false
+	for _, s := range m.Sessions {
+		if s.Name == name {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	if !removed {
+		return nil
+	}
+	m.Sessions = filtered
+	m.Generation++
+	m.UpdatedAt = time.Now()
+	return m.Save()
+}
+
 // Save writes manifest atomically.
 func (m *Manifest) Save() error {
 	if m.Version == 0 {

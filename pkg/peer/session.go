@@ -18,6 +18,7 @@ import (
 	"github.com/ekristen/guppi/pkg/common"
 	"github.com/ekristen/guppi/pkg/git"
 	"github.com/ekristen/guppi/pkg/identity"
+	"github.com/ekristen/guppi/pkg/recovery"
 	"github.com/ekristen/guppi/pkg/state"
 	"github.com/ekristen/guppi/pkg/stats"
 	"github.com/ekristen/guppi/pkg/tmux"
@@ -678,6 +679,9 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		}
 		if err := deps.TmuxClient.KillSession(params.ID, params.Name); err != nil {
 			log.WithError(err).Warn("kill session via peer failed")
+		}
+		if err := recovery.ForgetSession(params.Name); err != nil {
+			log.WithError(err).Warn("failed to remove session from recovery manifest")
 		}
 		sendStateUpdate(pc, deps)
 

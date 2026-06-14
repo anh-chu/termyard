@@ -37,6 +37,7 @@ import (
 	"github.com/ekristen/guppi/pkg/peer"
 	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
+	"github.com/ekristen/guppi/pkg/recovery"
 	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/socket"
 	"github.com/ekristen/guppi/pkg/state"
@@ -835,6 +836,11 @@ func Run(ctx context.Context, opts *Options) error {
 				}
 				if opts.StateMgr != nil {
 					opts.StateMgr.RemoveSession(req.Name)
+				}
+				// Drop from crash-recovery manifest synchronously so the
+				// rebuilder cannot resurrect an intentionally-killed session.
+				if err := recovery.ForgetSession(req.Name); err != nil {
+					logrus.WithError(err).WithField("session", req.Name).Warn("failed to remove session from recovery manifest")
 				}
 
 				// Remove the linked worktree if requested. Non-fatal — session is
