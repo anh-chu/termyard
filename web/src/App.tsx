@@ -9,6 +9,7 @@ import { ScheduleModal } from './components/ScheduleModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
 import { PaneTree, getLeaves, findLeaf, splitLeaf, insertBesideLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
+import { sessionSnapshot, snapshotStable, pruneGroupTree } from './lib/prune'
 import { StatusBar } from './components/StatusBar'
 import { Settings } from './components/Settings'
 import { HelpModal } from './components/HelpModal'
@@ -59,7 +60,7 @@ function getViewFromPath(): { view: View; sessionKey: string | null } {
 }
 
 function AppInner({ onLogout }: { onLogout?: () => void }) {
-  const { sessions, refresh } = useSessions()
+  const { sessions, loading: sessionsLoading, refresh } = useSessions()
   const { events: allToolEvents, handleEvent: handleToolEvent, getSessionEvents, sessionNeedsAttention, isSessionInActiveTurn, dismissEvent, dismissAll: dismissAllEvents } = useToolEvents()
   const { getSessionActivity, handleActivityEvent } = useActivity()
   const { pushState, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications()
@@ -173,6 +174,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const splitTargetRef = useRef<{ key: string; direction: 'h' | 'v'; newFirst?: boolean } | null>(null)
   const activeKeyRef = useRef(activeKey)
   activeKeyRef.current = activeKey
+  const sessionSnapshotRef = useRef('')
+  const sessionSnapshotStableRef = useRef(false)
   const { prefs } = usePreferences()
 
   // Shared session attributes (background / hidden) — server-authoritative,
@@ -530,6 +533,38 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const toastIdRef = useRef(0)
   const dismissToast = useCallback((id: number) => setToasts(t => t.filter(x => x.id !== id)), [])
 
+  const migrateSessionKey = useCallback((oldKey: string, newKey: string) => {
+    if (!oldKey || !newKey || oldKey === newKey) return
+
+    setPaneTree(prev => {
+      if (prev === null || !findLeaf(prev, oldKey)) return prev
+      return replaceLeaf(prev, oldKey, newKey)
+    })
+    setActiveKey(prev => (prev === oldKey ? newKey : prev))
+    setSingleView(prev => (prev === oldKey ? newKey : prev))
+    setSavedGroups(prev => prev.map(group => {
+      const hasOldKey = findLeaf(group.tree, oldKey)
+      if (!hasOldKey && group.activeKey !== oldKey) return group
+      return {
+        ...group,
+        tree: hasOldKey ? replaceLeaf(group.tree, oldKey, newKey) : group.tree,
+        activeKey: group.activeKey === oldKey ? newKey : group.activeKey,
+      }
+    }))
+
+    const { host: oldHost, name: oldName } = parseSessionKey(oldKey)
+    const oldPath = oldHost
+      ? `/session/${encodeURIComponent(oldHost)}/${encodeURIComponent(oldName)}`
+      : `/session/${encodeURIComponent(oldName)}`
+    const { host: newHost, name: newName } = parseSessionKey(newKey)
+    const newPath = newHost
+      ? `/session/${encodeURIComponent(newHost)}/${encodeURIComponent(newName)}`
+      : `/session/${encodeURIComponent(newName)}`
+    if (window.location.pathname === oldPath) {
+      window.history.replaceState(null, '', newPath)
+    }
+  }, [])
+
   // Listen for state events via WebSocket
   const onEvent = useCallback((evt: any) => {
     if (evt.type === 'notice') {
@@ -562,6 +597,18 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (evt.type === 'activity') {
       handleActivityEvent(evt.snapshots || [])
       return
+
+    }
+    if (evt.type === 'session-renamed') {
+      const oldName = evt.session || ''
+      const newName = evt.data?.new_name || ''
+      if (!oldName || !newName) return
+      const host = evt.host || ''
+      const oldKey = host ? `${host}/${oldName}` : oldName
+      const newKey = host ? `${host}/${newName}` : newName
+      migrateSessionKey(oldKey, newKey)
+      refresh()
+      return
     }
     if (['session-added', 'session-removed', 'sessions-changed'].includes(evt.type)) {
       refresh()
@@ -573,18 +620,21 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (evt.type === 'session-attrs-updated') {
       refreshSessionAttrs()
     }
-  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs])
+  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs, migrateSessionKey])
 
   const { connected } = useWebSocket('/ws/events', onEvent)
 
-  // If a pane's session was removed, remove that pane
-  // (don't bounce if we're waiting for a newly created session to appear)
   useEffect(() => {
-    if (sessions.length === 0 || paneTree === null) return
+    const snapshot = sessionSnapshot(sessions.map(s => sessionKey(s)))
+    sessionSnapshotStableRef.current = snapshotStable(sessionSnapshotRef.current, snapshot, sessionsLoading)
+    sessionSnapshotRef.current = snapshot
+  }, [sessions, sessionsLoading])
+
+  // Prune only after same snapshot twice so recovery transients don't dissolve groups.
+  useEffect(() => {
+    if (sessionsLoading || sessions.length === 0 || paneTree === null || !sessionSnapshotStableRef.current) return
     const validKeys = new Set(sessions.map(s => sessionKey(s)))
-    const keysToRemove = getLeaves(paneTree).filter(
-      k => k !== pendingSessionRef.current && !validKeys.has(k),
-    )
+    const keysToRemove = getLeaves(paneTree).filter(k => k !== pendingSessionRef.current && !validKeys.has(k))
     if (keysToRemove.length === 0) return
     setPaneTree(prev => {
       if (prev === null) return null
@@ -593,31 +643,34 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         if (tree === null) break
         tree = removeLeaf(tree, key)
       }
+      if (tree && activeKeyRef.current && keysToRemove.includes(activeKeyRef.current)) {
+        const leaves = getLeaves(tree)
+        setActiveKey(leaves[0] || null)
+      }
       return tree
     })
-    if (singleView && !validKeys.has(singleView)) setSingleView(null)
-  }, [sessions, paneTree, singleView]) // eslint-disable-line react-hooks/exhaustive-deps
+    setSingleView(prev => {
+      if (!prev) return prev
+      if (validKeys.has(prev)) return prev
+      return null
+    })
+  }, [sessions, sessionsLoading, paneTree, singleView]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Prune saved groups from removed sessions
   useEffect(() => {
-    if (sessions.length === 0) return
+    if (sessionsLoading || sessions.length === 0 || !sessionSnapshotStableRef.current) return
     const validKeys = new Set(sessions.map(s => sessionKey(s)))
     setSavedGroups(prev =>
       prev.map(group => {
-        const keysToRemove = getLeaves(group.tree).filter(k => !validKeys.has(k))
-        if (keysToRemove.length === 0) return group
-        let tree: PaneTree | null = group.tree
-        for (const key of keysToRemove) {
-          if (tree) tree = removeLeaf(tree, key)
-        }
-        if (!tree) return null
-        if (getLeaves(tree).length === 1) return null // dissolve to standalone
-        const newActiveKey = group.activeKey && validKeys.has(group.activeKey)
-          ? group.activeKey : getLeaves(tree)[0] ?? null
-        return { ...group, tree, activeKey: newActiveKey }
+        const pruned = pruneGroupTree(group.tree, group.activeKey, validKeys)
+        if (!pruned) return null
+        if (pruned.tree === group.tree && pruned.activeKey === group.activeKey) return group
+        return { ...group, tree: pruned.tree, activeKey: pruned.activeKey }
       }).filter(Boolean) as LayoutGroup[]
     )
-  }, [sessions])
+  }, [sessions, sessionsLoading])
+
+
 
   const selectSessionRef = useRef<((sk: string) => void) | null>(null)
 
@@ -983,20 +1036,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             localHostId={localHostId}
             hosts={hosts}
             onSessionSelect={handleSessionSelect}
-            onSessionRenamed={(oldKey, newKey) => {
-              setPaneTree(prev => {
-                if (prev === null) return null
-                return replaceLeaf(prev, oldKey, newKey)
-              })
-              if (activeKey === oldKey) {
-                setActiveKey(newKey)
-                const { host, name } = parseSessionKey(newKey)
-                const path = host
-                  ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
-                  : `/session/${encodeURIComponent(name)}`
-                window.history.replaceState(null, '', path)
-              }
-            }}
+            onSessionRenamed={migrateSessionKey}
             getSessionEvents={getSessionEvents}
             sessionNeedsAttention={sessionNeedsAttention}
             isSessionInActiveTurn={isSessionInActiveTurn}
