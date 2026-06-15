@@ -95,8 +95,9 @@ type StateUpdatePayload struct {
 
 // StateEventPayload carries an incremental state change
 type StateEventPayload struct {
-	EventType string `json:"event_type"` // session-added, session-removed, sessions-changed
+	EventType string `json:"event_type"` // session-added, session-removed, session-renamed, sessions-changed
 	Session   string `json:"session,omitempty"`
+	Data      any    `json:"data,omitempty"`
 }
 
 // ToolEventPayload wraps a tool event from a peer
@@ -121,16 +122,16 @@ type PeerStatePayload struct {
 
 // HostInfo represents a peer's state as seen by the hub
 type HostInfo struct {
-	ID        string                 `json:"id"` // public key fingerprint
-	Name      string                 `json:"name"`
-	Version   string                 `json:"version,omitempty"`
-	Local     bool                   `json:"local,omitempty"`
-	Online    bool                   `json:"online"`
-	Address   string                 `json:"address,omitempty"`
-	Sessions  []*tmux.Session        `json:"sessions"`
-	Activity  []*activity.Snapshot   `json:"activity,omitempty"`
-	Stats     map[string]interface{} `json:"stats,omitempty"`
-	LastSeen  time.Time              `json:"last_seen"`
+	ID       string                 `json:"id"` // public key fingerprint
+	Name     string                 `json:"name"`
+	Version  string                 `json:"version,omitempty"`
+	Local    bool                   `json:"local,omitempty"`
+	Online   bool                   `json:"online"`
+	Address  string                 `json:"address,omitempty"`
+	Sessions []*tmux.Session        `json:"sessions"`
+	Activity []*activity.Snapshot   `json:"activity,omitempty"`
+	Stats    map[string]interface{} `json:"stats,omitempty"`
+	LastSeen time.Time              `json:"last_seen"`
 }
 
 // PeerNotifyPayload is sent when a peer connects or disconnects

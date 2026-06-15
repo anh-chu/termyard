@@ -561,13 +561,13 @@ func Run(ctx context.Context, opts *Options) error {
 	// Build the events hub up front so routes can broadcast layout changes.
 	hub := ws.NewHub(opts.StateMgr, opts.Tracker)
 	opts.Hub = hub
-	if opts.ActivityTracker != nil {
-		var peerActivity ws.ActivitySource
-		localHostID := ""
-		if opts.PeerMgr != nil {
-			peerActivity = opts.PeerMgr
-			localHostID = opts.PeerMgr.LocalID()
-		}
+	var peerActivity ws.ActivitySource
+	localHostID := ""
+	if opts.PeerMgr != nil {
+		peerActivity = opts.PeerMgr
+		localHostID = opts.PeerMgr.LocalID()
+	}
+	if opts.ActivityTracker != nil || peerActivity != nil {
 		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
 	}
 
@@ -879,6 +879,7 @@ func Run(ctx context.Context, opts *Options) error {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
+				opts.StateMgr.ApplyRename(req.OldName, req.NewName)
 				if fresh, err := opts.Client.ListSessions(); err == nil {
 					opts.StateMgr.UpdateSessions(fresh)
 				}

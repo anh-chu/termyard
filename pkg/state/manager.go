@@ -500,6 +500,35 @@ func (m *Manager) GenerateGroupName(members []namer.GroupMember, current string)
 	})
 }
 
+func (m *Manager) ApplyRename(oldName, newName string) {
+	if oldName == "" || newName == "" || oldName == newName {
+		return
+	}
+
+	m.mu.Lock()
+	changed := false
+	if meta, ok := m.meta[oldName]; ok {
+		meta.TmuxRenamed = true
+		delete(m.meta, oldName)
+		m.meta[newName] = meta
+		changed = true
+	}
+	if sess, ok := m.sessions[oldName]; ok {
+		delete(m.sessions, oldName)
+		sess.Name = newName
+		m.sessions[newName] = sess
+		changed = true
+	}
+	m.mu.Unlock()
+
+	if !changed {
+		return
+	}
+
+	m.saveNames()
+	m.broadcast(StateEvent{Type: "session-renamed", Session: oldName, Data: map[string]string{"new_name": newName}})
+}
+
 // applyGeneratedName stores displayName for sessionName. The DisplayName is
 // refreshed on every call (unless the user manually set it) so the label tracks
 // the evolving work. The underlying tmux session rename is one-shot, guarded by
@@ -559,22 +588,7 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	}
 
 	// Migrate meta + sessions keys to the new name.
-	m.mu.Lock()
-	if meta, ok := m.meta[sessionName]; ok {
-		meta.TmuxRenamed = true
-		delete(m.meta, sessionName)
-		m.meta[newName] = meta
-	}
-	if sess, ok := m.sessions[sessionName]; ok {
-		delete(m.sessions, sessionName)
-		sess.Name = newName
-		m.sessions[newName] = sess
-	}
-	m.mu.Unlock()
-
-	m.saveNames()
-	m.broadcast(StateEvent{Type: "session-removed", Session: sessionName})
-	m.broadcast(StateEvent{Type: "session-added", Session: newName})
+	m.ApplyRename(sessionName, newName)
 	m.broadcast(StateEvent{Type: "sessions-changed"})
 }
 

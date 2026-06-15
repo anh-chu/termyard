@@ -111,6 +111,9 @@ func (h *Hub) Run() {
 			if !ok {
 				return
 			}
+			if evt.Type == "session-renamed" && evt.Host == "" && h.localHostID != "" {
+				evt.Host = h.localHostID
+			}
 			data, err := json.Marshal(evt)
 			if err != nil {
 				logrus.WithError(err).Warn("failed to marshal state event")

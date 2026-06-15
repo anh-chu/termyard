@@ -57,17 +57,17 @@ type BrowserBroadcaster interface {
 
 // SessionDeps groups the runtime dependencies needed by a peer session.
 type SessionDeps struct {
-	Manager      *Manager
-	LocalMgr     *state.Manager
-	Identity     *identity.Identity
-	ActTracker   *activity.Tracker
-	ToolTracker  *toolevents.Tracker
-	PeerStore    *identity.PeerStore
-	TmuxClient   *tmux.Client
-	PTYManager   *PTYManager
-	PTYRelay     *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
-	AttrsSink    SessionAttrsSink
-	BrowserHub   BrowserBroadcaster
+	Manager     *Manager
+	LocalMgr    *state.Manager
+	Identity    *identity.Identity
+	ActTracker  *activity.Tracker
+	ToolTracker *toolevents.Tracker
+	PeerStore   *identity.PeerStore
+	TmuxClient  *tmux.Client
+	PTYManager  *PTYManager
+	PTYRelay    *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
+	AttrsSink   SessionAttrsSink
+	BrowserHub  BrowserBroadcaster
 }
 
 // connWriter serializes WebSocket writes from multiple goroutines.
@@ -316,6 +316,7 @@ func forwardStateEvents(ctx context.Context, pc *PeerConnection, deps SessionDep
 			msg, err := NewMessage(MsgStateEvent, StateEventPayload{
 				EventType: evt.Type,
 				Session:   evt.Session,
+				Data:      evt.Data,
 			})
 			if err != nil {
 				continue
@@ -409,6 +410,27 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 		var p StateEventPayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {
 			return
+		}
+		if p.EventType == "session-renamed" && deps.BrowserHub != nil {
+			newName := ""
+			switch data := p.Data.(type) {
+			case map[string]any:
+				if v, ok := data["new_name"].(string); ok {
+					newName = v
+				}
+			case map[string]string:
+				newName = data["new_name"]
+			}
+			if p.Session != "" && newName != "" {
+				deps.BrowserHub.BroadcastJSON(map[string]interface{}{
+					"type":    "session-renamed",
+					"host":    peerID,
+					"session": p.Session,
+					"data": map[string]string{
+						"new_name": newName,
+					},
+				})
+			}
 		}
 		deps.Manager.UpdatePeerSessions(peerID, getPeerSessions(deps.Manager, peerID))
 
@@ -600,10 +622,10 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 	switch payload.Action {
 	case "new":
 		var params struct {
-			Name            string `json:"name"`
-			Path            string `json:"path,omitempty"`
-			Command         string `json:"command,omitempty"`
-			WorktreeBranch  string `json:"worktree_branch,omitempty"`
+			Name           string `json:"name"`
+			Path           string `json:"path,omitempty"`
+			Command        string `json:"command,omitempty"`
+			WorktreeBranch string `json:"worktree_branch,omitempty"`
 		}
 		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Name == "" {
 			return
@@ -652,6 +674,9 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		if err := deps.TmuxClient.RenameSession(params.OldName, params.NewName); err != nil {
 			log.WithError(err).Warn("rename session via peer failed")
 			return
+		}
+		if deps.LocalMgr != nil {
+			deps.LocalMgr.ApplyRename(params.OldName, params.NewName)
 		}
 		sendStateUpdate(pc, deps)
 
