@@ -22,11 +22,13 @@ type SessionMetadata struct {
 	AgentType        string
 	PromptPreview    string
 	AgentSessionID   string
-	UserPrompt       string // first user message; set once
-	LastAgentMessage string // last agent response; always updated
-	DisplayName      string // AI-generated friendly label
-	UserSetName      bool   // user manually set DisplayName; AI must not overwrite
-	NameAssigned     bool   // AI naming already ran for this session (one-shot for agent tmux rename)
+	UserPrompt       string    // first user message; set once
+	LastAgentMessage string    // last agent response; always updated
+	DisplayName      string    // AI-generated friendly label, refreshed as work evolves
+	UserSetName      bool      // user manually set DisplayName; AI must not overwrite
+	NameAssigned     bool      // AI naming has run at least once (informational/persisted)
+	TmuxRenamed      bool      // underlying tmux session was renamed; one-shot to avoid key churn
+	LastNamedAt      time.Time // last AI naming attempt; debounces continuous refresh (not persisted)
 }
 
 // Manager holds the central state tree
@@ -77,6 +79,7 @@ type persistedName struct {
 	DisplayName  string `json:"display_name"`
 	UserSetName  bool   `json:"user_set_name"`
 	NameAssigned bool   `json:"name_assigned"`
+	TmuxRenamed  bool   `json:"tmux_renamed"`
 }
 
 // loadNames seeds meta with persisted display names. Called once at startup
@@ -99,6 +102,7 @@ func (m *Manager) loadNames() {
 		meta.DisplayName = pn.DisplayName
 		meta.UserSetName = pn.UserSetName
 		meta.NameAssigned = pn.NameAssigned
+		meta.TmuxRenamed = pn.TmuxRenamed
 		m.meta[name] = meta
 	}
 }
@@ -119,6 +123,7 @@ func (m *Manager) saveNames() {
 			DisplayName:  meta.DisplayName,
 			UserSetName:  meta.UserSetName,
 			NameAssigned: meta.NameAssigned,
+			TmuxRenamed:  meta.TmuxRenamed,
 		}
 	}
 	m.mu.RUnlock()
@@ -349,9 +354,17 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 			firstPrompt = true
 		}
 	}
+	nameRefresh := false
 	if evt.AgentMessage != "" && meta.LastAgentMessage != evt.AgentMessage {
 		meta.LastAgentMessage = evt.AgentMessage
 		changed = true
+		// Re-name on completed turns as the work evolves, debounced per session.
+		// firstPrompt already covers the very first naming pass.
+		if !firstPrompt && !meta.UserSetName && evt.Status == toolevents.StatusCompleted &&
+			time.Since(meta.LastNamedAt) > nameRefreshInterval {
+			nameRefresh = true
+			meta.LastNamedAt = time.Now()
+		}
 	}
 
 	if !changed {
@@ -384,15 +397,19 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 
 	m.broadcast(StateEvent{Type: "sessions-changed"})
 
-	if firstPrompt {
+	if firstPrompt || nameRefresh {
 		go m.triggerAgentNaming(evt.Session)
 	}
 }
 
-// triggerAgentNaming runs the AI namer for an agent session on its first user
-// prompt. On success it stores a DisplayName and, when the gate passes (session
-// not attached, name available), also renames the underlying tmux session.
-// One-shot: guarded by meta.NameAssigned.
+// nameRefreshInterval debounces continuous AI re-naming of agent sessions so a
+// burst of completed turns does not hammer the namer endpoint.
+const nameRefreshInterval = 45 * time.Second
+
+// triggerAgentNaming runs the AI namer for an agent session, on its first user
+// prompt and on later completed turns as the work evolves. It refreshes the
+// DisplayName each time; the underlying tmux rename stays one-shot (guarded by
+// meta.TmuxRenamed inside applyGeneratedName). Manual names (UserSetName) win.
 func (m *Manager) triggerAgentNaming(sessionName string) {
 	m.mu.RLock()
 	n := m.namer
@@ -411,10 +428,10 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 		AgentMsg:   meta.LastAgentMessage,
 		Current:    meta.DisplayName,
 	}
-	alreadyNamed := meta.NameAssigned || meta.UserSetName
+	blocked := meta.UserSetName
 	m.mu.RUnlock()
 
-	if n == nil || !n.Enabled() || alreadyNamed {
+	if n == nil || !n.Enabled() || blocked {
 		return
 	}
 	if projectPath != "" {
@@ -456,9 +473,10 @@ func (m *Manager) GenerateGroupName(members []string, current string) (string, e
 	})
 }
 
-// applyGeneratedName stores displayName for sessionName and marks NameAssigned.
-// When allowRename is true and the name is a valid, non-colliding tmux session
-// name, it also renames the tmux session and migrates state/meta keys.
+// applyGeneratedName stores displayName for sessionName. The DisplayName is
+// refreshed on every call (unless the user manually set it) so the label tracks
+// the evolving work. The underlying tmux session rename is one-shot, guarded by
+// meta.TmuxRenamed, to avoid churning session keys/URLs on every refresh.
 func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRename bool) {
 	if displayName == "" {
 		return
@@ -468,12 +486,15 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	if !ok {
 		meta = SessionMetadata{}
 	}
-	if meta.UserSetName || meta.NameAssigned {
+	if meta.UserSetName {
 		m.mu.Unlock()
 		return
 	}
+	meta.LastNamedAt = time.Now()
+	nameChanged := meta.DisplayName != displayName
 	meta.DisplayName = displayName
 	meta.NameAssigned = true
+	alreadyRenamed := meta.TmuxRenamed
 	m.meta[sessionName] = meta
 	if sess := m.sessions[sessionName]; sess != nil {
 		sess.DisplayName = displayName
@@ -481,7 +502,7 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 
 	// Decide tmux rename inside the lock to avoid collision races.
 	newName := ""
-	if allowRename && displayName != sessionName {
+	if allowRename && !alreadyRenamed && displayName != sessionName {
 		if tmux.ValidateSessionName(displayName) == nil {
 			taken := make(map[string]bool, len(m.sessions))
 			for n := range m.sessions {
@@ -496,8 +517,10 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	m.mu.Unlock()
 
 	if newName == "" {
-		m.saveNames()
-		m.broadcast(StateEvent{Type: "sessions-changed"})
+		if nameChanged {
+			m.saveNames()
+			m.broadcast(StateEvent{Type: "sessions-changed"})
+		}
 		return
 	}
 
@@ -511,6 +534,7 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	// Migrate meta + sessions keys to the new name.
 	m.mu.Lock()
 	if meta, ok := m.meta[sessionName]; ok {
+		meta.TmuxRenamed = true
 		delete(m.meta, sessionName)
 		m.meta[newName] = meta
 	}
@@ -676,11 +700,13 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 		return "", err
 	}
 
-	// Reset guard + manual lock so the forced name applies even when the
-	// session was already named or user-set.
+	// Reset guards + manual lock so the forced name applies even when the
+	// session was already named or user-set. Clearing TmuxRenamed lets the
+	// manual action rename the tmux session again when detached.
 	m.mu.Lock()
 	meta = m.meta[sessionName]
 	meta.NameAssigned = false
+	meta.TmuxRenamed = false
 	meta.UserSetName = false
 	if sess := m.sessions[sessionName]; sess != nil {
 		sess.UserSetName = false
