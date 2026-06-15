@@ -1047,6 +1047,23 @@ func Run(ctx context.Context, opts *Options) error {
 				json.NewEncoder(w).Encode(events)
 			})
 
+			// Authoritative set of in-progress hook-based agent turns. The frontend
+			// reconciles its "working" badge against this on each periodic refresh so
+			// a dropped "completed" WebSocket frame self-heals.
+			r.Get("/active-turns", func(w http.ResponseWriter, r *http.Request) {
+				type turn struct {
+					Host    string `json:"host,omitempty"`
+					Session string `json:"session"`
+				}
+				turns := opts.Tracker.ActiveTurns()
+				out := make([]turn, 0, len(turns))
+				for _, evt := range turns {
+					out = append(out, turn{Host: evt.Host, Session: evt.Session})
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(out)
+			})
+
 			r.Delete("/tool-events", func(w http.ResponseWriter, r *http.Request) {
 				opts.Tracker.ClearAll()
 				w.WriteHeader(http.StatusNoContent)

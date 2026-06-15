@@ -91,6 +91,15 @@ type Tracker struct {
 	// pane ID so the %output handler can refresh progress cheaply.
 	activePanes map[string]*activeState
 
+	// activeTurns tracks panes with an in-progress hook-based agent turn,
+	// keyed by pane. Set on a hook "active" event, cleared on any terminal
+	// status (completed/waiting/error). Unlike t.events it survives the
+	// active-clears-tracking rule, giving the frontend an authoritative source
+	// to reconcile its "working" badge against. notify -> server is HTTP (not
+	// the lossy WS broadcast), so this map is reliable even when a completed
+	// WS frame is dropped.
+	activeTurns map[PaneKey]*Event
+
 	// Subscribers
 	subMu       sync.RWMutex
 	subscribers []chan *Event
@@ -111,6 +120,7 @@ func NewTracker() *Tracker {
 		events:      make(map[PaneKey]*Event),
 		lastActive:  make(map[PaneKey]*Event),
 		activePanes: make(map[string]*activeState),
+		activeTurns: make(map[PaneKey]*Event),
 		sessionMeta: make(map[string]SessionMeta),
 	}
 }
@@ -192,6 +202,21 @@ func (t *Tracker) Record(evt *Event) {
 			log.Trace("tracker: cleared active pane (non-active status)")
 		}
 	}
+
+	// Authoritative active-turn tracking for the frontend "working" badge.
+	// Hook "active" opens a turn; any terminal status closes it. Stuck keeps
+	// the turn open (the agent still claims to be working).
+	if !evt.AutoDetected {
+		switch evt.Status {
+		case StatusActive:
+			t.activeTurns[key] = evt
+		case StatusStuck:
+			// keep the turn open
+		default:
+			delete(t.activeTurns, key)
+		}
+	}
+
 	meta := t.sessionMeta[sessionKey]
 	if evt.Tool != "" {
 		meta.Tool = evt.Tool
@@ -265,6 +290,26 @@ func (t *Tracker) GetActivePaneEvents() []*Event {
 	return events
 }
 
+// ActiveTurns returns the events for panes with an in-progress hook-based
+// agent turn, pruning stale ones. The frontend rebuilds its "working" badge
+// state from this so a dropped "completed" WS frame self-heals on the next
+// periodic refresh.
+func (t *Tracker) ActiveTurns() []*Event {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now()
+	turns := make([]*Event, 0, len(t.activeTurns))
+	for key, evt := range t.activeTurns {
+		if now.Sub(evt.Timestamp) > StaleTimeout {
+			delete(t.activeTurns, key)
+			continue
+		}
+		turns = append(turns, evt)
+	}
+	return turns
+}
+
 // GetAll returns all currently tracked (non-completed) events, pruning stale ones.
 func (t *Tracker) GetAll() []*Event {
 	t.mu.Lock()
@@ -295,6 +340,7 @@ func (t *Tracker) Clear(host, session string, window int, pane string) {
 func (t *Tracker) ClearAll() {
 	t.mu.Lock()
 	t.events = make(map[PaneKey]*Event)
+	t.activeTurns = make(map[PaneKey]*Event)
 	t.mu.Unlock()
 }
 

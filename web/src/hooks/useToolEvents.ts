@@ -25,7 +25,18 @@ export function useToolEvents() {
   // Fetch initial state
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/tool-events')
+      const [res, turnsRes] = await Promise.all([
+        fetch('/api/tool-events'),
+        fetch('/api/active-turns'),
+      ])
+      // Reconcile turn tracking against the server's authoritative set so a
+      // dropped "completed" WebSocket frame can't leave the badge stuck on
+      // "working". The server is reliable here: notify posts over HTTP.
+      if (turnsRes.ok) {
+        const turns: { host?: string; session: string }[] = await turnsRes.json() || []
+        const keys = turns.map(t => (t.host ? `${t.host}/${t.session}` : t.session))
+        setActiveSessions(new Set(keys))
+      }
       if (res.ok) {
         const serverData: ToolEvent[] = await res.json() || []
         setEvents(prev => {
