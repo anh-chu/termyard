@@ -484,7 +484,7 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 // stateless helper: it does not persist anything. Returns ErrDisabled when the
 // namer is off and an error on any network/parse failure; callers keep the
 // existing name on error.
-func (m *Manager) GenerateGroupName(members []string, current string) (string, error) {
+func (m *Manager) GenerateGroupName(members []namer.GroupMember, current string) (string, error) {
 	m.mu.RLock()
 	n := m.namer
 	m.mu.RUnlock()

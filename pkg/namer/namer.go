@@ -36,12 +36,21 @@ type Context struct {
 	Kind       Kind
 	Workdir    string
 	Branch     string
-	Agent      string   // agent type, e.g. "claude" (agent kind only)
-	UserPrompt string   // first user message (agent kind only)
-	AgentMsg   string   // latest agent message (agent kind only)
-	Commands   []string // recent shell commands (shell kind only)
-	Members    []string // member session labels (group kind only)
-	Current    string   // existing display name for context; the system prompt decides keep vs rename
+	Agent      string        // agent type, e.g. "claude" (agent kind only)
+	UserPrompt string        // first user message (agent kind only)
+	AgentMsg   string        // latest agent message (agent kind only)
+	Commands   []string      // recent shell commands (shell kind only)
+	Members    []GroupMember // member sessions (group kind only)
+	Current    string        // existing display name for context; the system prompt decides keep vs rename
+}
+
+// GroupMember carries the current per-session signal the group namer reasons
+// over: its label plus whatever metadata exists for that session.
+type GroupMember struct {
+	Label   string `json:"label"`   // display name or tmux name
+	Agent   string `json:"agent"`   // agent type, e.g. "claude"
+	Project string `json:"project"` // project path
+	Prompt  string `json:"prompt"`  // user prompt or prompt preview
 }
 
 // Config holds the endpoint settings. Endpoint + Model must be non-empty for
@@ -313,13 +322,23 @@ func buildUserPrompt(nc Context) string {
 		if len(nc.Members) > 0 {
 			b.WriteString("Sessions in this group:\n")
 			for _, m := range nc.Members {
-				m = strings.TrimSpace(m)
-				if m != "" {
-					fmt.Fprintf(&b, "  %s\n", truncate(m, 120))
+				label := strings.TrimSpace(m.Label)
+				if label == "" {
+					continue
+				}
+				fmt.Fprintf(&b, "  - %s\n", truncate(label, 120))
+				if a := strings.TrimSpace(m.Agent); a != "" {
+					fmt.Fprintf(&b, "      agent: %s\n", a)
+				}
+				if p := strings.TrimSpace(m.Project); p != "" {
+					fmt.Fprintf(&b, "      project: %s\n", truncate(p, 120))
+				}
+				if pr := strings.TrimSpace(m.Prompt); pr != "" {
+					fmt.Fprintf(&b, "      task: %s\n", truncate(pr, 200))
 				}
 			}
 		}
-		b.WriteString("\nName this group by the shared theme of its sessions.")
+		b.WriteString("\nName this group by what its sessions have in common. If they share a project path, agent, or task, make that commonality the name. Fall back to the broadest shared theme only when there is no obvious common attribute.")
 		return b.String()
 	}
 	b.WriteString("\nName this session.")

@@ -512,7 +512,14 @@ export function Sidebar({
   }
 
   const aiNameGroup = async (groupId: string, sessions: Session[], current?: string) => {
-    const members = sessions.map(sessionLabel).filter(Boolean)
+    const members = sessions
+      .map(s => ({
+        label: sessionLabel(s),
+        agent: s.agent_type || '',
+        project: s.project_path || '',
+        prompt: (s.user_prompt || s.prompt_preview || '').trim(),
+      }))
+      .filter(m => m.label)
     if (members.length === 0) return
     setAiNamingGroupId(groupId)
     try {

@@ -36,6 +36,7 @@ import (
 	"github.com/ekristen/guppi/pkg/common"
 	"github.com/ekristen/guppi/pkg/git"
 	"github.com/ekristen/guppi/pkg/identity"
+	"github.com/ekristen/guppi/pkg/namer"
 	"github.com/ekristen/guppi/pkg/peer"
 	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
@@ -816,8 +817,8 @@ func Run(ctx context.Context, opts *Options) error {
 			// the client persists it.
 			r.Post("/group/name", func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
-					Members []string `json:"members"`
-					Current string   `json:"current,omitempty"`
+					Members []namer.GroupMember `json:"members"`
+					Current string              `json:"current,omitempty"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Members) == 0 {
 					http.Error(w, "members is required", http.StatusBadRequest)
