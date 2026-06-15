@@ -1587,9 +1587,24 @@ export function Sidebar({
                       )}
                       title={active ? 'running' : 'idle'}
                     />
-                    <span className="text-[12px] font-medium tracking-tight shrink-0 text-mute">
-                      {sessionLabel(session)}
-                    </span>
+                    {renamingSession?.key === sk ? (
+                      <input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') submitRename()
+                          if (e.key === 'Escape') setRenamingSession(null)
+                        }}
+                        onBlur={submitRename}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex-1 text-sm text-ink bg-surface-elevated border border-primary rounded-sm px-1.5 py-0.5 outline-none font-sans font-medium"
+                      />
+                    ) : (
+                      <span className="text-[12px] font-medium tracking-tight shrink-0 text-mute">
+                        {sessionLabel(session)}
+                      </span>
+                    )}
                     {cmdLabel && (
                       <span
                         className="min-w-0 flex-1 truncate text-[11px] text-mute/50 font-mono"
