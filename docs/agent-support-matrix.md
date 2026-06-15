@@ -2,31 +2,31 @@
 
 ## Support Tiers
 
-| Agent | Support Level | Detection | Waiting Detection | Latency |
-|-------|--------------|-----------|-------------------|---------|
-| **Claude Code** | **Full (Native)** | Hook-based | Native hooks | <1-2s |
-| **OpenCode** | **Full (Native)** | Plugin-based hooks | Native hooks | <1-2s |
-| **GitHub Copilot CLI** | **Partial (Hybrid)** | Hooks + process tree | Silence monitor + inactivity promoter | 10-30s |
-| **Codex** | **Partial (Hybrid)** | Hooks + process tree | Silence monitor + inactivity promoter | 10-30s |
+| Agent                  | Support Level        | Detection            | Waiting Detection                     | Latency |
+| ---------------------- | -------------------- | -------------------- | ------------------------------------- | ------- |
+| **Claude Code**        | **Full (Native)**    | Hook-based           | Native hooks                          | <1-2s   |
+| **OpenCode**           | **Full (Native)**    | Plugin-based hooks   | Native hooks                          | <1-2s   |
+| **GitHub Copilot CLI** | **Partial (Hybrid)** | Hooks + process tree | Silence monitor + inactivity promoter | 10-30s  |
+| **Codex**              | **Partial (Hybrid)** | Hooks + process tree | Silence monitor + inactivity promoter | 10-30s  |
 
 ## Feature Breakdown
 
-| Feature | Claude | OpenCode | Copilot | Codex |
-|---------|--------|----------|---------|-------|
-| Auto-detection (process tree) | Yes | Yes | Yes | Yes |
-| Hook-based activity tracking | Yes | Yes | Yes | Limited (turn-complete only) |
-| Native waiting state | Yes | Yes | No | No |
-| Tool use events | Yes | Yes | Yes | No |
-| Thinking/working events | Yes | Yes | Yes | No |
-| Permission prompt detection | Native | Native | Silence-based (~10s) | Silence-based (~10s) |
-| Completion events | Native | Native | Native | Native |
-| Error events | No | Native | Native | No |
-| Push notifications on waiting | Instant | Instant | Delayed (10-30s) | Delayed (10-30s) |
-| Auto setup (`guppi agent-setup`) | Yes | Yes | Yes | Yes |
+| Feature                             | Claude  | OpenCode | Copilot              | Codex                        |
+| ----------------------------------- | ------- | -------- | -------------------- | ---------------------------- |
+| Auto-detection (process tree)       | Yes     | Yes      | Yes                  | Yes                          |
+| Hook-based activity tracking        | Yes     | Yes      | Yes                  | Limited (turn-complete only) |
+| Native waiting state                | Yes     | Yes      | No                   | No                           |
+| Tool use events                     | Yes     | Yes      | Yes                  | No                           |
+| Thinking/working events             | Yes     | Yes      | Yes                  | No                           |
+| Permission prompt detection         | Native  | Native   | Silence-based (~10s) | Silence-based (~10s)         |
+| Completion events                   | Native  | Native   | Native               | Native                       |
+| Error events                        | No      | Native   | Native               | No                           |
+| Push notifications on waiting       | Instant | Instant  | Delayed (10-30s)     | Delayed (10-30s)             |
+| Auto setup (`termyard agent-setup`) | Yes     | Yes      | Yes                  | Yes                          |
 
 ## Detection Layers
 
-1. **Hook-based** (<1-2s) — Agent calls `guppi notify` via configured hooks, which spawns a CLI process, delivers via Unix socket, and broadcasts over WebSocket. Claude and OpenCode get full granular events including explicit "waiting" states.
+1. **Hook-based** (<1-2s) — Agent calls `termyard notify` via configured hooks, which spawns a CLI process, delivers via Unix socket, and broadcasts over WebSocket. Claude and OpenCode get full granular events including explicit "waiting" states.
 2. **Process tree scanning** (~5s) — Scans tmux panes every 5s, reads `/proc/<pid>/cmdline` to detect agent processes. Works for all agents as a fallback.
 3. **Silence monitor** (~10-20s) — For non-native-waiting agents. After 10s of silence, runs `tmux capture-pane` and checks for approval prompts (`(y/n)`, `allow/deny`, etc.). Limited to 2 checks per silence period.
 4. **Inactivity promoter** (~30s) — Last-resort fallback. If no activity for 30s, generates synthetic "waiting" event for Copilot/Codex.
@@ -34,7 +34,7 @@
 
 ## Why Claude Has Best Support
 
-Claude Code has native hook support for every lifecycle event — `PreToolUse`, `PostToolUse`, `Notification` (permission prompts, input dialogs), and `Stop`. This means guppi knows within seconds when Claude is thinking, using a tool, waiting for permission, or done. No polling, no guessing.
+Claude Code has native hook support for every lifecycle event — `PreToolUse`, `PostToolUse`, `Notification` (permission prompts, input dialogs), and `Stop`. This means termyard knows within seconds when Claude is thinking, using a tool, waiting for permission, or done. No polling, no guessing.
 
 ## Why OpenCode Is Close Behind
 
@@ -42,7 +42,7 @@ OpenCode has a JavaScript plugin system that fires events for `permission.asked`
 
 ## How We Support Other Agents
 
-Copilot and Codex lack native "waiting" hooks, so guppi uses a hybrid approach:
+Copilot and Codex lack native "waiting" hooks, so termyard uses a hybrid approach:
 
 - **Copilot** has hooks for `sessionStart/End`, `preToolUse`, `postToolUse`, and `userPromptSubmitted` — good activity tracking, but waiting detection relies on silence monitoring and capture-pane prompt parsing.
 - **Codex** only fires a single `agent-turn-complete` hook, so it has the least granular hook coverage. Waiting and activity detection rely heavily on process tree scanning and silence monitoring.

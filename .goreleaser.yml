@@ -1,8 +1,9 @@
 version: 2
+project_name: termyard
 release:
   github:
     owner: anh-chu
-    name: guppi
+    name: termyard
   draft: false
   # Mark nightly-* tags as GitHub prereleases; v* tags become stable releases.
   prerelease: auto
@@ -11,7 +12,7 @@ before:
   hooks:
     - /usr/bin/make frontend
 builds:
-  - id: guppi
+  - id: termyard
     goos:
       - linux
       - darwin
@@ -32,9 +33,9 @@ builds:
       - -X '{{ .ModulePath }}/pkg/common.COMMIT={{ .Commit }}'
     mod_timestamp: "{{ .CommitTimestamp }}"
 archives:
-  - id: guppi
+  - id: termyard
     builds:
-      - guppi
+      - termyard
     name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ .Arm }}"
 checksum:
   name_template: "checksums.txt"

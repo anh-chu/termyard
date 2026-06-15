@@ -7,9 +7,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/sessionattrs"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/sessionattrs"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 // Snapshotter periodically persists manifest state.

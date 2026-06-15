@@ -8,7 +8,7 @@ import (
 	wp "github.com/SherClockHolmes/webpush-go"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 // PushPayload is the JSON sent to the service worker
@@ -100,7 +100,7 @@ func (s *Sender) sendAll(evt *toolevents.Event) {
 
 	for _, sub := range subs {
 		resp, err := wp.SendNotification(data, sub, &wp.Options{
-			Subscriber:      "mailto:guppi@localhost",
+			Subscriber:      "mailto:termyard@localhost",
 			VAPIDPublicKey:  s.keys.PublicKey,
 			VAPIDPrivateKey: s.keys.PrivateKey,
 			TTL:             30,

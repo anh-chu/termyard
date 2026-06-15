@@ -71,7 +71,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     const urlKey = getViewFromPath().sessionKey
     if (!urlKey) return null
     try {
-      const stored = localStorage.getItem('guppi:pane-tree')
+      const stored = localStorage.getItem('termyard:pane-tree')
       if (stored) {
         return JSON.parse(stored) as PaneTree  // always restore full split
       }
@@ -82,8 +82,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     const urlKey = getViewFromPath().sessionKey
     if (!urlKey) return null
     try {
-      const stored = localStorage.getItem('guppi:pane-tree')
-      const storedActiveKey = localStorage.getItem('guppi:active-key')
+      const stored = localStorage.getItem('termyard:pane-tree')
+      const storedActiveKey = localStorage.getItem('termyard:active-key')
       if (stored && storedActiveKey) {
         const tree = JSON.parse(stored) as PaneTree
         if (findLeaf(tree, urlKey) && findLeaf(tree, storedActiveKey)) {
@@ -97,7 +97,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     const urlKey = getViewFromPath().sessionKey
     if (!urlKey) return null
     try {
-      const stored = localStorage.getItem('guppi:pane-tree')
+      const stored = localStorage.getItem('termyard:pane-tree')
       if (stored) {
         const tree = JSON.parse(stored) as PaneTree
         // If URL session is NOT in the stored split tree, it was a singleView
@@ -108,33 +108,33 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   })
   const [savedGroups, setSavedGroups] = useState<LayoutGroup[]>(() => {
     try {
-      const stored = localStorage.getItem('guppi:saved-groups')
+      const stored = localStorage.getItem('termyard:saved-groups')
       if (stored) return JSON.parse(stored)
     } catch {}
     return []
   })
   const [activeGroupId, setActiveGroupId] = useState<string>(() => {
     try {
-      const stored = localStorage.getItem('guppi:active-group-id')
+      const stored = localStorage.getItem('termyard:active-group-id')
       if (stored) return stored
     } catch {}
     return Math.random().toString(36).slice(2)
   })
   const [activeGroupName, setActiveGroupName] = useState<string>(() => {
-    try { return localStorage.getItem('guppi:active-group-name') || '' } catch { return '' }
+    try { return localStorage.getItem('termyard:active-group-name') || '' } catch { return '' }
   })
   const [groupOrder, setGroupOrder] = useState<string[]>(() => {
     try {
-      const stored = localStorage.getItem('guppi:group-order')
+      const stored = localStorage.getItem('termyard:group-order')
       if (stored) {
         const parsed = JSON.parse(stored)
         if (Array.isArray(parsed) && parsed.length > 0) return parsed
       }
     } catch {}
-    // Seed from existing group IDs (migration / first run)
+    // Seed from existing group IDs (first run)
     try {
-      const activeId = localStorage.getItem('guppi:active-group-id')
-      const savedStr = localStorage.getItem('guppi:saved-groups')
+      const activeId = localStorage.getItem('termyard:active-group-id')
+      const savedStr = localStorage.getItem('termyard:saved-groups')
       const saved: LayoutGroup[] = savedStr ? JSON.parse(savedStr) : []
       const ids = [activeId, ...saved.map(g => g.id)].filter(Boolean) as string[]
       return Array.from(new Set(ids))
@@ -150,18 +150,18 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const [newSessionModalOpen, setNewSessionModalOpen] = useState(false)
   const terminalContainerRef = useRef<HTMLDivElement>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return localStorage.getItem('guppi:sidebar-collapsed') === 'true' } catch { return false }
+    try { return localStorage.getItem('termyard:sidebar-collapsed') === 'true' } catch { return false }
   })
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
-      const v = parseInt(localStorage.getItem('guppi:sidebar-width') || '', 10)
+      const v = parseInt(localStorage.getItem('termyard:sidebar-width') || '', 10)
       if (!Number.isNaN(v)) return Math.min(560, Math.max(200, v))
     } catch {}
     return 288
   })
   const handleSidebarWidth = useCallback((w: number) => {
     setSidebarWidth(w)
-    try { localStorage.setItem('guppi:sidebar-width', String(w)) } catch {}
+    try { localStorage.setItem('termyard:sidebar-width', String(w)) } catch {}
   }, [])
   const [terminalFullscreen, setTerminalFullscreen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -228,18 +228,18 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   // Persist sidebar state across reloads. Per-device — NOT synced.
   useEffect(() => {
-    localStorage.setItem('guppi:sidebar-collapsed', String(sidebarCollapsed))
+    localStorage.setItem('termyard:sidebar-collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
 
   // Persist pane tree across reloads. Per-device — NOT synced.
   useEffect(() => {
     try {
       if (paneTree) {
-        localStorage.setItem('guppi:pane-tree', JSON.stringify(paneTree))
-        localStorage.setItem('guppi:active-key', activeKey || '')
+        localStorage.setItem('termyard:pane-tree', JSON.stringify(paneTree))
+        localStorage.setItem('termyard:active-key', activeKey || '')
       } else {
-        localStorage.removeItem('guppi:pane-tree')
-        localStorage.removeItem('guppi:active-key')
+        localStorage.removeItem('termyard:pane-tree')
+        localStorage.removeItem('termyard:active-key')
       }
     } catch {}
   }, [paneTree, activeKey])
@@ -247,10 +247,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   // Persist saved groups across reloads. Per-device — NOT synced.
   useEffect(() => {
     try {
-      localStorage.setItem('guppi:saved-groups', JSON.stringify(savedGroups))
-      localStorage.setItem('guppi:active-group-id', activeGroupId)
-      localStorage.setItem('guppi:active-group-name', activeGroupName)
-      localStorage.setItem('guppi:group-order', JSON.stringify(groupOrder))
+      localStorage.setItem('termyard:saved-groups', JSON.stringify(savedGroups))
+      localStorage.setItem('termyard:active-group-id', activeGroupId)
+      localStorage.setItem('termyard:active-group-name', activeGroupName)
+      localStorage.setItem('termyard:group-order', JSON.stringify(groupOrder))
     } catch {}
   }, [savedGroups, activeGroupId, activeGroupName, groupOrder])
 
@@ -940,7 +940,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     const needsAttention = allToolEvents.some(
       evt => evt.status === 'waiting' || evt.status === 'error' || evt.status === 'stuck',
     )
-    document.title = needsAttention ? 'Guppi - Attention needed' : 'Guppi'
+    document.title = needsAttention ? 'Termyard - Attention needed' : 'Termyard'
   }, [allToolEvents])
 
   // Exit fullscreen when navigating away from terminal
@@ -1074,7 +1074,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
               if (y > h * 0.75) return 'bottom'
               return 'center'
             }
-            if (dt.types.includes('application/x-guppi-new-session')) {
+            if (dt.types.includes('application/x-termyard-new-session')) {
               e.preventDefault()
               e.dataTransfer.dropEffect = 'copy'
               const val = { type: 'new-session' as const, zone: getZone() }
@@ -1082,7 +1082,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
               setMainDragOver(val)
               return
             }
-            if (dt.types.includes('text/plain') && !dt.types.includes('application/x-guppi-pane')) {
+            if (dt.types.includes('text/plain') && !dt.types.includes('application/x-termyard-pane')) {
               e.preventDefault()
               const val = { type: 'sidebar' as const, zone: getZone() }
               mainDragOverRef.current = val
@@ -1100,12 +1100,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             const zone = mainDragOverRef.current?.zone ?? 'center'
             mainDragOverRef.current = null
             setMainDragOver(null)
-            if (e.dataTransfer.types.includes('application/x-guppi-new-session')) {
+            if (e.dataTransfer.types.includes('application/x-termyard-new-session')) {
               handleDropNewSession('', zone)
               return
             }
             const sessKey = e.dataTransfer.getData('text/plain')
-            if (sessKey && !e.dataTransfer.types.includes('application/x-guppi-pane')) {
+            if (sessKey && !e.dataTransfer.types.includes('application/x-termyard-pane')) {
               handleDropSession(sessKey, singleView ?? '', zone)
             }
           }}
@@ -1249,8 +1249,8 @@ export default function App() {
   // Apply last-used theme immediately (before auth) so login page is themed
   useEffect(() => {
     try {
-      const cached = localStorage.getItem('guppi:theme')
-      const cachedCustom = localStorage.getItem('guppi:custom-theme')
+      const cached = localStorage.getItem('termyard:theme')
+      const cachedCustom = localStorage.getItem('termyard:custom-theme')
       if (cached) {
         applyTheme(cached, cachedCustom ? JSON.parse(cachedCustom) : undefined)
       }
@@ -1262,8 +1262,8 @@ export default function App() {
     if (prefsProvider.loaded) {
       applyTheme(prefsProvider.prefs.theme, prefsProvider.prefs.custom_theme)
       try {
-        localStorage.setItem('guppi:theme', prefsProvider.prefs.theme)
-        localStorage.setItem('guppi:custom-theme', JSON.stringify(prefsProvider.prefs.custom_theme || {}))
+        localStorage.setItem('termyard:theme', prefsProvider.prefs.theme)
+        localStorage.setItem('termyard:custom-theme', JSON.stringify(prefsProvider.prefs.custom_theme || {}))
       } catch {}
     }
   }, [prefsProvider.loaded, prefsProvider.prefs.theme, prefsProvider.prefs.custom_theme])
@@ -1290,7 +1290,7 @@ export default function App() {
       <PreferencesContext.Provider value={prefsProvider}>
         <Setup fullPage onComplete={() => {
           setShowOnboarding(false)
-          try { localStorage.setItem('guppi:setup-seen', 'true') } catch {}
+          try { localStorage.setItem('termyard:setup-seen', 'true') } catch {}
         }} />
       </PreferencesContext.Provider>
     )

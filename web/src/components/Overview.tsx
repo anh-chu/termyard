@@ -24,7 +24,7 @@ interface SystemStats {
   arch: string
   cpus: number
   goroutines: number
-  guppi_mem_mb: number
+  termyard_mem_mb: number
   load?: { '1m': number; '5m': number; '15m': number }
   uptime_seconds?: number
   memory?: { total_mb: number; used_mb: number; available_mb: number; percent: number }

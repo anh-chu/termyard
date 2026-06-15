@@ -8,7 +8,7 @@ sidebar.
 
 - **Cron expressions** for schedule spec (standard 5-field).
 - **Always spawn** a new uniquely-named session per fire.
-- **Persist** schedules to `~/.config/guppi/schedules.json`.
+- **Persist** schedules to `~/.config/termyard/schedules.json`.
 - Spawned sessions tagged with owning **ScheduleID** so frontend can group them.
 
 ## Dependency
@@ -25,7 +25,7 @@ scheduler:
 
 ### `pkg/scheduler/store.go` — JSON-persisted registry
 
-Mirror `preferences.Store` (mutex + `~/.config/guppi/` + load/save).
+Mirror `preferences.Store` (mutex + `~/.config/termyard/` + load/save).
 
 ```go
 type Job struct {

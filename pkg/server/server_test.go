@@ -8,9 +8,9 @@ func TestEnsureUniqueSessionName(t *testing.T) {
 		existing []string
 		want     string
 	}{
-		{name: "codex-guppi", existing: nil, want: "codex-guppi"},
-		{name: "codex-guppi", existing: []string{"codex-guppi"}, want: "codex-guppi-2"},
-		{name: "codex-guppi", existing: []string{"codex-guppi", "codex-guppi-2"}, want: "codex-guppi-3"},
+		{name: "codex-termyard", existing: nil, want: "codex-termyard"},
+		{name: "codex-termyard", existing: []string{"codex-termyard"}, want: "codex-termyard-2"},
+		{name: "codex-termyard", existing: []string{"codex-termyard", "codex-termyard-2"}, want: "codex-termyard-3"},
 	}
 
 	for _, tt := range tests {

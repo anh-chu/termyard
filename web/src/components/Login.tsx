@@ -41,9 +41,9 @@ export function Login({ mode, error, onSubmit }: LoginProps) {
       <div className="w-full max-w-sm p-10 bg-surface border border-hairline rounded-xl">
         <div className="text-center mb-10">
           <div className="flex justify-center mb-6">
-            <img src="/favicon.svg" alt="guppi" width="48" height="48" className="rounded-lg border border-hairline" />
+            <img src="/favicon.svg" alt="termyard" width="48" height="48" className="rounded-lg border border-hairline" />
           </div>
-          <h1 className="text-2xl font-bold text-ink tracking-tight uppercase tracking-[0.2em]">GUPPI</h1>
+          <h1 className="text-2xl font-bold text-ink tracking-tight uppercase tracking-[0.2em]">Termyard</h1>
           <div className="flex flex-col gap-1 mt-4">
             <p className="text-xs font-bold text-mute/60 uppercase tracking-widest leading-relaxed">
               All tmux sessions

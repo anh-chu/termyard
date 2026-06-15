@@ -6,13 +6,13 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/activity"
-	"github.com/ekristen/guppi/pkg/common"
-	"github.com/ekristen/guppi/pkg/identity"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/stats"
-	"github.com/ekristen/guppi/pkg/tmux"
-	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/activity"
+	"github.com/anh-chu/termyard/pkg/common"
+	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/stats"
+	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 const (

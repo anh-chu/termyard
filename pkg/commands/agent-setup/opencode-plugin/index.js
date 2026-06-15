@@ -1,4 +1,4 @@
-const guppi = "__GUPPI_BIN__";
+const termyard = "__TERMYARD_BIN__";
 const sessions = new Map();
 
 function sessionState(sessionID) {
@@ -15,10 +15,10 @@ function compactText(value, maxLen = 240) {
   return text.length > maxLen ? `${text.slice(0, maxLen - 1)}…` : text;
 }
 
-// fire sends args to guppi notify with no stdin.
+// fire sends args to termyard notify with no stdin.
 function fire(args) {
   try {
-    const proc = Bun.spawn([guppi, 'notify', ...args], {
+    const proc = Bun.spawn([termyard, 'notify', ...args], {
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',
@@ -27,12 +27,12 @@ function fire(args) {
   } catch {}
 }
 
-// fireStdin sends a JSON payload to guppi notify via stdin.
+// fireStdin sends a JSON payload to termyard notify via stdin.
 // This lets the Go side do activity-label mapping (toolNameToActivity),
 // keeping the mapping in one place rather than duplicating it here.
 function fireStdin(payload) {
   try {
-    const proc = Bun.spawn([guppi, 'notify', '-t', 'opencode', '--stdin'], {
+    const proc = Bun.spawn([termyard, 'notify', '-t', 'opencode', '--stdin'], {
       stdin: Buffer.from(payload),
       stdout: 'ignore',
       stderr: 'ignore',
@@ -46,8 +46,8 @@ function notify(status, message, extraArgs = []) {
 }
 
 export default {
-  id: 'guppi',
-  server: async function GuppiPlugin() {
+  id: 'termyard',
+  server: async function TermyardPlugin() {
     return {
       'permission.ask': async () => {
         notify('waiting', 'Permission needed');

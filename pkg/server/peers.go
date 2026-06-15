@@ -12,9 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/common"
-	"github.com/ekristen/guppi/pkg/identity"
-	"github.com/ekristen/guppi/pkg/peer"
+	"github.com/anh-chu/termyard/pkg/common"
+	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/peer"
 )
 
 type peersGetResponse struct {
@@ -253,5 +253,3 @@ func findSnapshot(snaps []peer.LinkSnapshot, fp string) *peer.LinkSnapshot {
 	}
 	return nil
 }
-
-

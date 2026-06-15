@@ -8,9 +8,9 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/peer"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/peer"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 // CreateSessionReq reuses the session-spawn contract across HTTP and cron.

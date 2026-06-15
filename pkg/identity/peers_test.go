@@ -21,7 +21,7 @@ func TestPeerStoreMigratesLegacyFields(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	writeLegacyPeers(t, filepath.Join(tmpHome, ".config", "guppi"), `{
+	writeLegacyPeers(t, filepath.Join(tmpHome, ".config", "termyard"), `{
 		"peers": [
 			{"name":"old","public_key":"pk","paired_at":"2020-01-01T00:00:00Z","tls_cert_pem":"junk"}
 		]
@@ -43,7 +43,7 @@ func TestPeerStoreMigratesLegacyFields(t *testing.T) {
 	}
 
 	// Verify the file was re-saved with the new fields.
-	raw, err := os.ReadFile(filepath.Join(tmpHome, ".config", "guppi", "peers.json"))
+	raw, err := os.ReadFile(filepath.Join(tmpHome, ".config", "termyard", "peers.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

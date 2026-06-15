@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ekristen/guppi/pkg/activity"
-	"github.com/ekristen/guppi/pkg/identity"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/activity"
+	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 // makeTestDeps builds a SessionDeps + supervisor wired to an isolated HOME so
@@ -19,7 +19,7 @@ func makeTestDeps(t *testing.T) (SessionDeps, *LinkSupervisor, *identity.PeerSto
 	t.Helper()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
-	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "guppi"), 0o700)
+	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "termyard"), 0o700)
 
 	id, err := identity.Generate("test-node")
 	if err != nil {
@@ -155,7 +155,7 @@ func TestGetHostsForPeerOnlyLocal(t *testing.T) {
 	_, _, _ = makeTestDeps(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
-	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "guppi"), 0o700)
+	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "termyard"), 0o700)
 	id, _ := identity.Generate("local-node")
 	ps, _ := identity.NewPeerStore()
 	mgr := NewManager(id, ps, state.NewManager(nil))

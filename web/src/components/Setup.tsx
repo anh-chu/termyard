@@ -101,7 +101,7 @@ export function Setup({ onComplete, fullPage = false }: { onComplete: () => void
           </h1>
           <p className="text-[13px] font-medium text-mute/60 mt-4 leading-relaxed">
             {step === 'agents'
-              ? 'Configure your agents to report status to GUPPI'
+              ? 'Configure your agents to report status to Termyard'
               : 'Pick a theme and enable system notifications'}
           </p>
         </div>

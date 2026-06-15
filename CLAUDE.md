@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Guppi is a web dashboard for monitoring and interacting with coding agents running in tmux sessions. Go backend + React/Vite frontend embedded in a single binary. The binary name is `guppi`.
+Termyard is a web dashboard for monitoring and interacting with coding agents running in tmux sessions. Go backend + React/Vite frontend embedded in a single binary. The binary name is `termyard`.
 
 ## Quick Reference
 
@@ -25,7 +25,7 @@ Guppi is a web dashboard for monitoring and interacting with coding agents runni
 - **WebSocket bridge:** Each browser tab gets its own PTY-to-WebSocket bridge
 - **Embedded frontend:** Vite builds to `pkg/server/dist/`, Go embeds via `//go:embed`
 - **Multi-host:** Star topology with hub/peer model using ed25519 identity and mTLS
-- **Agent monitoring:** Coding agents push lifecycle events to `guppi notify` via per-agent hooks; the server tracks state and broadcasts it to the frontend over WebSocket
+- **Agent monitoring:** Coding agents push lifecycle events to `termyard notify` via per-agent hooks; the server tracks state and broadcasts it to the frontend over WebSocket
 
 ## Project Structure
 
@@ -34,7 +34,7 @@ main.go                  # Entry point, urfave/cli v3
 pkg/
   commands/              # CLI commands (server, notify, pair, peers, agent-setup, install)
     agent-setup/         # Per-agent hook installers + embedded plugin/extension sources
-    notify/              # `guppi notify` — receives agent hook events, posts to server
+    notify/              # `termyard notify` — receives agent hook events, posts to server
   server/                # Chi HTTP server + embedded frontend; POST /api/tool-event
   ws/                    # WebSocket hub (broadcast) + PTY terminal bridge
   state/                 # Central state tree with diff-based broadcasting
@@ -64,13 +64,13 @@ scripts/release.sh       # Single source of truth for version bumps
 
 ### Go
 
-- **Module:** `github.com/ekristen/guppi`
+- **Module:** `github.com/anh-chu/termyard`
 - **CLI framework:** urfave/cli v3
 - **Command registration:** Commands register via `init()` calling `common.RegisterCommand()`, imported as blank imports in `main.go`
 - **Logging:** logrus (`log.WithField(...)`). Set verbosity with `LOG_LEVEL=trace|debug|info`.
 - **HTTP router:** chi v5
 - **WebSockets:** gorilla/websocket
-- **Environment variables:** Prefixed with `GUPPI_` (e.g., `GUPPI_PORT`, `GUPPI_SOCKET`, `GUPPI_HUB`)
+- **Environment variables:** Prefixed with `TERMYARD_` (e.g., `TERMYARD_PORT`, `TERMYARD_SOCKET`, `TERMYARD_HUB`)
 - **Testing:** Standard `testing` package, table-driven tests with `t.Run()` subtests
 
 ### Frontend
@@ -83,13 +83,13 @@ scripts/release.sh       # Single source of truth for version bumps
 - **Dev proxy:** Vite proxies to `http://localhost:7654`
 - **Build output:** `../pkg/server/dist` (relative to `web/`)
 
-## Tool Events (the agent → guppi contract)
+## Tool Events (the agent → termyard contract)
 
-Agents report state by invoking `guppi notify`, which POSTs an `Event` to `POST /api/tool-event` (unauthenticated; auto-stamps host identity). Events drive the sidebar status badges.
+Agents report state by invoking `termyard notify`, which POSTs an `Event` to `POST /api/tool-event` (unauthenticated; auto-stamps host identity). Events drive the sidebar status badges.
 
 **Statuses:** `active` (working), `waiting` (needs user attention), `completed` (turn done), `error`, `stuck`.
 
-**`guppi notify` flags that carry session metadata:**
+**`termyard notify` flags that carry session metadata:**
 
 - `--user-prompt` — the user's first message; **set-once** server-side, and **the task label is derived from it.** There is **no `--task` flag** — it was removed in `18340d5`. Passing `--task` makes the _entire_ notify call fail with `exit 1` ("flag provided but not defined: -task") and silently drop the event. Do not reintroduce it in any agent extension.
 - `--agent-message` — the agent's last response; updated each turn.
@@ -109,12 +109,12 @@ Detection uses layered signals — see `docs/agent-detection.md` for the full pi
 
 ## Per-Agent Hook Mechanics
 
-Each agent has its own hook system. Sources live under `pkg/commands/agent-setup/` and are installed by `guppi agent-setup`. See `docs/agent-setup.md`.
+Each agent has its own hook system. Sources live under `pkg/commands/agent-setup/` and are installed by `termyard agent-setup`. See `docs/agent-setup.md`.
 
 - **Claude** — `hooks.json`. `UserPromptSubmit` → `user_prompt`; `Stop` parses the transcript JSONL for the last assistant message; `PreToolUse` → activity label.
 - **Codex** — `hooks.json` (separate file). Requires `hooks = true` under `[features]` in `config.toml` (off by default; agent-setup sets it).
-- **Pi** — TypeScript extension (`pi-extension/guppi.ts`), enabled in `~/.pi/agent/settings.json`. Pi compiles it via **jiti and caches the result** (`~/.pi/agent/cache/jiti/`). **The extension is loaded once at pi process startup** — editing it requires fully restarting the pi process (not just a new prompt) to take effect. The persistent `pane_pid` is the shell wrapper; the actual pi process is its child. Prompt is captured in `before_agent_start` (the only event carrying it); the agent message is recovered from `agent_end`'s `messages[]` array.
-- **OpenCode** — ESM plugin (`opencode-plugin/index.js`) written to `~/.config/opencode/plugins/guppi.js`, which OpenCode auto-loads at startup (the canonical local-files mechanism, no `opencode.json` registration). Export is the v1 `export default { id, server }` shape. agent-setup also cleans up the prior non-canonical install: the `node_modules/guppi` package and its `file://` entry in `opencode.json`.
+- **Pi** — TypeScript extension (`pi-extension/termyard.ts`), enabled in `~/.pi/agent/settings.json`. Pi compiles it via **jiti and caches the result** (`~/.pi/agent/cache/jiti/`). **The extension is loaded once at pi process startup** — editing it requires fully restarting the pi process (not just a new prompt) to take effect. The persistent `pane_pid` is the shell wrapper; the actual pi process is its child. Prompt is captured in `before_agent_start` (the only event carrying it); the agent message is recovered from `agent_end`'s `messages[]` array.
+- **OpenCode** — ESM plugin (`opencode-plugin/index.js`) written to `~/.config/opencode/plugins/termyard.js`, which OpenCode auto-loads at startup (the canonical local-files mechanism, no `opencode.json` registration). Export is the v1 `export default { id, server }` shape. agent-setup also cleans up the prior non-canonical install: the `node_modules/termyard` package and its `file://` entry in `opencode.json`.
 
 ## Multi-Host & Event Identity
 
@@ -134,5 +134,5 @@ Each agent has its own hook system. Sources live under `pkg/commands/agent-setup
 
 When an agent's status/metadata is wrong, capture what `notify` actually does rather than theorizing:
 
-1. `LOG_LEVEL=trace` on the server (systemd: drop-in `Environment=LOG_LEVEL=trace`, `daemon-reload`, restart) and watch `journalctl --user -u guppi -f` for `received request` / `recording tool event`.
+1. `LOG_LEVEL=trace` on the server (systemd: drop-in `Environment=LOG_LEVEL=trace`, `daemon-reload`, restart) and watch `journalctl --user -u termyard -f` for `received request` / `recording tool event`.
 2. If no events arrive, the failure is in the agent extension or `notify` itself — log the `spawnSync` result (`status`, `stderr`) from inside the extension. A non-zero exit with an "Incorrect Usage" stderr means a bad/removed flag (see the `--task` note above).

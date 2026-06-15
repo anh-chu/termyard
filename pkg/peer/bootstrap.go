@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ekristen/guppi/pkg/common"
+	"github.com/anh-chu/termyard/pkg/common"
 )
 
-// DefaultPort is guppi's default HTTP port (also peer port).
+// DefaultPort is termyard's default HTTP port (also peer port).
 const DefaultPort = "7654"
 
 // BootstrapRequest is what the dialer posts to /api/peers/bootstrap.
@@ -102,7 +102,7 @@ func SendBootstrap(ctx context.Context, addr string, req BootstrapRequest) (*Boo
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "guppi/"+common.VERSION)
+	httpReq.Header.Set("User-Agent", "termyard/"+common.VERSION)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {

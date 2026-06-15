@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/identity"
 )
 
 var wsUpgrader = websocket.Upgrader{

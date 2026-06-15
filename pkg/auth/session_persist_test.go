@@ -13,7 +13,7 @@ func TestSessionPersistence(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	// configDir() resolves to $HOME/.config/guppi
+	// configDir() resolves to $HOME/.config/termyard
 	sm := NewSessionManager(time.Hour)
 	token, err := sm.Create()
 	if err != nil {
@@ -21,7 +21,7 @@ func TestSessionPersistence(t *testing.T) {
 	}
 
 	// File should exist after Create.
-	path := filepath.Join(dir, ".config", "guppi", "sessions.json")
+	path := filepath.Join(dir, ".config", "termyard", "sessions.json")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("sessions file not written: %v", err)
 	}

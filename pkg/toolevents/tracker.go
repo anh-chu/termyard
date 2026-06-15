@@ -45,7 +45,7 @@ type Event struct {
 	AgentSessionID string    `json:"agent_session_id,omitempty"` // upstream agent session/thread id when available
 	Timestamp      time.Time `json:"timestamp"`
 	AutoDetected   bool      `json:"auto_detected,omitempty"` // true if detected via process tree (not hooks)
-	UserPrompt     string    `json:"user_prompt,omitempty"`    // first user message for this session (set once)
+	UserPrompt     string    `json:"user_prompt,omitempty"`   // first user message for this session (set once)
 	AgentMessage   string    `json:"agent_message,omitempty"` // last agent response message (updates each turn)
 }
 

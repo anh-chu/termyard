@@ -10,22 +10,22 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v3"
 
-	"github.com/ekristen/guppi/pkg/activity"
-	"github.com/ekristen/guppi/pkg/auth"
-	"github.com/ekristen/guppi/pkg/common"
-	"github.com/ekristen/guppi/pkg/identity"
-	"github.com/ekristen/guppi/pkg/namer"
-	"github.com/ekristen/guppi/pkg/peer"
-	"github.com/ekristen/guppi/pkg/portforward"
-	"github.com/ekristen/guppi/pkg/preferences"
-	"github.com/ekristen/guppi/pkg/recovery"
-	"github.com/ekristen/guppi/pkg/scheduler"
-	"github.com/ekristen/guppi/pkg/server"
-	"github.com/ekristen/guppi/pkg/sessionattrs"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/tmux"
-	"github.com/ekristen/guppi/pkg/toolevents"
-	"github.com/ekristen/guppi/pkg/webpush"
+	"github.com/anh-chu/termyard/pkg/activity"
+	"github.com/anh-chu/termyard/pkg/auth"
+	"github.com/anh-chu/termyard/pkg/common"
+	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/namer"
+	"github.com/anh-chu/termyard/pkg/peer"
+	"github.com/anh-chu/termyard/pkg/portforward"
+	"github.com/anh-chu/termyard/pkg/preferences"
+	"github.com/anh-chu/termyard/pkg/recovery"
+	"github.com/anh-chu/termyard/pkg/scheduler"
+	"github.com/anh-chu/termyard/pkg/server"
+	"github.com/anh-chu/termyard/pkg/sessionattrs"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/webpush"
 )
 
 func Execute(ctx context.Context, c *cli.Command) error {
@@ -301,40 +301,40 @@ func init() {
 			Name:    "port",
 			Aliases: []string{"p"},
 			Usage:   "HTTP server port",
-			Sources: cli.EnvVars("GUPPI_PORT"),
+			Sources: cli.EnvVars("TERMYARD_PORT"),
 			Value:   7654,
 		},
 		&cli.IntFlag{
 			Name:    "discovery-interval",
 			Usage:   "Session discovery interval in seconds",
-			Sources: cli.EnvVars("GUPPI_DISCOVERY_INTERVAL"),
+			Sources: cli.EnvVars("TERMYARD_DISCOVERY_INTERVAL"),
 			Value:   2,
 		},
 		&cli.BoolFlag{
 			Name:    "no-control-mode",
 			Usage:   "Disable tmux control mode (use polling only)",
-			Sources: cli.EnvVars("GUPPI_NO_CONTROL_MODE"),
+			Sources: cli.EnvVars("TERMYARD_NO_CONTROL_MODE"),
 		},
 		&cli.StringFlag{
 			Name:    "socket",
 			Usage:   "Unix socket path for local notify CLI (auto-detected if omitted)",
-			Sources: cli.EnvVars("GUPPI_SOCKET"),
+			Sources: cli.EnvVars("TERMYARD_SOCKET"),
 		},
 		&cli.BoolFlag{
 			Name:    "no-auth",
 			Usage:   "Disable authentication (not recommended for remote access)",
-			Sources: cli.EnvVars("GUPPI_NO_AUTH"),
+			Sources: cli.EnvVars("TERMYARD_NO_AUTH"),
 		},
 		&cli.BoolFlag{
 			Name:    "no-recovery",
 			Usage:   "Disable tmux crash recovery loops",
-			Sources: cli.EnvVars("GUPPI_NO_RECOVERY"),
+			Sources: cli.EnvVars("TERMYARD_NO_RECOVERY"),
 		},
 	}
 
 	cmd := &cli.Command{
 		Name:        "server",
-		Usage:       "start the guppi web server",
+		Usage:       "start the termyard web server",
 		Description: "starts the web dashboard for monitoring and interacting with tmux sessions",
 		Flags:       flags,
 		Action:      Execute,

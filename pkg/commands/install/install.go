@@ -11,13 +11,13 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/ekristen/guppi/pkg/common"
+	"github.com/anh-chu/termyard/pkg/common"
 )
 
 const systemdUnit = `[Unit]
-Description=Guppi - Web dashboard for tmux sessions
-Wants=guppi-tmux.service
-After=default.target guppi-tmux.service
+Description=Termyard - Web dashboard for tmux sessions
+Wants=termyard-tmux.service
+After=default.target termyard-tmux.service
 
 [Service]
 Type=simple
@@ -32,7 +32,7 @@ WantedBy=default.target
 `
 
 const tmuxServerUnit = `[Unit]
-Description=Guppi tmux server
+Description=Termyard tmux server
 After=default.target
 
 [Service]
@@ -52,7 +52,7 @@ const launchdPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.guppi.server</string>
+	<string>com.termyard.server</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>{{.BinaryPath}}</string>
@@ -63,9 +63,9 @@ const launchdPlist = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>KeepAlive</key>
 	<true/>
 	<key>StandardOutPath</key>
-	<string>{{.LogDir}}/guppi.stdout.log</string>
+	<string>{{.LogDir}}/termyard.stdout.log</string>
 	<key>StandardErrorPath</key>
-	<string>{{.LogDir}}/guppi.stderr.log</string>
+	<string>{{.LogDir}}/termyard.stderr.log</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
@@ -111,8 +111,8 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 	}
 
 	unitDir := filepath.Join(configDir, "systemd", "user")
-	unitPath := filepath.Join(unitDir, "guppi.service")
-	tmuxUnitPath := filepath.Join(unitDir, "guppi-tmux.service")
+	unitPath := filepath.Join(unitDir, "termyard.service")
+	tmuxUnitPath := filepath.Join(unitDir, "termyard-tmux.service")
 
 	if err := os.MkdirAll(unitDir, 0755); err != nil {
 		return fmt.Errorf("could not create systemd user directory: %w", err)
@@ -153,18 +153,18 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("systemctl daemon-reload failed: %w", err)
 	}
 
-	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "guppi-tmux.service").Run(); err != nil {
+	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "termyard-tmux.service").Run(); err != nil {
 		return fmt.Errorf("systemctl enable tmux failed: %w", err)
 	}
-	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "guppi.service").Run(); err != nil {
+	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "termyard.service").Run(); err != nil {
 		return fmt.Errorf("systemctl enable failed: %w", err)
 	}
 
 	fmt.Println("Service enabled and started (systemctl --user)")
 	fmt.Println()
-	fmt.Println("  Status:   systemctl --user status guppi guppi-tmux")
-	fmt.Println("  Logs:     journalctl --user -u guppi -f")
-	fmt.Println("  Restart:  systemctl --user restart guppi")
+	fmt.Println("  Status:   systemctl --user status termyard termyard-tmux")
+	fmt.Println("  Logs:     journalctl --user -u termyard -f")
+	fmt.Println("  Restart:  systemctl --user restart termyard")
 	fmt.Println("  Web UI:   https://localhost:7654")
 	return nil
 }
@@ -181,7 +181,7 @@ func installDarwin(ctx context.Context, c *cli.Command) error {
 	}
 
 	agentDir := filepath.Join(home, "Library", "LaunchAgents")
-	plistPath := filepath.Join(agentDir, "com.guppi.server.plist")
+	plistPath := filepath.Join(agentDir, "com.termyard.server.plist")
 	logDir := filepath.Join(home, "Library", "Logs")
 
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
@@ -218,9 +218,9 @@ func installDarwin(ctx context.Context, c *cli.Command) error {
 
 	fmt.Println("Service loaded and started (launchctl)")
 	fmt.Println()
-	fmt.Println("  Status:   launchctl list com.guppi.server")
-	fmt.Printf("  Logs:     tail -f %s/guppi.stderr.log\n", cfg.LogDir)
-	fmt.Printf("  Restart:  launchctl kickstart -k gui/$(id -u)/com.guppi.server\n")
+	fmt.Println("  Status:   launchctl list com.termyard.server")
+	fmt.Printf("  Logs:     tail -f %s/termyard.stderr.log\n", cfg.LogDir)
+	fmt.Printf("  Restart:  launchctl kickstart -k gui/$(id -u)/com.termyard.server\n")
 	fmt.Println("  Web UI:   https://localhost:7654")
 	return nil
 }
@@ -243,12 +243,12 @@ func uninstallLinux(ctx context.Context, c *cli.Command) error {
 	}
 
 	unitDir := filepath.Join(configDir, "systemd", "user")
-	unitPath := filepath.Join(unitDir, "guppi.service")
-	tmuxUnitPath := filepath.Join(unitDir, "guppi-tmux.service")
+	unitPath := filepath.Join(unitDir, "termyard.service")
+	tmuxUnitPath := filepath.Join(unitDir, "termyard-tmux.service")
 
 	// Disable and stop
-	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "guppi.service").Run()
-	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "guppi-tmux.service").Run()
+	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "termyard.service").Run()
+	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "termyard-tmux.service").Run()
 
 	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("could not remove unit file: %w", err)
@@ -271,7 +271,7 @@ func uninstallDarwin(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("could not determine home directory: %w", err)
 	}
 
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.guppi.server.plist")
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.termyard.server.plist")
 
 	// Unload the agent
 	_ = exec.CommandContext(ctx, "launchctl", "unload", "-w", plistPath).Run()
@@ -299,20 +299,20 @@ func uninstallExecute(ctx context.Context, c *cli.Command) error {
 func init() {
 	cmd := &cli.Command{
 		Name:  "install",
-		Usage: "install guppi as a user service for auto-start",
-		Description: `Install guppi to start automatically on login.
+		Usage: "install termyard as a user service for auto-start",
+		Description: `Install termyard to start automatically on login.
 
-On Linux, installs a systemd user unit (~/.config/systemd/user/guppi.service).
-On macOS, installs a launchd plist (~/Library/LaunchAgents/com.guppi.server.plist).
+On Linux, installs a systemd user unit (~/.config/systemd/user/termyard.service).
+On macOS, installs a launchd plist (~/Library/LaunchAgents/com.termyard.server.plist).
 
-Use "guppi install" to install and enable, "guppi uninstall" to remove.`,
+Use "termyard install" to install and enable, "termyard uninstall" to remove.`,
 		Action: installExecute,
 	}
 
 	uninstallCmd := &cli.Command{
 		Name:  "uninstall",
-		Usage: "remove guppi user service",
-		Description: `Remove the guppi auto-start service.
+		Usage: "remove termyard user service",
+		Description: `Remove the termyard auto-start service.
 
 On Linux, disables and removes the systemd user unit.
 On macOS, unloads and removes the launchd plist.`,

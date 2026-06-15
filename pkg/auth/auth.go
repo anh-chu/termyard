@@ -32,10 +32,10 @@ func configDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "guppi"), nil
+	return filepath.Join(home, ".config", "termyard"), nil
 }
 
-// NewPasswordStore creates a store backed by ~/.config/guppi/auth.json.
+// NewPasswordStore creates a store backed by ~/.config/termyard/auth.json.
 func NewPasswordStore() (*PasswordStore, error) {
 	dir, err := configDir()
 	if err != nil {
@@ -101,7 +101,7 @@ type SessionManager struct {
 }
 
 // NewSessionManager creates a session manager with the given TTL. Sessions are
-// persisted to ~/.config/guppi/sessions.json and reloaded on startup, with
+// persisted to ~/.config/termyard/sessions.json and reloaded on startup, with
 // already-expired entries pruned.
 func NewSessionManager(ttl time.Duration) *SessionManager {
 	sm := &SessionManager{
@@ -200,7 +200,7 @@ func (sm *SessionManager) Cleanup() {
 	sm.save()
 }
 
-const cookieName = "guppi_session"
+const cookieName = "termyard_session"
 
 // isUnixSocket returns true if the request arrived over a unix socket.
 func isUnixSocket(r *http.Request) bool {

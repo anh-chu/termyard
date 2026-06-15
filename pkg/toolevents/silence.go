@@ -275,4 +275,3 @@ func (sm *SilenceMonitor) checkSilentPanes() {
 		}
 	}
 }
-

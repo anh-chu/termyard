@@ -4,7 +4,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/ekristen/guppi/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 type mockHealthClient struct {
@@ -50,7 +50,7 @@ func TestHealthPollerTriggersOnServerDeath(t *testing.T) {
 	p := NewHealthPoller(client, 0, func() {
 		atomic.AddInt32(&calls, 1)
 	})
-	p.probe()          // alive, records wasAlive
+	p.probe()            // alive, records wasAlive
 	client.alive = false // server crashes
 	p.probe()
 	p.probe() // already triggered, must not re-fire

@@ -12,10 +12,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/activity"
-	"github.com/ekristen/guppi/pkg/common"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/activity"
+	"github.com/anh-chu/termyard/pkg/common"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 var upgrader = websocket.Upgrader{

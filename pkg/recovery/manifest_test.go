@@ -22,10 +22,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			AgentType:      "claude",
 			AgentSessionID: "abc",
 			Windows: []WindowSnapshot{{
-				Index: 0,
-				Name:  "main",
+				Index:  0,
+				Name:   "main",
 				Layout: "even-horizontal",
-				Panes: []PaneSnapshot{{Index: 0, CWD: "/tmp/project", StartCommand: "claude --resume abc"}},
+				Panes:  []PaneSnapshot{{Index: 0, CWD: "/tmp/project", StartCommand: "claude --resume abc"}},
 			}},
 		}},
 	}

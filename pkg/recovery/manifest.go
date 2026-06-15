@@ -54,7 +54,7 @@ func configDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "guppi"), nil
+	return filepath.Join(home, ".config", "termyard"), nil
 }
 
 // ManifestPath returns manifest file path.

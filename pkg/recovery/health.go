@@ -6,7 +6,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 type serverProbe interface {

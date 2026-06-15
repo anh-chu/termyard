@@ -76,8 +76,8 @@ export function TopBar({
       {/* Left: Logo + alerts */}
       <div className="flex items-center gap-4 flex-1 overflow-hidden">
         <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={onOverview}>
-          <img src="/favicon.svg" alt="guppi" width="18" height="18" className="rounded-sm" />
-          <span className="text-[11px] font-bold tracking-[0.1em] text-ink">GUPPI</span>
+          <img src="/favicon.svg" alt="termyard" width="18" height="18" className="rounded-sm" />
+          <span className="text-[11px] font-bold tracking-[0.1em] text-ink">Termyard</span>
         </div>
 
         {/* New session + split pane + collapse sidebar */}
@@ -86,7 +86,7 @@ export function TopBar({
             onClick={() => onNewSession?.()}
             draggable
             onDragStart={(e) => {
-              e.dataTransfer.setData('application/x-guppi-new-session', '1')
+              e.dataTransfer.setData('application/x-termyard-new-session', '1')
               e.dataTransfer.effectAllowed = 'copy'
             }}
             title="New session (drag onto main view to split)"

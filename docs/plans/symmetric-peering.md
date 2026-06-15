@@ -2,9 +2,9 @@
 
 > **Status**: Plan (not yet implemented)
 > **Author**: derived from user discussion 2026-05-29
-> **Target audience**: implementing agent with **zero prior context** about guppi
+> **Target audience**: implementing agent with **zero prior context** about termyard
 
-This document is the **complete specification** for replacing guppi's current
+This document is the **complete specification** for replacing termyard's current
 asymmetric hub/peer model with a symmetric peer-to-peer model, removing all
 TLS/cert plumbing, and exposing all multi-host functionality through the web UI.
 Everything needed to implement it is in this file (plus the source files it
@@ -16,11 +16,11 @@ references). Do not skim — every section matters.
 
 | Term                   | Meaning                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **node**               | One running `guppi server` process. Every machine is just a node. There is no "hub" or "peer-role" distinction anymore.                                                                                                                                                                                                                      |
-| **identity**           | A persistent ed25519 keypair stored at `~/.config/guppi/identity.json`. Already exists. Loaded by `identity.LoadOrCreate(hostname)` in `pkg/commands/server/server.go`.                                                                                                                                                                      |
+| **node**               | One running `termyard server` process. Every machine is just a node. There is no "hub" or "peer-role" distinction anymore.                                                                                                                                                                                                                      |
+| **identity**           | A persistent ed25519 keypair stored at `~/.config/termyard/identity.json`. Already exists. Loaded by `identity.LoadOrCreate(hostname)` in `pkg/commands/server/server.go`.                                                                                                                                                                      |
 | **fingerprint**        | Short ID derived from a node's public key. `pkg/identity/identity.go::Fingerprint()`.                                                                                                                                                                                                                                                        |
-| **peer record**        | An entry in `~/.config/guppi/peers.json` describing another node we trust. Loaded via `identity.NewPeerStore()`.                                                                                                                                                                                                                             |
-| **dashboard password** | The user-set password protecting the web UI. Stored as bcrypt hash in `~/.config/guppi/auth.json`. Managed by `pkg/auth/auth.go`.                                                                                                                                                                                                            |
+| **peer record**        | An entry in `~/.config/termyard/peers.json` describing another node we trust. Loaded via `identity.NewPeerStore()`.                                                                                                                                                                                                                             |
+| **dashboard password** | The user-set password protecting the web UI. Stored as bcrypt hash in `~/.config/termyard/auth.json`. Managed by `pkg/auth/auth.go`.                                                                                                                                                                                                            |
 | **bootstrap**          | One-time exchange that establishes mutual trust between two previously-unknown nodes. After bootstrap, only ed25519 identity is used (password is never sent again).                                                                                                                                                                         |
 | **link**               | The active WebSocket connection between two paired nodes.                                                                                                                                                                                                                                                                                    |
 | **dialer / listener**  | For a given pair (A, B): the node where the user originally clicked **Connect** is the **dialer** (initiates and maintains the WebSocket). The other side, which received the bootstrap POST, is the **listener**. Stored per-peer as `InitiatedByUs bool` in the local peer record. See §3.2 for the simultaneous-initiate race resolution. |
@@ -31,7 +31,7 @@ references). Do not skim — every section matters.
 
 ### Goals
 
-1. Both machines run identical `guppi server` — no flags, no CLI ceremony.
+1. Both machines run identical `termyard server` — no flags, no CLI ceremony.
 2. From the dashboard of node A, user enters `host:port` and **node B's
    dashboard password** to connect.
 3. Connection is **bidirectional**: once A↔B is up, A sees B's sessions
@@ -40,10 +40,10 @@ references). Do not skim — every section matters.
    user explicitly disables the link.
 5. Either node going offline must not impair the other; local sessions stay
    functional.
-6. **All multi-host config happens through the UI**. No `guppi pair`, no
-   `--hub`, no `--tls-san`, no `guppi peers list` is needed by the user.
-7. **TLS and self-signed cert generation are removed from guppi entirely.**
-   guppi serves plain HTTP. Users put a reverse proxy (Caddy, Tailscale,
+6. **All multi-host config happens through the UI**. No `termyard pair`, no
+   `--hub`, no `--tls-san`, no `termyard peers list` is needed by the user.
+7. **TLS and self-signed cert generation are removed from termyard entirely.**
+   termyard serves plain HTTP. Users put a reverse proxy (Caddy, Tailscale,
    nginx) in front if they want TLS. The peer-to-peer link runs over
    plain WebSocket (`ws://`) — encryption is the user's network's job.
 
@@ -63,7 +63,7 @@ references). Do not skim — every section matters.
 | Path                                      | Role                                                                                                                                                                                                   |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `pkg/identity/identity.go`                | ed25519 keypair generation & sign/verify. **Keep.**                                                                                                                                                    |
-| `pkg/identity/peers.go`                   | `Peer` struct, `PeerStore` with `~/.config/guppi/peers.json`. **Modify** (add fields, drop TLS fields).                                                                                                |
+| `pkg/identity/peers.go`                   | `Peer` struct, `PeerStore` with `~/.config/termyard/peers.json`. **Modify** (add fields, drop TLS fields).                                                                                                |
 | `pkg/identity/pairing.go`                 | Time-limited pairing codes. **Delete.**                                                                                                                                                                |
 | `pkg/peer/manager.go`                     | `Manager` — aggregates `HostState` from local tmux + remote nodes. Already symmetric. **Keep, minor edits.**                                                                                           |
 | `pkg/peer/handler.go`                     | HTTP/WS handler for incoming peer connections. Implements challenge-response auth on `/ws/peer`. Also has `HandlePairing` for `/api/pair/complete`. **Modify** (drop pairing, generalize accept side). |
@@ -74,15 +74,15 @@ references). Do not skim — every section matters.
 | `pkg/auth/auth.go`                        | Dashboard password (bcrypt) + session tokens. **Keep**, add a `VerifyConstantTime` helper if not present (bcrypt.Compare is already CT).                                                               |
 | `pkg/tlscert/`                            | Self-signed cert generation, hot-reload. **DELETE THIS ENTIRE PACKAGE.**                                                                                                                               |
 | `pkg/server/server.go`                    | Main HTTP server. Mounts all routes including `/ws/peer`, `/api/pair/complete`, TLS listener. **Modify** (drop TLS, drop pair routes, add new peers routes).                                           |
-| `pkg/commands/server/server.go`           | `guppi server` CLI command. **Modify** (drop `--hub`, `--tls-*`, `--insecure`, `--local-only`, `--no-tls`).                                                                                            |
-| `pkg/commands/pair/pair.go`               | `guppi pair` CLI. **DELETE.**                                                                                                                                                                          |
-| `pkg/commands/peers/peers.go`             | `guppi peers list/remove` CLI. **DELETE.** (UI replaces it.)                                                                                                                                           |
+| `pkg/commands/server/server.go`           | `termyard server` CLI command. **Modify** (drop `--hub`, `--tls-*`, `--insecure`, `--local-only`, `--no-tls`).                                                                                            |
+| `pkg/commands/pair/pair.go`               | `termyard pair` CLI. **DELETE.**                                                                                                                                                                          |
+| `pkg/commands/peers/peers.go`             | `termyard peers list/remove` CLI. **DELETE.** (UI replaces it.)                                                                                                                                           |
 | `web/src/components/TrustCertificate.tsx` | Frontend cert-trust flow. **DELETE.**                                                                                                                                                                  |
 | `web/src/App.tsx`                         | Mounts `TrustCertificate`. **Edit** (remove import + route).                                                                                                                                           |
 | `web/src/components/Settings.tsx`         | Settings page. **Edit** (add Peers panel).                                                                                                                                                             |
 | `main.go`                                 | Registers commands. **Edit** (remove `pair` and `peers` imports).                                                                                                                                      |
 | `docs/multi-host.md`                      | Existing docs assume hub/peer + TLS. **Rewrite.**                                                                                                                                                      |
-| `README.md`                               | Mentions `--hub`, `GUPPI_HUB`, etc. **Edit.**                                                                                                                                                          |
+| `README.md`                               | Mentions `--hub`, `TERMYARD_HUB`, etc. **Edit.**                                                                                                                                                          |
 
 ### 2.2 Existing wire protocol (keep, with additions)
 
@@ -411,11 +411,11 @@ import (
 
     "github.com/sirupsen/logrus"
 
-    "github.com/ekristen/guppi/pkg/activity"
-    "github.com/ekristen/guppi/pkg/identity"
-    "github.com/ekristen/guppi/pkg/state"
-    "github.com/ekristen/guppi/pkg/tmux"
-    "github.com/ekristen/guppi/pkg/toolevents"
+    "github.com/anh-chu/termyard/pkg/activity"
+    "github.com/anh-chu/termyard/pkg/identity"
+    "github.com/anh-chu/termyard/pkg/state"
+    "github.com/anh-chu/termyard/pkg/tmux"
+    "github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 // LinkSupervisor owns per-peer reconnector goroutines. It is the only place
@@ -621,8 +621,8 @@ import (
     "net/http"
     "time"
 
-    "github.com/ekristen/guppi/pkg/common"
-    "github.com/ekristen/guppi/pkg/identity"
+    "github.com/anh-chu/termyard/pkg/common"
+    "github.com/anh-chu/termyard/pkg/identity"
 )
 
 type BootstrapRequest struct {
@@ -658,7 +658,7 @@ func SendBootstrap(ctx context.Context, addr string, req BootstrapRequest) (*Boo
     httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
     if err != nil { return nil, err }
     httpReq.Header.Set("Content-Type", "application/json")
-    httpReq.Header.Set("User-Agent", "guppi/"+common.VERSION)
+    httpReq.Header.Set("User-Agent", "termyard/"+common.VERSION)
     resp, err := httpClient.Do(httpReq)
     if err != nil { return nil, fmt.Errorf("dial: %w", err) }
     defer resp.Body.Close()
@@ -787,7 +787,7 @@ CACertPEM       string
 from `Options`. Delete the `Run` function's TLS branch (uses
 `http.Server.ServeTLS`). Replace with a single `http.Server.ListenAndServe`.
 
-Drop imports of `crypto/tls`, `github.com/ekristen/guppi/pkg/tlscert`.
+Drop imports of `crypto/tls`, `github.com/anh-chu/termyard/pkg/tlscert`.
 
 Update `Run` signature/body so it only does plain HTTP. The default port
 stays 7654.
@@ -796,14 +796,14 @@ stays 7654.
 
 Remove the following CLI flags and their environment variables:
 
-- `--no-tls` / `GUPPI_NO_TLS`
-- `--tls-cert` / `GUPPI_TLS_CERT`
-- `--tls-key` / `GUPPI_TLS_KEY`
-- `--tls-san` / `GUPPI_TLS_SAN`
-- `--tls-reload-interval` / `GUPPI_TLS_RELOAD_INTERVAL`
-- `--hub` / `GUPPI_HUB`
-- `--insecure` / `GUPPI_INSECURE`
-- `--local-only` / `GUPPI_LOCAL_ONLY`
+- `--no-tls` / `TERMYARD_NO_TLS`
+- `--tls-cert` / `TERMYARD_TLS_CERT`
+- `--tls-key` / `TERMYARD_TLS_KEY`
+- `--tls-san` / `TERMYARD_TLS_SAN`
+- `--tls-reload-interval` / `TERMYARD_TLS_RELOAD_INTERVAL`
+- `--hub` / `TERMYARD_HUB`
+- `--insecure` / `TERMYARD_INSECURE`
+- `--local-only` / `TERMYARD_LOCAL_ONLY`
 
 Remove the `tlscert.LoadOrGenerate(...)` call and the corresponding lines that
 set `opts.TLSConfig`, `opts.TLSFingerprint`, `opts.CACertPEM`,
@@ -825,8 +825,8 @@ opts.LinkSupervisor = supervisor
 
 ```go
 // Delete these imports:
-_ "github.com/ekristen/guppi/pkg/commands/pair"
-_ "github.com/ekristen/guppi/pkg/commands/peers"
+_ "github.com/anh-chu/termyard/pkg/commands/pair"
+_ "github.com/anh-chu/termyard/pkg/commands/peers"
 ```
 
 Then `rm -rf pkg/commands/pair pkg/commands/peers pkg/tlscert pkg/identity/pairing.go`.
@@ -1041,7 +1041,7 @@ Remove `pair` and `peers` imports.
 
 Replace with concise version describing:
 
-1. Run `guppi server` on each machine.
+1. Run `termyard server` on each machine.
 2. Open each dashboard, set a password.
 3. In Settings → Connected Machines on node A, click "Connect to another
    machine", enter B's address + B's dashboard password.
@@ -1053,7 +1053,7 @@ Drop all mentions of TLS SANs, `tailscale cert`, pair codes, `--hub`,
 
 ### 8.4 Edit `README.md`
 
-Delete the `GUPPI_HUB`, `GUPPI_INSECURE`, `--hub`, `--insecure`, `--no-tls`,
+Delete the `TERMYARD_HUB`, `TERMYARD_INSECURE`, `--hub`, `--insecure`, `--no-tls`,
 `--tls-*`, `--tls-san` rows from the env-vars / flags tables.
 
 ---
@@ -1145,7 +1145,7 @@ This order minimizes broken intermediate states.
 
 On two machines (or two ports on one machine — e.g. 7654 and 7655):
 
-1. Start both: `guppi server` (port 7654), `guppi server -p 7655`.
+1. Start both: `termyard server` (port 7654), `termyard server -p 7655`.
 2. Set password on both via UI (`/setup` flow already exists).
 3. From dashboard at :7654, connect to `localhost:7655` with the second
    password.
@@ -1179,7 +1179,7 @@ On two machines (or two ports on one machine — e.g. 7654 and 7655):
    `req.public_key == localIdentity.PublicKey`. Return 400 with message
    "cannot pair with self".
 3. **Re-pair after key rotation**: identity is durable, but if a user
-   nukes `~/.config/guppi/identity.json`, paired peers will get
+   nukes `~/.config/termyard/identity.json`, paired peers will get
    "unknown peer" on auth. The forget-on-fail strategy: if a dialer gets
    `auth-fail` with reason "unknown peer", it should keep retrying for a
    minute, then mark its local record as "stale" (status field) but **not**
@@ -1191,7 +1191,7 @@ On two machines (or two ports on one machine — e.g. 7654 and 7655):
 5. **Two nodes both behind NAT**: dialer selection now follows user intent
    (whoever clicked Connect). So the user must run Connect on the side that
    can reach the other. If neither side is reachable from the other,
-   nothing works — that's a network problem, not a guppi problem. Document
+   nothing works — that's a network problem, not a termyard problem. Document
    this in `docs/multi-host.md`.
 
 6. **Two processes simultaneously bootstrap each other**: both
@@ -1278,11 +1278,11 @@ old code ignores them.
   `golang.org/x/crypto/bcrypt`. These are already present.
 - **Plain HTTP everywhere.** Never construct `https://` or `wss://`. The user
   layers their own TLS (Caddy / Tailscale / nginx) if they want it.
-- **No env-var fallbacks.** Settings live in `~/.config/guppi/peers.json`
+- **No env-var fallbacks.** Settings live in `~/.config/termyard/peers.json`
   managed by the UI. The only persistent runtime config the CLI exposes is
   `--port`, `--socket`, `--discovery-interval`, `--no-control-mode`,
   `--no-auth`.
-- **Backward compatibility**: a user upgrading from old guppi will find
+- **Backward compatibility**: a user upgrading from old termyard will find
   their old `peers.json` migrated automatically (Enabled defaults to true)
   and the new UI will list them. They will have to re-pair only if the old
   records relied on pinned TLS certs to reach a non-system-trusted host —
@@ -1294,9 +1294,9 @@ old code ignores them.
 
 Refactor is complete when **all** of these are true:
 
-- [ ] `grep -ri 'tls\|cert\|--hub\|GUPPI_TLS\|GUPPI_HUB\|pairing\|TrustCertificate' pkg web/src main.go` returns nothing except docs/comments.
-- [ ] `guppi server --help` lists only: `--port`, `--socket`, `--discovery-interval`, `--no-control-mode`, `--no-auth`.
-- [ ] `guppi --help` lists only top-level commands: `server`, `notify`, `agent-setup`, `install`. (No `pair`, no `peers`.)
+- [ ] `grep -ri 'tls\|cert\|--hub\|TERMYARD_TLS\|TERMYARD_HUB\|pairing\|TrustCertificate' pkg web/src main.go` returns nothing except docs/comments.
+- [ ] `termyard server --help` lists only: `--port`, `--socket`, `--discovery-interval`, `--no-control-mode`, `--no-auth`.
+- [ ] `termyard --help` lists only top-level commands: `server`, `notify`, `agent-setup`, `install`. (No `pair`, no `peers`.)
 - [ ] Fresh install on two machines: connect via UI works first try.
 - [ ] Killing one machine does not affect the other's local sessions.
 - [ ] After bringing it back up, the link auto-recovers within 30 s.

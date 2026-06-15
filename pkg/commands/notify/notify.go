@@ -18,9 +18,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v3"
 
-	"github.com/ekristen/guppi/pkg/common"
-	"github.com/ekristen/guppi/pkg/socket"
-	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/common"
+	"github.com/anh-chu/termyard/pkg/socket"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 // stdinEvent represents the JSON payload that agent hooks pass via stdin.
@@ -206,11 +206,11 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 	}
 
 	return stdinResult{
-		Tool:          tool,
-		Status:        status,
-		Message:       message,
-		UserPrompt:    userPrompt,
-		AgentMessage:  agentMessage,
+		Tool:           tool,
+		Status:         status,
+		Message:        message,
+		UserPrompt:     userPrompt,
+		AgentMessage:   agentMessage,
 		AgentSessionID: agentSessionID,
 	}, nil
 }
@@ -472,7 +472,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		}
 		log.WithFields(logrus.Fields{
 			"parsed_tool": res.Tool, "parsed_status": res.Status,
-			"parsed_message": res.Message,
+			"parsed_message":     res.Message,
 			"parsed_user_prompt": res.UserPrompt != "", "parsed_agent_message": res.AgentMessage != "",
 		}).Trace("stdin event parsed")
 
@@ -567,14 +567,14 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		httpClient := &http.Client{Timeout: 1 * time.Second}
 		resp, err = httpClient.Post(url, "application/json", bytes.NewReader(body))
 		if err != nil {
-			return fmt.Errorf("failed to notify guppi: %w", err)
+			return fmt.Errorf("failed to notify termyard: %w", err)
 		}
 		log.WithField("status_code", resp.StatusCode).Trace("HTTP response")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("guppi returned status %d", resp.StatusCode)
+		return fmt.Errorf("termyard returned status %d", resp.StatusCode)
 	}
 
 	log.WithFields(logrus.Fields{
@@ -637,26 +637,26 @@ func init() {
 		},
 		&cli.StringFlag{
 			Name:    "server",
-			Usage:   "guppi server URL (HTTP fallback)",
-			Sources: cli.EnvVars("GUPPI_URL"),
+			Usage:   "termyard server URL (HTTP fallback)",
+			Sources: cli.EnvVars("TERMYARD_URL"),
 			Value:   "http://localhost:7654",
 		},
 		&cli.StringFlag{
 			Name:    "socket",
-			Usage:   "path to guppi unix socket (auto-detected if omitted)",
-			Sources: cli.EnvVars("GUPPI_SOCKET"),
+			Usage:   "path to termyard unix socket (auto-detected if omitted)",
+			Sources: cli.EnvVars("TERMYARD_SOCKET"),
 		},
 	}
 
 	cmd := &cli.Command{
 		Name:  "notify",
-		Usage: "send an agent hook event to guppi",
-		Description: `Notify guppi of AI tool activity. Used by agent hooks.
+		Usage: "send an agent hook event to termyard",
+		Description: `Notify termyard of AI tool activity. Used by agent hooks.
 
 Examples:
-  guppi notify -t claude -s waiting -m "Needs approval"
-  guppi notify -t codex -s active
-  guppi notify -t claude -s completed
+  termyard notify -t claude -s waiting -m "Needs approval"
+  termyard notify -t codex -s active
+  termyard notify -t claude -s completed
 
 The tmux session, window, and pane are auto-detected when run inside tmux.`,
 		Flags:  flags,

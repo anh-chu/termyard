@@ -21,12 +21,12 @@ type StatusResult struct {
 	SetupCommand string        `json:"setup_command"`
 }
 
-// CheckAgents checks which agents are installed and whether their guppi hooks are configured.
+// CheckAgents checks which agents are installed and whether their termyard hooks are configured.
 func CheckAgents() *StatusResult {
 	home, _ := os.UserHomeDir()
 
 	result := &StatusResult{
-		SetupCommand: "guppi agent-setup",
+		SetupCommand: "termyard agent-setup",
 		Agents: []AgentStatus{
 			{
 				Name:       "Claude Code",
@@ -73,7 +73,7 @@ func isClaudeConfigured(home string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "guppi")
+	return strings.Contains(string(data), "termyard")
 }
 
 func isCodexConfigured(home string) bool {
@@ -81,25 +81,25 @@ func isCodexConfigured(home string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "guppi")
+	return strings.Contains(string(data), "termyard")
 }
 
 func isCopilotConfigured(home string) bool {
-	hookPath := filepath.Join(home, ".copilot", "hooks", "guppi.json")
+	hookPath := filepath.Join(home, ".copilot", "hooks", "termyard.json")
 	_, err := os.Stat(hookPath)
 	return err == nil
 }
 
 func isOpenCodeConfigured(home string) bool {
-	// agent-setup writes the plugin canonically to plugins/guppi.js, which
+	// agent-setup writes the plugin canonically to plugins/termyard.js, which
 	// OpenCode auto-loads at startup (no opencode.json registration needed).
-	pluginFile := filepath.Join(home, ".config", "opencode", "plugins", "guppi.js")
+	pluginFile := filepath.Join(home, ".config", "opencode", "plugins", "termyard.js")
 	_, err := os.Stat(pluginFile)
 	return err == nil
 }
 
 func isPiConfigured(home string) bool {
-	pluginPath := filepath.Join(home, ".pi", "agent", "extensions", "guppi.ts")
+	pluginPath := filepath.Join(home, ".pi", "agent", "extensions", "termyard.ts")
 	_, err := os.Stat(pluginPath)
 	return err == nil
 }

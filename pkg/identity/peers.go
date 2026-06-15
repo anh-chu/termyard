@@ -14,10 +14,10 @@ type Peer struct {
 	Name          string    `json:"name"`
 	PublicKey     string    `json:"public_key"`
 	PairedAt      time.Time `json:"paired_at"`
-	Address       string    `json:"address"`                 // host:port last successfully used
-	Enabled       bool      `json:"enabled"`                 // auto-reconnect on/off (governs outbound dials only)
-	InitiatedByUs bool      `json:"initiated_by_us"`         // true ⇒ we dial; false ⇒ we wait for inbound
-	LastSeen      time.Time `json:"last_seen,omitempty"`     // updated on every successful connect
+	Address       string    `json:"address"`             // host:port last successfully used
+	Enabled       bool      `json:"enabled"`             // auto-reconnect on/off (governs outbound dials only)
+	InitiatedByUs bool      `json:"initiated_by_us"`     // true ⇒ we dial; false ⇒ we wait for inbound
+	LastSeen      time.Time `json:"last_seen,omitempty"` // updated on every successful connect
 }
 
 // Fingerprint returns a short identifier derived from the peer's public key

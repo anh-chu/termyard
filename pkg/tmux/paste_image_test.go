@@ -18,8 +18,8 @@ func TestStorePastedImage(t *testing.T) {
 	if filepath.Ext(path) != ".png" {
 		t.Fatalf("expected .png extension, got %q", filepath.Ext(path))
 	}
-	if !strings.Contains(path, filepath.Join("guppi-paste", "pasted-")) {
-		t.Fatalf("expected guppi-paste temp path, got %q", path)
+	if !strings.Contains(path, filepath.Join("termyard-paste", "pasted-")) {
+		t.Fatalf("expected termyard-paste temp path, got %q", path)
 	}
 
 	got, err := os.ReadFile(path)

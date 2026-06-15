@@ -4,17 +4,17 @@ import "testing"
 
 func TestSanitize(t *testing.T) {
 	cases := map[string]string{
-		"Fix Auth Token":        "fix-auth-token",
-		"  db migration  ":      "db-migration",
-		"\"docker-logs\"":       "docker-logs",
-		"feature/branch:thing":  "featurebranchthing",
-		"a..b::c~d!e":           "abcde",
-		"UPPER_snake_case":      "upper-snake-case",
-		"multi   space\tname":   "multi-space-name",
-		"---trim---":            "trim",
-		"café résumé":           "caf-rsum",
-		"":                      "",
-		"!!!":                   "",
+		"Fix Auth Token":       "fix-auth-token",
+		"  db migration  ":     "db-migration",
+		"\"docker-logs\"":      "docker-logs",
+		"feature/branch:thing": "featurebranchthing",
+		"a..b::c~d!e":          "abcde",
+		"UPPER_snake_case":     "upper-snake-case",
+		"multi   space\tname":  "multi-space-name",
+		"---trim---":           "trim",
+		"café résumé":          "caf-rsum",
+		"":                     "",
+		"!!!":                  "",
 		"verylongnamethatexceedsthefortycharacterlimitfortmux": "verylongnamethatexceedsthefortycharacter",
 	}
 	for in, want := range cases {

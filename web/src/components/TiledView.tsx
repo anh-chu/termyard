@@ -115,7 +115,7 @@ export function TiledView({
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     // Ignore pane swap drags
-    if (e.dataTransfer.types.includes('application/x-guppi-pane')) return
+    if (e.dataTransfer.types.includes('application/x-termyard-pane')) return
     e.preventDefault()
     e.stopPropagation()
     setDragOver(true)
@@ -123,7 +123,7 @@ export function TiledView({
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     // Ignore pane swap drags
-    if (e.dataTransfer.types.includes('application/x-guppi-pane')) return
+    if (e.dataTransfer.types.includes('application/x-termyard-pane')) return
     // Only clear when leaving the container itself, not moving into a child
     if (e.currentTarget.contains(e.relatedTarget as Node)) return
     e.preventDefault()
@@ -136,12 +136,12 @@ export function TiledView({
       e.preventDefault()
       e.stopPropagation()
       setDragOver(false)
-      if (e.dataTransfer.types.includes('application/x-guppi-new-session')) {
+      if (e.dataTransfer.types.includes('application/x-termyard-new-session')) {
         onDropNewSession?.(activeKey ?? '', 'center')
         return
       }
       // Only handle sidebar drops (text/plain), not pane swaps
-      if (e.dataTransfer.types.includes('application/x-guppi-pane')) return
+      if (e.dataTransfer.types.includes('application/x-termyard-pane')) return
       const sessKey = e.dataTransfer.getData('text/plain')
       if (sessKey) {
         onDropSession?.(sessKey, activeKey ?? '', 'center')
@@ -193,20 +193,20 @@ export function TiledView({
             if (y > h * 0.75) return 'bottom'
             return 'center'
           }
-          if (dt.types.includes('application/x-guppi-new-session')) {
+          if (dt.types.includes('application/x-termyard-new-session')) {
             e.preventDefault()
             setDragType('new-session')
             setDropTarget({ key: sessionKey, zone: getZone() })
             return
           }
-          if (dt.types.includes('text/plain') && !dt.types.includes('application/x-guppi-pane')) {
+          if (dt.types.includes('text/plain') && !dt.types.includes('application/x-termyard-pane')) {
             e.preventDefault()
             setDragType('sidebar')
             setDropTarget({ key: sessionKey, zone: getZone() })
             return
           }
-          if (totalLeaves > 1 && dt.types.includes('application/x-guppi-pane')) {
-            const droppedKey = dt.getData('application/x-guppi-pane')
+          if (totalLeaves > 1 && dt.types.includes('application/x-termyard-pane')) {
+            const droppedKey = dt.getData('application/x-termyard-pane')
             if (droppedKey !== sessionKey) {
               e.preventDefault()
               setDragType('pane')
@@ -225,13 +225,13 @@ export function TiledView({
           e.stopPropagation()
           const currentDropTarget = dropTarget
           setDropTarget(null)
-          if (e.dataTransfer.types.includes('application/x-guppi-new-session')) {
+          if (e.dataTransfer.types.includes('application/x-termyard-new-session')) {
             const zone = currentDropTarget?.key === sessionKey ? currentDropTarget.zone : 'center'
             onDropNewSession?.(sessionKey, zone)
             return
           }
           // Pane-to-pane swap/move
-          const paneKey = e.dataTransfer.getData('application/x-guppi-pane')
+          const paneKey = e.dataTransfer.getData('application/x-termyard-pane')
           if (paneKey && paneKey !== sessionKey && totalLeaves > 1 && currentDropTarget?.key === sessionKey) {
             if (currentDropTarget.zone === 'center') {
               onSwapPanes?.(paneKey, sessionKey)
@@ -286,7 +286,7 @@ export function TiledView({
               onMouseLeave={() => { if (confirmKillKey === sessionKey) setConfirmKillKey(null) }}
               onDragStart={(e) => {
                 if ((e.target as HTMLElement).closest('button')) { e.preventDefault(); return }
-                e.dataTransfer.setData('application/x-guppi-pane', sessionKey)
+                e.dataTransfer.setData('application/x-termyard-pane', sessionKey)
                 e.dataTransfer.effectAllowed = 'move'
               }}
             >

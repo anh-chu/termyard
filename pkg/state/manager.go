@@ -12,10 +12,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/git"
-	"github.com/ekristen/guppi/pkg/namer"
-	"github.com/ekristen/guppi/pkg/tmux"
-	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/git"
+	"github.com/anh-chu/termyard/pkg/namer"
+	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 type SessionMetadata struct {
@@ -72,7 +72,7 @@ func NewManager(client *tmux.Client) *Manager {
 		meta:     make(map[string]SessionMetadata),
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		m.namesPath = filepath.Join(home, ".config", "guppi", "session-names.json")
+		m.namesPath = filepath.Join(home, ".config", "termyard", "session-names.json")
 		m.loadNames()
 	}
 	return m
@@ -235,7 +235,7 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 	}
 
 	// Detect removed sessions. A session that vanishes from discovery (e.g.
-	// killed directly via tmux, outside guppi's UI) must also have its metadata
+	// killed directly via tmux, outside termyard's UI) must also have its metadata
 	// dropped, otherwise a later session reusing the same tmux name inherits the
 	// stale DisplayName, UserPrompt, agent message, etc.
 	removed := make([]string, 0)
@@ -740,7 +740,7 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 	m.mu.RUnlock()
 
 	if n == nil || !n.Enabled() {
-		m.notice("warn", "ai-naming", sessionName, "AI naming is disabled. Enable it in Settings or set GUPPI_NAMER_ENDPOINT.")
+		m.notice("warn", "ai-naming", sessionName, "AI naming is disabled. Enable it in Settings or set TERMYARD_NAMER_ENDPOINT.")
 		return "", namer.ErrDisabled
 	}
 

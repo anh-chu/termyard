@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ekristen/guppi/pkg/peer"
+	"github.com/anh-chu/termyard/pkg/peer"
 	"github.com/sirupsen/logrus"
 )
 

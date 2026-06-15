@@ -643,7 +643,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
             {prefs.ai_naming.enabled && (
               <>
                 <Divider />
-                <Row label="Endpoint" description="Base URL, e.g. https://api.openai.com/v1 (falls back to GUPPI_NAMER_ENDPOINT)">
+                <Row label="Endpoint" description="Base URL, e.g. https://api.openai.com/v1 (falls back to TERMYARD_NAMER_ENDPOINT)">
                   <TextInput
                     value={prefs.ai_naming.endpoint}
                     onChange={(v) => updateNested('ai_naming', { endpoint: v })}
@@ -769,7 +769,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
           </Section>
 
           {/* ── Machines / Peers ── */}
-          <Section id="peers" title="Machines" description="Connect other guppi machines to share sessions across hosts">
+          <Section id="peers" title="Machines" description="Connect other termyard machines to share sessions across hosts">
             <PeersSection />
           </Section>
 

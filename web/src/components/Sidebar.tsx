@@ -237,16 +237,16 @@ export function Sidebar({
   const backgroundSet = sessionAttrs.background
   const scheduleIDs = sessionAttrs.scheduleIDs
   const scheduleById = useMemo(() => new Map(schedules.map(schedule => [schedule.id, schedule])), [schedules])
-  const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('guppi:session-order'))
-  const [projectFilters, setProjectFilters] = useState<string[]>(() => readStoredList('guppi:project-filters'))
+  const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('termyard:session-order'))
+  const [projectFilters, setProjectFilters] = useState<string[]>(() => readStoredList('termyard:project-filters'))
   const [hiddenExpanded, setHiddenExpanded] = useState(false)
   const [scheduledExpanded, setScheduledExpanded] = useState(() => {
-    try { return localStorage.getItem('guppi:scheduled-collapsed') !== '1' } catch { return true }
+    try { return localStorage.getItem('termyard:scheduled-collapsed') !== '1' } catch { return true }
   })
   const toggleScheduledExpanded = useCallback(() => {
     setScheduledExpanded(prev => {
       const next = !prev
-      try { localStorage.setItem('guppi:scheduled-collapsed', next ? '0' : '1') } catch {}
+      try { localStorage.setItem('termyard:scheduled-collapsed', next ? '0' : '1') } catch {}
       return next
     })
   }, [])
@@ -257,8 +257,8 @@ export function Sidebar({
   const [confirmWorktreeKillKey, setConfirmWorktreeKillKey] = useState<string | null>(null)
   const [filterOpen, setFilterOpen] = useState(false)
   const [viewMode, setViewMode] = useState<'default' | 'status'>(() =>
-    localStorage.getItem('guppi:view-mode') === 'status' ? 'status' : 'default')
-  useEffect(() => { localStorage.setItem('guppi:view-mode', viewMode) }, [viewMode])
+    localStorage.getItem('termyard:view-mode') === 'status' ? 'status' : 'default')
+  useEffect(() => { localStorage.setItem('termyard:view-mode', viewMode) }, [viewMode])
   const [resizing, setResizing] = useState(false)
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -287,14 +287,14 @@ export function Sidebar({
   const [dropIndicator, setDropIndicator] = useState<{ key: string; position: 'above' | 'below' } | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
-      const stored = localStorage.getItem('guppi:collapsed-groups')
+      const stored = localStorage.getItem('termyard:collapsed-groups')
       if (stored) return new Set(JSON.parse(stored))
     } catch {}
     return new Set()
   })
   const [expandedScheduleGroups, setExpandedScheduleGroups] = useState<Set<string>>(() => {
     try {
-      const stored = localStorage.getItem('guppi:expanded-schedule-groups')
+      const stored = localStorage.getItem('termyard:expanded-schedule-groups')
       if (stored) return new Set(JSON.parse(stored))
     } catch {}
     return new Set()
@@ -304,7 +304,7 @@ export function Sidebar({
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
-      try { localStorage.setItem('guppi:collapsed-groups', JSON.stringify([...next])) } catch {}
+      try { localStorage.setItem('termyard:collapsed-groups', JSON.stringify([...next])) } catch {}
       return next
     })
   }, [])
@@ -313,7 +313,7 @@ export function Sidebar({
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
-      try { localStorage.setItem('guppi:expanded-schedule-groups', JSON.stringify([...next])) } catch {}
+      try { localStorage.setItem('termyard:expanded-schedule-groups', JSON.stringify([...next])) } catch {}
       return next
     })
   }, [])
@@ -368,11 +368,11 @@ export function Sidebar({
 
   // session-order: per-device manual ordering. NOT synced (stays local).
   useEffect(() => {
-    writeStoredList('guppi:session-order', manualOrder)
+    writeStoredList('termyard:session-order', manualOrder)
   }, [manualOrder])
 
   useEffect(() => {
-    writeStoredList('guppi:project-filters', projectFilters)
+    writeStoredList('termyard:project-filters', projectFilters)
   }, [projectFilters])
 
   // Prune per-device manual ordering for sessions that have disappeared.

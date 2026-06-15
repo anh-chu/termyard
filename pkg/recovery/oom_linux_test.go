@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ekristen/guppi/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 func TestTuneOomPanesAtRecursesChildren(t *testing.T) {

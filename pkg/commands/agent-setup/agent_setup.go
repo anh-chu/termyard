@@ -13,10 +13,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v3"
 
-	"github.com/ekristen/guppi/pkg/common"
+	"github.com/anh-chu/termyard/pkg/common"
 )
 
-//go:embed pi-extension/guppi.ts
+//go:embed pi-extension/termyard.ts
 var piExtensionTemplate string
 
 //go:embed opencode-plugin/index.js
@@ -27,7 +27,7 @@ type agentConfig struct {
 	key      string
 	binary   string
 	detected bool
-	setup    func(serverURL, guppiBin string, resilient bool, extraDirs []string) error
+	setup    func(serverURL, termyardBin string, resilient bool, extraDirs []string) error
 }
 
 func Execute(ctx context.Context, c *cli.Command) error {
@@ -43,15 +43,15 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		extraDirs[parts[0]] = append(extraDirs[parts[0]], parts[1])
 	}
 
-	// Find guppi binary path
-	guppiBin, err := os.Executable()
+	// Find termyard binary path
+	termyardBin, err := os.Executable()
 	if err != nil {
-		guppiBin = "guppi"
+		termyardBin = "termyard"
 	}
 
 	// If running `go run`, use the binary name directly
-	if strings.Contains(guppiBin, "go-build") {
-		guppiBin = "guppi"
+	if strings.Contains(termyardBin, "go-build") {
+		termyardBin = "termyard"
 	}
 
 	agents := []agentConfig{
@@ -112,7 +112,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 			}
 		} else {
 			fmt.Printf("Configuring hooks for %s...\n", agent.name)
-			if err := agent.setup(serverURL, guppiBin, resilient, extras); err != nil {
+			if err := agent.setup(serverURL, termyardBin, resilient, extras); err != nil {
 				logrus.WithError(err).WithField("agent", agent.name).Warn("failed to configure")
 				fmt.Printf("  Warning: %v\n", err)
 			} else {
@@ -127,12 +127,12 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Agent hooks configured. They will notify guppi at:", serverURL)
+	fmt.Println("Agent hooks configured. They will notify termyard at:", serverURL)
 	return nil
 }
 
 // setupClaude configures Claude Code hooks in ~/.claude/settings.json and any extra dirs
-func setupClaude(serverURL, guppiBin string, resilient bool, extraDirs []string) error {
+func setupClaude(serverURL, termyardBin string, resilient bool, extraDirs []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -140,14 +140,14 @@ func setupClaude(serverURL, guppiBin string, resilient bool, extraDirs []string)
 
 	dirs := append([]string{filepath.Join(homeDir, ".claude")}, extraDirs...)
 	for _, dir := range dirs {
-		if err := setupClaudeDir(dir, guppiBin, resilient); err != nil {
+		if err := setupClaudeDir(dir, termyardBin, resilient); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func setupClaudeDir(configDir, guppiBin string, resilient bool) error {
+func setupClaudeDir(configDir, termyardBin string, resilient bool) error {
 	settingsPath := filepath.Join(configDir, "settings.json")
 
 	// Read existing settings
@@ -165,7 +165,7 @@ func setupClaudeDir(configDir, guppiBin string, resilient bool) error {
 	}
 
 	// Notify auto-discovers the unix socket, so no --server needed
-	notifyCmd := fmt.Sprintf("'%s' notify", guppiBin)
+	notifyCmd := fmt.Sprintf("'%s' notify", termyardBin)
 
 	suffix := ""
 	if resilient {
@@ -243,7 +243,7 @@ func setupClaudeDir(configDir, guppiBin string, resilient bool) error {
 }
 
 // setupCodex configures Codex CLI via ~/.codex/config.toml and any extra dirs
-func setupCodex(serverURL, guppiBin string, resilient bool, extraDirs []string) error {
+func setupCodex(serverURL, termyardBin string, resilient bool, extraDirs []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -251,7 +251,7 @@ func setupCodex(serverURL, guppiBin string, resilient bool, extraDirs []string) 
 
 	dirs := append([]string{filepath.Join(homeDir, ".codex")}, extraDirs...)
 	for _, dir := range dirs {
-		if err := setupCodexDir(dir, guppiBin, resilient); err != nil {
+		if err := setupCodexDir(dir, termyardBin, resilient); err != nil {
 			return err
 		}
 	}
@@ -263,40 +263,40 @@ func setupCodex(serverURL, guppiBin string, resilient bool, extraDirs []string) 
 // 1. Legacy `notify` key in config.toml (fires on agent-turn-complete)
 // 2. Modern hooks system in hooks.json (supports UserPromptSubmit, Stop, PreToolUse, etc.)
 // We use both: notify for backward compat, hooks.json for full lifecycle.
-func setupCodexDir(configDir, guppiBin string, resilient bool) error {
+func setupCodexDir(configDir, termyardBin string, resilient bool) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
 
 	// Configure legacy notify hook in config.toml
 	configPath := filepath.Join(configDir, "config.toml")
-	if err := setupCodexNotify(configPath, guppiBin, resilient); err != nil {
+	if err := setupCodexNotify(configPath, termyardBin, resilient); err != nil {
 		return err
 	}
 
 	// Configure modern hooks in hooks.json
 	hooksPath := filepath.Join(configDir, "hooks.json")
-	if err := setupCodexHooks(hooksPath, guppiBin, resilient); err != nil {
+	if err := setupCodexHooks(hooksPath, termyardBin, resilient); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func setupCodexNotify(configPath, guppiBin string, resilient bool) error {
+func setupCodexNotify(configPath, termyardBin string, resilient bool) error {
 	// Codex passes the event JSON as argv[1] to the notify command.
-	// guppi notify --event-data parses it natively — no bash/jq needed.
+	// termyard notify --event-data parses it natively — no bash/jq needed.
 	var notifyLine string
 	if resilient {
 		// Wrap in bash to support || true — Codex appends event JSON as $1
 		notifyLine = fmt.Sprintf(
-			`notify = ["bash", "-c", "'%s' notify -t codex --event-data \"$1\" || true", "--"] # guppi-agent-hook`,
-			guppiBin,
+			`notify = ["bash", "-c", "'%s' notify -t codex --event-data \"$1\" || true", "--"] # termyard-agent-hook`,
+			termyardBin,
 		)
 	} else {
 		notifyLine = fmt.Sprintf(
-			`notify = ["%s", "notify", "-t", "codex", "--event-data"] # guppi-agent-hook`,
-			guppiBin,
+			`notify = ["%s", "notify", "-t", "codex", "--event-data"] # termyard-agent-hook`,
+			termyardBin,
 		)
 	}
 
@@ -409,8 +409,8 @@ func setupCodexNotify(configPath, guppiBin string, resilient bool) error {
 	return nil
 }
 
-func setupCodexHooks(hooksPath, guppiBin string, resilient bool) error {
-	notifyCmd := fmt.Sprintf("'%s' notify", guppiBin)
+func setupCodexHooks(hooksPath, termyardBin string, resilient bool) error {
+	notifyCmd := fmt.Sprintf("'%s' notify", termyardBin)
 
 	suffix := ""
 	if resilient {
@@ -474,7 +474,7 @@ func setupCodexHooks(hooksPath, guppiBin string, resilient bool) error {
 }
 
 // setupOpenCode configures OpenCode via native plugin in ~/.config/opencode and any extra dirs
-func setupOpenCode(serverURL, guppiBin string, resilient bool, extraDirs []string) error {
+func setupOpenCode(serverURL, termyardBin string, resilient bool, extraDirs []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -482,138 +482,44 @@ func setupOpenCode(serverURL, guppiBin string, resilient bool, extraDirs []strin
 
 	dirs := append([]string{filepath.Join(homeDir, ".config", "opencode")}, extraDirs...)
 	for _, dir := range dirs {
-		if err := setupOpenCodeDir(dir, guppiBin); err != nil {
+		if err := setupOpenCodeDir(dir, termyardBin); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func setupOpenCodeDir(configDir, guppiBin string) error {
+func setupOpenCodeDir(configDir, termyardBin string) error {
 	pluginDir := filepath.Join(configDir, "plugins")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		return err
 	}
 
-	indexJS, err := buildOpenCodePlugin(guppiBin)
+	indexJS, err := buildOpenCodePlugin(termyardBin)
 	if err != nil {
 		return err
 	}
-	pluginFile := filepath.Join(pluginDir, "guppi.js")
+	pluginFile := filepath.Join(pluginDir, "termyard.js")
 	if err := os.WriteFile(pluginFile, []byte(indexJS), 0o644); err != nil {
 		return err
-	}
-
-	// Clean up the previous non-canonical npm-package install: the
-	// node_modules/guppi package plus its file:// entry in opencode.json.
-	// OpenCode auto-loads files in plugins/ at startup, so neither is needed.
-	legacyPkg := filepath.Join(configDir, "node_modules", "guppi")
-	if _, err := os.Stat(legacyPkg); err == nil {
-		if err := os.RemoveAll(legacyPkg); err != nil {
-			fmt.Printf("  Warning: could not remove legacy plugin package %s: %v\n", legacyPkg, err)
-		} else {
-			fmt.Printf("  Removed legacy plugin package %s\n", legacyPkg)
-		}
-	}
-	if err := unregisterOpenCodePlugin(filepath.Join(configDir, "opencode.json")); err != nil {
-		fmt.Printf("  Warning: could not clean opencode.json: %v\n", err)
-	}
-
-	legacyHook := filepath.Join(configDir, "guppi-hook.sh")
-	if _, err := os.Stat(legacyHook); err == nil {
-		if err := os.Remove(legacyHook); err != nil {
-			fmt.Printf("  Warning: could not remove legacy hook %s: %v\n", legacyHook, err)
-		} else {
-			fmt.Printf("  Removed legacy hook %s\n", legacyHook)
-		}
 	}
 
 	fmt.Printf("  Wrote OpenCode plugin to %s\n", pluginFile)
 	return nil
 }
 
-func buildOpenCodePlugin(guppiBin string) (string, error) {
-	quotedBin, err := json.Marshal(guppiBin)
+func buildOpenCodePlugin(termyardBin string) (string, error) {
+	quotedBin, err := json.Marshal(termyardBin)
 	if err != nil {
 		return "", err
 	}
-	// Replace the __GUPPI_BIN__ token (including its surrounding quotes) with the
+	// Replace the __TERMYARD_BIN__ token (including its surrounding quotes) with the
 	// JSON-encoded binary path so the result is a valid JS string literal.
-	return strings.ReplaceAll(openCodePluginTemplate, `"__GUPPI_BIN__"`, string(quotedBin)), nil
-}
-
-// unregisterOpenCodePlugin removes any guppi entry from opencode.json's plugin
-// array, cleaning up the previous file:// node_modules/guppi registration. The
-// plugin is now loaded canonically from the plugins/ directory instead.
-func unregisterOpenCodePlugin(configPath string) error {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("parse %s: %w", configPath, err)
-	}
-
-	raw, ok := config["plugin"]
-	if !ok {
-		return nil
-	}
-	plugins, ok := raw.([]interface{})
-	if !ok {
-		return nil
-	}
-
-	isGuppi := func(spec string) bool {
-		return spec == "guppi" || strings.Contains(spec, "node_modules/guppi")
-	}
-
-	filtered := make([]interface{}, 0, len(plugins))
-	for _, entry := range plugins {
-		switch v := entry.(type) {
-		case string:
-			if isGuppi(v) {
-				continue
-			}
-		case []interface{}:
-			if len(v) > 0 {
-				if spec, ok := v[0].(string); ok && isGuppi(spec) {
-					continue
-				}
-			}
-		}
-		filtered = append(filtered, entry)
-	}
-
-	if len(filtered) == len(plugins) {
-		return nil
-	}
-
-	if len(filtered) == 0 {
-		delete(config, "plugin")
-	} else {
-		config["plugin"] = filtered
-	}
-
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return err
-	}
-	out = append(out, '\n')
-	if err := os.WriteFile(configPath, out, 0o644); err != nil {
-		return err
-	}
-
-	fmt.Printf("  Removed legacy plugin registration from %s\n", configPath)
-	return nil
+	return strings.ReplaceAll(openCodePluginTemplate, `"__TERMYARD_BIN__"`, string(quotedBin)), nil
 }
 
 // setupPi configures Pi extension in ~/.pi/agent/extensions/ and any extra dirs
-func setupPi(serverURL, guppiBin string, resilient bool, extraDirs []string) error {
+func setupPi(serverURL, termyardBin string, resilient bool, extraDirs []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -621,14 +527,14 @@ func setupPi(serverURL, guppiBin string, resilient bool, extraDirs []string) err
 
 	dirs := append([]string{filepath.Join(homeDir, ".pi", "agent", "extensions")}, extraDirs...)
 	for _, dir := range dirs {
-		if err := setupPiDir(dir, guppiBin, resilient); err != nil {
+		if err := setupPiDir(dir, termyardBin, resilient); err != nil {
 			return err
 		}
 	}
 
 	// Register extension in settings.json
 	settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
-	if err := registerPiExtension(settingsPath, "extensions/guppi.ts"); err != nil {
+	if err := registerPiExtension(settingsPath, "extensions/termyard.ts"); err != nil {
 		fmt.Printf("  Warning: could not register extension in settings.json: %v\n", err)
 	} else {
 		fmt.Printf("  Registered extension in %s\n", settingsPath)
@@ -637,15 +543,15 @@ func setupPi(serverURL, guppiBin string, resilient bool, extraDirs []string) err
 	return nil
 }
 
-func setupPiDir(configDir, guppiBin string, resilient bool) error {
+func setupPiDir(configDir, termyardBin string, resilient bool) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
 
-	// Replace placeholder with actual guppi binary path
-	content := strings.ReplaceAll(piExtensionTemplate, "__GUPPI_BIN__", guppiBin)
+	// Replace placeholder with actual termyard binary path
+	content := strings.ReplaceAll(piExtensionTemplate, "__TERMYARD_BIN__", termyardBin)
 
-	pluginFile := filepath.Join(configDir, "guppi.ts")
+	pluginFile := filepath.Join(configDir, "termyard.ts")
 	if err := os.WriteFile(pluginFile, []byte(content), 0o644); err != nil {
 		return err
 	}
@@ -702,8 +608,8 @@ func init() {
 	flags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    "server",
-			Usage:   "guppi server URL",
-			Sources: cli.EnvVars("GUPPI_URL"),
+			Usage:   "termyard server URL",
+			Sources: cli.EnvVars("TERMYARD_URL"),
 			Value:   "http://localhost:7654",
 		},
 		&cli.BoolFlag{
@@ -722,9 +628,9 @@ func init() {
 
 	cmd := &cli.Command{
 		Name:  "agent-setup",
-		Usage: "configure AI agent hooks to notify guppi",
+		Usage: "configure AI agent hooks to notify termyard",
 		Description: `Detects installed AI coding tools and configures their hooks
-to send status notifications to the guppi server.
+to send status notifications to the termyard server.
 
 Supported agents:
   - Claude Code (claude)

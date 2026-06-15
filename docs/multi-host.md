@@ -1,12 +1,12 @@
 # Multi-host (symmetric peer-to-peer)
 
-guppi runs as a symmetric peer-to-peer mesh. Every machine runs the same
-`guppi server` process — there is no hub or peer role anymore. Any node can
+termyard runs as a symmetric peer-to-peer mesh. Every machine runs the same
+`termyard server` process — there is no hub or peer role anymore. Any node can
 connect to any other node from its dashboard.
 
 ## How it works
 
-1. On each machine, run `guppi server` (no flags needed beyond `--port` if
+1. On each machine, run `termyard server` (no flags needed beyond `--port` if
    you want to change the default 7654).
 2. Open each dashboard in your browser and set a password (one-time).
 3. On node A's dashboard, open **Settings → Machines → Connect to another
@@ -20,14 +20,14 @@ address.
 
 ## Reachability
 
-guppi serves plain HTTP. The peer-to-peer link is plain WebSocket (`ws://`).
+termyard serves plain HTTP. The peer-to-peer link is plain WebSocket (`ws://`).
 There is no built-in TLS, no certificate generation, and no pairing codes.
 
 Use one of these for encryption / cross-network reachability:
 
 - **Tailscale / WireGuard** (recommended) — gives each node a stable
   hostname and end-to-end encryption.
-- **Reverse proxy** (Caddy, nginx) in front of `guppi server` if you want
+- **Reverse proxy** (Caddy, nginx) in front of `termyard server` if you want
   HTTPS for the browser side.
 
 If neither machine can reach the other directly, no overlay network will
@@ -47,19 +47,19 @@ from there — that side becomes the dialer; the other side just listens.
 
 ## Server flags
 
-`guppi server` only takes:
+`termyard server` only takes:
 
-- `--port` / `GUPPI_PORT` (default 7654)
-- `--socket` / `GUPPI_SOCKET` (local notify CLI socket path)
-- `--discovery-interval` / `GUPPI_DISCOVERY_INTERVAL` (default 2s)
-- `--no-control-mode` / `GUPPI_NO_CONTROL_MODE`
-- `--no-auth` / `GUPPI_NO_AUTH`
+- `--port` / `TERMYARD_PORT` (default 7654)
+- `--socket` / `TERMYARD_SOCKET` (local notify CLI socket path)
+- `--discovery-interval` / `TERMYARD_DISCOVERY_INTERVAL` (default 2s)
+- `--no-control-mode` / `TERMYARD_NO_CONTROL_MODE`
+- `--no-auth` / `TERMYARD_NO_AUTH`
 
-All peer configuration lives in `~/.config/guppi/peers.json` and is managed
-through the UI. There is no `--hub`, no `--tls-*`, no `guppi pair`, no
-`guppi peers` CLI.
+All peer configuration lives in `~/.config/termyard/peers.json` and is managed
+through the UI. There is no `--hub`, no `--tls-*`, no `termyard pair`, no
+`termyard peers` CLI.
 
-## Migration from older guppi
+## Migration from older termyard
 
 Old `peers.json` entries are loaded automatically (legacy TLS fields are
 ignored). You will need to re-pair only if the old setup relied on pinned

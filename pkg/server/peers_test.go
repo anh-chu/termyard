@@ -12,19 +12,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ekristen/guppi/pkg/activity"
-	"github.com/ekristen/guppi/pkg/auth"
-	"github.com/ekristen/guppi/pkg/identity"
-	"github.com/ekristen/guppi/pkg/peer"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/activity"
+	"github.com/anh-chu/termyard/pkg/auth"
+	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/peer"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 func newTestOpts(t *testing.T) *Options {
 	t.Helper()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
-	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "guppi"), 0o700)
+	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "termyard"), 0o700)
 
 	id, _ := identity.Generate("local-host")
 	ps, _ := identity.NewPeerStore()
@@ -84,7 +84,7 @@ func TestPostPeersBootstrapNoPasswordReturns503(t *testing.T) {
 	// Clear password.
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
-	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "guppi"), 0o700)
+	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "termyard"), 0o700)
 	freshStore, _ := auth.NewPasswordStore()
 	opts.PasswordStore = freshStore
 

@@ -13,14 +13,14 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ekristen/guppi/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/identity"
 )
 
 // LinkStatus reports the state of a per-peer link.
 type LinkStatus string
 
 const (
-	StatusIdle      LinkStatus = "idle"      // disabled
+	StatusIdle      LinkStatus = "idle" // disabled
 	StatusDialing   LinkStatus = "dialing"
 	StatusConnected LinkStatus = "connected"
 	StatusBackoff   LinkStatus = "backoff"

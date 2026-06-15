@@ -75,7 +75,7 @@ func StorePastedImage(data, mimeType, filename string) (string, error) {
 		return "", fmt.Errorf("pasted image exceeds %d byte limit", maxPastedImageBytes)
 	}
 
-	dir := filepath.Join(os.TempDir(), "guppi-paste")
+	dir := filepath.Join(os.TempDir(), "termyard-paste")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create paste directory: %w", err)
 	}

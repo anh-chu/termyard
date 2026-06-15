@@ -9,8 +9,8 @@ import (
 type Mode string
 
 const (
-	// ModeProxy routes traffic through guppi's HTTP reverse-proxy at
-	// /proxy/{port}/ — HTTP/WebSocket only, inherits guppi auth.
+	// ModeProxy routes traffic through termyard's HTTP reverse-proxy at
+	// /proxy/{port}/ — HTTP/WebSocket only, inherits termyard auth.
 	ModeProxy Mode = "proxy"
 	// ModeSocat binds the port on 0.0.0.0 via socat, exposing raw TCP
 	// directly. Works for any protocol; no auth layer.
@@ -19,12 +19,12 @@ const (
 
 // Forward is a single port-forwarding entry.
 type Forward struct {
-	Port         int    `json:"port"`
-	Label        string `json:"label"`
-	Mode         Mode   `json:"mode"`
+	Port  int    `json:"port"`
+	Label string `json:"label"`
+	Mode  Mode   `json:"mode"`
 	// ExternalPort is the port socat binds on 0.0.0.0 (socat mode only).
 	// Must differ from Port because the service already owns Port on 127.0.0.1.
-	ExternalPort int    `json:"external_port,omitempty"`
+	ExternalPort int `json:"external_port,omitempty"`
 
 	// socatPID is the PID of the socat child process, or 0 if not running.
 	// Not exported — callers use Store methods.

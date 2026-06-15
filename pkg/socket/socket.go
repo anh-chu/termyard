@@ -7,27 +7,27 @@ import (
 	"runtime"
 )
 
-const socketName = "guppi.sock"
+const socketName = "termyard.sock"
 
 // DefaultPath returns the default Unix socket path for the current user.
 // It follows the XDG Base Directory Specification with platform-appropriate fallbacks:
-//  1. $XDG_RUNTIME_DIR/guppi/guppi.sock (Linux standard)
-//  2. $TMPDIR/guppi-$UID/guppi.sock (macOS / fallback)
-//  3. /tmp/guppi-$UID/guppi.sock (last resort)
+//  1. $XDG_RUNTIME_DIR/termyard/termyard.sock (Linux standard)
+//  2. $TMPDIR/termyard-$UID/termyard.sock (macOS / fallback)
+//  3. /tmp/termyard-$UID/termyard.sock (last resort)
 func DefaultPath() string {
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "guppi", socketName)
+		return filepath.Join(dir, "termyard", socketName)
 	}
 
 	uid := fmt.Sprintf("%d", os.Getuid())
 
 	if runtime.GOOS == "darwin" {
 		if tmpDir := os.Getenv("TMPDIR"); tmpDir != "" {
-			return filepath.Join(tmpDir, "guppi-"+uid, socketName)
+			return filepath.Join(tmpDir, "termyard-"+uid, socketName)
 		}
 	}
 
-	return filepath.Join("/tmp", "guppi-"+uid, socketName)
+	return filepath.Join("/tmp", "termyard-"+uid, socketName)
 }
 
 // EnsureDir creates the parent directory for the socket path with 0700 permissions.

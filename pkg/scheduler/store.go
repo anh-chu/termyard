@@ -32,7 +32,7 @@ type Job struct {
 	CreatedAt         time.Time `json:"created_at"`
 }
 
-// Store persists schedules to ~/.config/guppi/schedules.json.
+// Store persists schedules to ~/.config/termyard/schedules.json.
 type Store struct {
 	mu   sync.RWMutex
 	path string
@@ -44,7 +44,7 @@ func configDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "guppi"), nil
+	return filepath.Join(home, ".config", "termyard"), nil
 }
 
 func NewStore() (*Store, error) {

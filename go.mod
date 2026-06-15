@@ -1,4 +1,4 @@
-module github.com/ekristen/guppi
+module github.com/anh-chu/termyard
 
 go 1.25.1
 

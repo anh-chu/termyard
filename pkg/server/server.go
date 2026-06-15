@@ -30,26 +30,26 @@ import (
 
 	wp "github.com/SherClockHolmes/webpush-go"
 
-	"github.com/ekristen/guppi/pkg/activity"
-	"github.com/ekristen/guppi/pkg/agentcheck"
-	"github.com/ekristen/guppi/pkg/auth"
-	"github.com/ekristen/guppi/pkg/common"
-	"github.com/ekristen/guppi/pkg/git"
-	"github.com/ekristen/guppi/pkg/identity"
-	"github.com/ekristen/guppi/pkg/namer"
-	"github.com/ekristen/guppi/pkg/peer"
-	"github.com/ekristen/guppi/pkg/portforward"
-	"github.com/ekristen/guppi/pkg/preferences"
-	"github.com/ekristen/guppi/pkg/recovery"
-	"github.com/ekristen/guppi/pkg/scheduler"
-	"github.com/ekristen/guppi/pkg/sessionattrs"
-	"github.com/ekristen/guppi/pkg/socket"
-	"github.com/ekristen/guppi/pkg/state"
-	"github.com/ekristen/guppi/pkg/stats"
-	"github.com/ekristen/guppi/pkg/tmux"
-	"github.com/ekristen/guppi/pkg/toolevents"
-	"github.com/ekristen/guppi/pkg/webpush"
-	"github.com/ekristen/guppi/pkg/ws"
+	"github.com/anh-chu/termyard/pkg/activity"
+	"github.com/anh-chu/termyard/pkg/agentcheck"
+	"github.com/anh-chu/termyard/pkg/auth"
+	"github.com/anh-chu/termyard/pkg/common"
+	"github.com/anh-chu/termyard/pkg/git"
+	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/namer"
+	"github.com/anh-chu/termyard/pkg/peer"
+	"github.com/anh-chu/termyard/pkg/portforward"
+	"github.com/anh-chu/termyard/pkg/preferences"
+	"github.com/anh-chu/termyard/pkg/recovery"
+	"github.com/anh-chu/termyard/pkg/scheduler"
+	"github.com/anh-chu/termyard/pkg/sessionattrs"
+	"github.com/anh-chu/termyard/pkg/socket"
+	"github.com/anh-chu/termyard/pkg/state"
+	"github.com/anh-chu/termyard/pkg/stats"
+	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/toolevents"
+	"github.com/anh-chu/termyard/pkg/webpush"
+	"github.com/anh-chu/termyard/pkg/ws"
 )
 
 type Options struct {
@@ -267,7 +267,7 @@ func CreateSession(opts *Options, req scheduler.CreateSessionReq) error {
 				expanded = home + expanded[1:]
 			}
 		}
-		// Resolve bare relative paths (e.g. "guppi") against the home dir.
+		// Resolve bare relative paths (e.g. "termyard") against the home dir.
 		if !filepath.IsAbs(expanded) {
 			if home, err := os.UserHomeDir(); err == nil {
 				expanded = filepath.Join(home, expanded)
@@ -383,12 +383,12 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 // of regexp compilation on every request.
 var absPathRe = regexp.MustCompile(`((?:href|src|action|srcset|data-src|data-href)=")(/[^/])`)
 
-// handleProxy reverse-proxies a request to a locally-bound port on the guppi
+// handleProxy reverse-proxies a request to a locally-bound port on the termyard
 // host. WebSocket upgrade requests are tunnelled over raw TCP so that
-// localhost-only dev servers remain accessible through the guppi URL.
+// localhost-only dev servers remain accessible through the termyard URL.
 //
 // Route pattern: /proxy/{port}/{rest...}
-func handleProxy(w http.ResponseWriter, r *http.Request, guppiPort int) {
+func handleProxy(w http.ResponseWriter, r *http.Request, termyardPort int) {
 	// Extract port from chi URL params
 	portStr := chi.URLParam(r, "port")
 	port, err := strconv.Atoi(portStr)
@@ -396,8 +396,8 @@ func handleProxy(w http.ResponseWriter, r *http.Request, guppiPort int) {
 		http.Error(w, "invalid port", http.StatusBadRequest)
 		return
 	}
-	if port == guppiPort {
-		http.Error(w, "cannot proxy guppi's own port", http.StatusForbidden)
+	if port == termyardPort {
+		http.Error(w, "cannot proxy termyard's own port", http.StatusForbidden)
 		return
 	}
 
@@ -438,13 +438,13 @@ func handleProxy(w http.ResponseWriter, r *http.Request, guppiPort int) {
 
 // makeHTMLRewriter returns a ModifyResponse function that rewrites absolute
 // paths in HTML responses so browsers route asset requests back through the
-// guppi proxy rather than directly to the host root.
+// termyard proxy rather than directly to the host root.
 //
 // For example, a Next.js app served at /proxy/8377/ generates:
 //
 //	<script src="/_next/static/chunks/main.js">
 //
-// which the browser resolves to devvm:7654/_next/... (a guppi 404). The
+// which the browser resolves to devvm:7654/_next/... (a termyard 404). The
 // rewriter turns it into src="/proxy/8377/_next/...", which routes correctly.
 //
 // It also patches the assetPrefix/basePath fields in Next.js __NEXT_DATA__ so
@@ -508,7 +508,7 @@ func makeHTMLRewriter(port int) func(*http.Response) error {
 
 // proxyWebSocket tunnels a WebSocket upgrade through a raw TCP connection to
 // the downstream port, allowing WebSocket-based dev servers to work through
-// the guppi port-forward proxy.
+// the termyard port-forward proxy.
 func proxyWebSocket(w http.ResponseWriter, r *http.Request, port int, path string) {
 	backend, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
 	if err != nil {
@@ -1631,7 +1631,7 @@ func Run(ctx context.Context, opts *Options) error {
 		r.Get("/ws/peer", opts.PeerHandler.HandlePeer)
 	}
 
-	// Port-forward proxy — exposes localhost-bound services through guppi's URL.
+	// Port-forward proxy — exposes localhost-bound services through termyard's URL.
 	// Requires auth (same rule as other protected routes) so remote users can't
 	// reach internal services without a valid session.
 	if opts.PortForwardStore != nil {
@@ -1691,7 +1691,7 @@ func Run(ctx context.Context, opts *Options) error {
 		}
 	}()
 
-	logger.WithField("port", opts.Port).Info("starting guppi server")
+	logger.WithField("port", opts.Port).Info("starting termyard server")
 	logger.Infof("open http://localhost:%d in your browser", opts.Port)
 	if opts.AuthEnabled {
 		logger.Info("authentication is enabled")

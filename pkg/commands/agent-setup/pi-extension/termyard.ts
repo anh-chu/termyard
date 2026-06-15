@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 export default function (pi) {
-  const guppiBin = process.env.GUPPI_BIN || "__GUPPI_BIN__";
+  const termyardBin = process.env.TERMYARD_BIN || "__TERMYARD_BIN__";
 
   const safeString = (value, fallback = "") => {
     if (typeof value === "string") return value;
@@ -17,18 +17,18 @@ export default function (pi) {
 
   const notify = (status, message, extraArgs = []) => {
     try {
-      spawnSync(guppiBin, ["notify", "-t", "pi", "-s", status, "-m", message, ...extraArgs], { stdio: "ignore" });
+      spawnSync(termyardBin, ["notify", "-t", "pi", "-s", status, "-m", message, ...extraArgs], { stdio: "ignore" });
     } catch (e) {
       // Never crash Pi
     }
   };
 
-  // Pass tool name via stdin JSON so guppi maps it to an activity label
+  // Pass tool name via stdin JSON so termyard maps it to an activity label
   // (e.g. "bash" → "running commands", "read" → "reading files")
   const notifyWithToolName = (toolName) => {
     try {
       const payload = JSON.stringify({ hook_event_name: "PreToolUse", tool_name: safeString(toolName) });
-      spawnSync(guppiBin, ["notify", "-t", "pi", "--stdin"], {
+      spawnSync(termyardBin, ["notify", "-t", "pi", "--stdin"], {
         input: payload,
         stdio: ["pipe", "ignore", "ignore"],
         encoding: "utf8",

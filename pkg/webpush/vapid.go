@@ -16,16 +16,16 @@ type VAPIDKeys struct {
 	PrivateKey string `json:"private_key"`
 }
 
-// dataDir returns the directory for storing guppi data files
+// dataDir returns the directory for storing termyard data files
 func dataDir() string {
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
-		return filepath.Join(dir, "guppi")
+		return filepath.Join(dir, "termyard")
 	}
 	home, _ := os.UserHomeDir()
 	if runtime.GOOS == "darwin" {
-		return filepath.Join(home, "Library", "Application Support", "guppi")
+		return filepath.Join(home, "Library", "Application Support", "termyard")
 	}
-	return filepath.Join(home, ".local", "share", "guppi")
+	return filepath.Join(home, ".local", "share", "termyard")
 }
 
 // LoadOrCreateKeys loads VAPID keys from disk, or generates and persists new ones

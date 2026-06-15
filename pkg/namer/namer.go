@@ -62,8 +62,8 @@ type Config struct {
 	Timeout  time.Duration
 }
 
-// ConfigFromEnv reads namer configuration from GUPPI_NAMER_* environment
-// variables. Falls back to GUPPI_OPENAI_* for endpoint/key/model so a single
+// ConfigFromEnv reads namer configuration from TERMYARD_NAMER_* environment
+// variables. Falls back to TERMYARD_OPENAI_* for endpoint/key/model so a single
 // OpenAI-compatible config can be shared.
 func ConfigFromEnv() Config {
 	get := func(keys ...string) string {
@@ -75,9 +75,9 @@ func ConfigFromEnv() Config {
 		return ""
 	}
 	c := Config{
-		Endpoint: get("GUPPI_NAMER_ENDPOINT", "GUPPI_OPENAI_ENDPOINT", "GUPPI_OPENAI_BASE_URL"),
-		APIKey:   get("GUPPI_NAMER_API_KEY", "GUPPI_OPENAI_API_KEY"),
-		Model:    get("GUPPI_NAMER_MODEL", "GUPPI_OPENAI_MODEL"),
+		Endpoint: get("TERMYARD_NAMER_ENDPOINT", "TERMYARD_OPENAI_ENDPOINT", "TERMYARD_OPENAI_BASE_URL"),
+		APIKey:   get("TERMYARD_NAMER_API_KEY", "TERMYARD_OPENAI_API_KEY"),
+		Model:    get("TERMYARD_NAMER_MODEL", "TERMYARD_OPENAI_MODEL"),
 		Timeout:  8 * time.Second,
 	}
 	if c.Model == "" && c.Endpoint != "" {
@@ -87,7 +87,7 @@ func ConfigFromEnv() Config {
 }
 
 // Configure builds a Config from explicit settings (e.g. user preferences),
-// falling back to GUPPI_NAMER_* / GUPPI_OPENAI_* environment variables for any
+// falling back to TERMYARD_NAMER_* / TERMYARD_OPENAI_* environment variables for any
 // empty field. If enabled is false it returns a disabled (zero-endpoint)
 // Config.
 func Configure(enabled bool, endpoint, apiKey, model string) Config {

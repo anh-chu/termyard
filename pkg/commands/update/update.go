@@ -1,4 +1,4 @@
-// Package update implements `guppi update`: in-place self-update from
+// Package update implements `termyard update`: in-place self-update from
 // GitHub Releases. Channel-aware (stable / nightly), arch-aware, and
 // binary-path aware (resolves symlinks, swaps atomically).
 package update
@@ -23,10 +23,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v3"
 
-	"github.com/ekristen/guppi/pkg/common"
+	"github.com/anh-chu/termyard/pkg/common"
 )
 
-const defaultRepo = "anh-chu/guppi"
+const defaultRepo = "anh-chu/termyard"
 
 // Channel is the release stream to track.
 type Channel string
@@ -38,12 +38,12 @@ const (
 
 // release mirrors the fields we use from the GitHub Releases API.
 type release struct {
-	TagName    string    `json:"tag_name"`
-	Name       string    `json:"name"`
-	Prerelease bool      `json:"prerelease"`
-	Draft      bool      `json:"draft"`
+	TagName     string    `json:"tag_name"`
+	Name        string    `json:"name"`
+	Prerelease  bool      `json:"prerelease"`
+	Draft       bool      `json:"draft"`
 	PublishedAt time.Time `json:"published_at"`
-	Assets     []struct {
+	Assets      []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 		Size               int64  `json:"size"`
@@ -85,7 +85,7 @@ func pickRelease(ctx context.Context, repo string, ch Channel, pinnedTag string)
 			return err
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("User-Agent", "guppi-update/"+common.VERSION)
+		req.Header.Set("User-Agent", "termyard-update/"+common.VERSION)
 		resp, err := client.Do(req)
 		if err != nil {
 			return fmt.Errorf("github api: %w", err)
@@ -140,7 +140,7 @@ func pickRelease(ctx context.Context, repo string, ch Channel, pinnedTag string)
 // just substitute the bare tag back into the same shape.
 func expectedAssetName(tag, goos, goarch string) string {
 	v := strings.TrimPrefix(tag, "v")
-	return fmt.Sprintf("guppi-v%s-%s-%s.tar.gz", v, goos, goarch)
+	return fmt.Sprintf("termyard-v%s-%s-%s.tar.gz", v, goos, goarch)
 }
 
 // findAsset returns the URL + size of the archive matching this host's
@@ -173,7 +173,7 @@ func downloadToTemp(ctx context.Context, url, dir, prefix string) (string, strin
 	if err != nil {
 		return "", "", err
 	}
-	req.Header.Set("User-Agent", "guppi-update/"+common.VERSION)
+	req.Header.Set("User-Agent", "termyard-update/"+common.VERSION)
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -220,9 +220,9 @@ func expectedChecksum(checksumsBody, archiveName string) (string, error) {
 	return "", fmt.Errorf("checksum for %q not found", archiveName)
 }
 
-// extractGuppiBinary pulls the `guppi` (or `guppi.exe`) file out of the
+// extractTermyardBinary pulls the `termyard` (or `termyard.exe`) file out of the
 // tarball at archivePath and writes it to outPath. Returns the bytes written.
-func extractGuppiBinary(archivePath, outPath string) error {
+func extractTermyardBinary(archivePath, outPath string) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func extractGuppiBinary(archivePath, outPath string) error {
 			return fmt.Errorf("read tar: %w", err)
 		}
 		base := filepath.Base(h.Name)
-		if base != "guppi" && base != "guppi.exe" {
+		if base != "termyard" && base != "termyard.exe" {
 			continue
 		}
 		out, err := os.OpenFile(outPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
@@ -259,7 +259,7 @@ func extractGuppiBinary(archivePath, outPath string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("guppi binary not found in archive")
+	return fmt.Errorf("termyard binary not found in archive")
 }
 
 // suggestRestart inspects the OS for a known service manager and prints a
@@ -267,17 +267,17 @@ func extractGuppiBinary(archivePath, outPath string) error {
 func suggestRestart(log *logrus.Entry) {
 	switch runtime.GOOS {
 	case "linux":
-		if out, err := exec.Command("systemctl", "--user", "is-active", "guppi.service").Output(); err == nil && strings.TrimSpace(string(out)) == "active" {
-			log.Info("restart with: systemctl --user restart guppi")
+		if out, err := exec.Command("systemctl", "--user", "is-active", "termyard.service").Output(); err == nil && strings.TrimSpace(string(out)) == "active" {
+			log.Info("restart with: systemctl --user restart termyard")
 			return
 		}
 	case "darwin":
-		if out, err := exec.Command("launchctl", "list", "com.guppi.server").Output(); err == nil && len(out) > 0 {
-			log.Info("restart with: launchctl kickstart -k gui/$(id -u)/com.guppi.server")
+		if out, err := exec.Command("launchctl", "list", "com.termyard.server").Output(); err == nil && len(out) > 0 {
+			log.Info("restart with: launchctl kickstart -k gui/$(id -u)/com.termyard.server")
 			return
 		}
 	}
-	log.Info("if guppi is currently running, restart it for the update to take effect")
+	log.Info("if termyard is currently running, restart it for the update to take effect")
 }
 
 // run performs the update flow. dryRun=true means: check + report only.
@@ -304,9 +304,9 @@ func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun,
 		return err
 	}
 	log.WithFields(logrus.Fields{
-		"tag":         rel.TagName,
-		"prerelease":  rel.Prerelease,
-		"published":   rel.PublishedAt.Format(time.RFC3339),
+		"tag":        rel.TagName,
+		"prerelease": rel.Prerelease,
+		"published":  rel.PublishedAt.Format(time.RFC3339),
 	}).Info("found release")
 
 	if !force && current != "" {
@@ -339,7 +339,7 @@ func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun,
 	log.WithField("path", binPath).Info("target binary")
 
 	// Download checksums first, then archive.
-	tmpDir, err := os.MkdirTemp("", "guppi-update-*")
+	tmpDir, err := os.MkdirTemp("", "termyard-update-*")
 	if err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun,
 	// Extract directly into a sibling of the target so the final rename is
 	// atomic (same filesystem).
 	newPath := binPath + ".new"
-	if err := extractGuppiBinary(archivePath, newPath); err != nil {
+	if err := extractTermyardBinary(archivePath, newPath); err != nil {
 		return err
 	}
 
@@ -419,8 +419,8 @@ func matches(currentVersion, tag string) bool {
 func init() {
 	cmd := &cli.Command{
 		Name:  "update",
-		Usage: "update guppi to the latest release",
-		Description: `Checks GitHub Releases for a newer build of guppi targeting this
+		Usage: "update termyard to the latest release",
+		Description: `Checks GitHub Releases for a newer build of termyard targeting this
 machine's OS/arch and swaps the running binary in place.
 
 Channels:
@@ -433,7 +433,7 @@ containing "nightly" defaults to the nightly channel).`,
 			&cli.StringFlag{
 				Name:    "channel",
 				Usage:   "release channel: stable or nightly (default: auto-detect from running version)",
-				Sources: cli.EnvVars("GUPPI_UPDATE_CHANNEL"),
+				Sources: cli.EnvVars("TERMYARD_UPDATE_CHANNEL"),
 			},
 			&cli.StringFlag{
 				Name:  "version",
@@ -442,7 +442,7 @@ containing "nightly" defaults to the nightly channel).`,
 			&cli.StringFlag{
 				Name:    "repo",
 				Usage:   "GitHub repo to pull releases from",
-				Sources: cli.EnvVars("GUPPI_UPDATE_REPO"),
+				Sources: cli.EnvVars("TERMYARD_UPDATE_REPO"),
 				Value:   defaultRepo,
 			},
 			&cli.BoolFlag{

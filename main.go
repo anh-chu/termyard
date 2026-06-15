@@ -8,13 +8,13 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v3"
 
-	"github.com/ekristen/guppi/pkg/common"
+	"github.com/anh-chu/termyard/pkg/common"
 
-	_ "github.com/ekristen/guppi/pkg/commands/agent-setup"
-	_ "github.com/ekristen/guppi/pkg/commands/install"
-	_ "github.com/ekristen/guppi/pkg/commands/notify"
-	_ "github.com/ekristen/guppi/pkg/commands/server"
-	_ "github.com/ekristen/guppi/pkg/commands/update"
+	_ "github.com/anh-chu/termyard/pkg/commands/agent-setup"
+	_ "github.com/anh-chu/termyard/pkg/commands/install"
+	_ "github.com/anh-chu/termyard/pkg/commands/notify"
+	_ "github.com/anh-chu/termyard/pkg/commands/server"
+	_ "github.com/anh-chu/termyard/pkg/commands/update"
 )
 
 func main() {
@@ -30,7 +30,7 @@ func main() {
 
 		app := &cli.Command{
 			Name:    common.AppVersion.Name,
-			Usage:   "web dashboard for monitoring and interacting with tmux sessions",
+			Usage:   "web dashboard for monitoring AI coding agents running in tmux sessions",
 			Version: common.AppVersion.Summary,
 			Authors: []any{
 				"Erik Kristensen <erik@erikkristensen.com>",

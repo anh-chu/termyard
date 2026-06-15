@@ -33,7 +33,7 @@ const APIKeyMask = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 
 // AINaming configures the optional AI session namer. When Enabled is false the
 // namer is off regardless of endpoint. Empty Endpoint/Model fall back to
-// GUPPI_NAMER_* / GUPPI_OPENAI_* environment variables.
+// TERMYARD_NAMER_* / TERMYARD_OPENAI_* environment variables.
 type AINaming struct {
 	Enabled  bool   `json:"enabled"`
 	Endpoint string `json:"endpoint"`
@@ -106,7 +106,7 @@ func configDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "guppi"), nil
+	return filepath.Join(home, ".config", "termyard"), nil
 }
 
 func NewStore() (*Store, error) {

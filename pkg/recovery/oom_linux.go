@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ekristen/guppi/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 func TuneOomPanes(sessions []*tmux.Session) error {

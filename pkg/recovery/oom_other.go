@@ -2,6 +2,6 @@
 
 package recovery
 
-import "github.com/ekristen/guppi/pkg/tmux"
+import "github.com/anh-chu/termyard/pkg/tmux"
 
 func TuneOomPanes(sessions []*tmux.Session) error { return nil }

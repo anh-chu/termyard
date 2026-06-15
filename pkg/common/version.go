@@ -1,7 +1,7 @@
 package common
 
 // NAME of the App
-var NAME = "guppi"
+var NAME = "termyard"
 
 // SUMMARY of the Version
 var SUMMARY = "v0.12.0" // x-release-please-version

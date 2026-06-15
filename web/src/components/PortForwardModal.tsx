@@ -9,7 +9,7 @@ interface Props {
 const modeLabels: Record<ForwardMode, { short: string; desc: string; color: string }> = {
   proxy: {
     short: 'HTTP proxy',
-    desc: 'Route HTTP/WebSocket through guppi — same port, same auth, browser link.',
+    desc: 'Route HTTP/WebSocket through termyard — same port, same auth, browser link.',
     color: 'text-primary bg-primary/10 border-primary/30',
   },
   socat: {
@@ -84,7 +84,7 @@ export function PortForwardModal({ onClose }: Props) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-hairline">
           <div>
             <h2 className="text-sm font-bold text-ink tracking-tight">Port Forwards</h2>
-            <p className="text-xs text-mute mt-0.5">Expose localhost-bound services through guppi</p>
+            <p className="text-xs text-mute mt-0.5">Expose localhost-bound services through termyard</p>
           </div>
           <button
             onClick={onClose}
