@@ -240,6 +240,16 @@ export function Sidebar({
   const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('guppi:session-order'))
   const [projectFilters, setProjectFilters] = useState<string[]>(() => readStoredList('guppi:project-filters'))
   const [hiddenExpanded, setHiddenExpanded] = useState(false)
+  const [scheduledExpanded, setScheduledExpanded] = useState(() => {
+    try { return localStorage.getItem('guppi:scheduled-collapsed') !== '1' } catch { return true }
+  })
+  const toggleScheduledExpanded = useCallback(() => {
+    setScheduledExpanded(prev => {
+      const next = !prev
+      try { localStorage.setItem('guppi:scheduled-collapsed', next ? '0' : '1') } catch {}
+      return next
+    })
+  }, [])
   const [renamingSession, setRenamingSession] = useState<RenameState | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [contextMenu, setContextMenu] = useState<{ key: string; id: string; name: string; label: string; host?: string; isWorktree?: boolean; x: number; y: number } | null>(null)
@@ -556,29 +566,14 @@ export function Sidebar({
   type UnifiedItem =
     | { kind: 'session'; session: Session }
     | { kind: 'group'; group: NonNullable<typeof layoutGroups>[number]; sessions: Session[] }
-    | { kind: 'schedule'; scheduleId: string; schedule: (typeof schedules)[number] | undefined; sessions: Session[] }
 
   const unifiedItems = useMemo((): UnifiedItem[] => {
     const items: UnifiedItem[] = []
     const seenGroups = new Set<string>()
-    const seenScheduleGroups = new Set<string>()
     for (const session of visibleSessions) {
       const scheduleId = scheduleIDs.get(sessionKey(session)) || scheduleIDs.get(session.name) || sessionScheduleID(session)
-      if (scheduleId) {
-        if (!seenScheduleGroups.has(scheduleId)) {
-          seenScheduleGroups.add(scheduleId)
-          const scheduleSessions = sortNewestFirst(
-            visibleSessions.filter(item => (scheduleIDs.get(sessionKey(item)) || scheduleIDs.get(item.name) || sessionScheduleID(item)) === scheduleId),
-          )
-          items.push({
-            kind: 'schedule',
-            scheduleId,
-            schedule: scheduleById.get(scheduleId),
-            sessions: scheduleSessions,
-          })
-        }
-        continue
-      }
+      // Scheduled sessions are rendered in their own pinned footer block, not inline.
+      if (scheduleId) continue
       const group = layoutGroups?.find(g => g.leaves.includes(sessionKey(session)))
       if (group) {
         if (!seenGroups.has(group.id)) {
@@ -602,7 +597,24 @@ export function Sidebar({
       }
     }
     return items
-  }, [visibleSessions, layoutGroups, schedules, scheduleById, scheduleIDs])
+  }, [visibleSessions, layoutGroups, scheduleIDs])
+
+  // Schedule groups render in a dedicated pinned block above the Hidden section,
+  // out of the scrolling session list — recurring/background work, not active.
+  const scheduleGroups = useMemo(() => {
+    const groups: { scheduleId: string; schedule: (typeof schedules)[number] | undefined; sessions: Session[] }[] = []
+    const seen = new Set<string>()
+    for (const session of visibleSessions) {
+      const scheduleId = scheduleIDs.get(sessionKey(session)) || scheduleIDs.get(session.name) || sessionScheduleID(session)
+      if (!scheduleId || seen.has(scheduleId)) continue
+      seen.add(scheduleId)
+      const scheduleSessions = sortNewestFirst(
+        visibleSessions.filter(item => (scheduleIDs.get(sessionKey(item)) || scheduleIDs.get(item.name) || sessionScheduleID(item)) === scheduleId),
+      )
+      groups.push({ scheduleId, schedule: scheduleById.get(scheduleId), sessions: scheduleSessions })
+    }
+    return groups
+  }, [visibleSessions, schedules, scheduleById, scheduleIDs])
 
   // Derive the status badge for a session. Single source of truth shared by the
   // row renderer and the status-grouped view mode.
@@ -999,10 +1011,13 @@ export function Sidebar({
   const renderScheduleItem = (scheduleId: string, sessions: Session[], schedule?: (typeof schedules)[number]) => {
     const latest = sessions[0]
     const isExpanded = expandedScheduleGroups.has(scheduleId)
-    const shouldShowSessions = isExpanded || sessions.length === 1
     const maxExpandedChildren = 6
-    const childSessions = shouldShowSessions ? sessions.slice(0, maxExpandedChildren) : [latest].filter(Boolean)
+    // Collapsed groups hide ALL runs; the indicator below surfaces count + state.
+    const childSessions = isExpanded ? sessions.slice(0, maxExpandedChildren) : []
     const overflow = isExpanded && sessions.length > maxExpandedChildren ? sessions.length - maxExpandedChildren : 0
+    const latestStatus = latest ? statusOf(latest) : 'idle'
+    const latestColor = statusBadgeConfig[latestStatus].color
+    const attentionCount = sessions.filter(s => { const st = statusOf(s); return st === 'stuck' || st === 'waiting' }).length
     const deleted = !schedule
     const enabled = schedule?.enabled ?? true
     const host = schedule?.host || ''
@@ -1026,17 +1041,26 @@ export function Sidebar({
                   {stateLabel}
                 </span>
               </div>
-              <div className="mt-0.5 text-[10px] text-mute/60 truncate" title={schedule?.cronSpec}>
-                {(schedule?.cronSpec ? describeCron(schedule.cronSpec) : null) ?? schedule?.cronSpec ?? '—'}  ·  next {formatRelativeTime(schedule?.nextRun)}  ·  {schedule?.runCount ?? sessions.length} runs
+              <div className="mt-0.5 text-[10px] text-mute/60 flex items-center gap-1.5">
+                <span className="truncate" title={schedule?.cronSpec}>
+                  {(schedule?.cronSpec ? describeCron(schedule.cronSpec) : null) ?? schedule?.cronSpec ?? '—'}  ·  next {formatRelativeTime(schedule?.nextRun)}  ·  {schedule?.runCount ?? sessions.length} runs
+                </span>
+                <span className="shrink-0 inline-flex items-center gap-1" title={`${sessions.length} session${sessions.length === 1 ? '' : 's'}, latest ${latestStatus}`}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: latestColor }} />
+                  {sessions.length}
+                  {attentionCount > 0 && <span className="text-accent-red font-semibold">{attentionCount}⚠</span>}
+                </span>
               </div>
             </div>
           </button>
-          <div className="px-1.5 pb-1.5 pl-5 space-y-0.5">
-            {childSessions.map((session, idx) => renderSessionItem(session, false, null))}
-            {overflow > 0 && (
-              <div className="px-2 pt-1 text-[10px] text-mute/60 font-medium">+{overflow} more</div>
-            )}
-          </div>
+          {childSessions.length > 0 && (
+            <div className="px-1.5 pb-1.5 pl-5 space-y-0.5">
+              {childSessions.map((session, idx) => renderSessionItem(session, false, null))}
+              {overflow > 0 && (
+                <div className="px-2 pt-1 text-[10px] text-mute/60 font-medium">+{overflow} more</div>
+              )}
+            </div>
+          )}
         </div>
       </li>
     )
@@ -1207,9 +1231,6 @@ export function Sidebar({
           {viewMode === 'default' && unifiedItems.map(item => {
             if (item.kind === 'session') {
               return renderSessionItem(item.session, false, null)
-            }
-            if (item.kind === 'schedule') {
-              return renderScheduleItem(item.scheduleId, item.sessions, item.schedule)
             }
             const { group, sessions: groupSessions } = item
             const firstLeaf = group.leaves[0]
@@ -1503,6 +1524,29 @@ export function Sidebar({
 
         </ul>
       </nav>
+
+      {scheduleGroups.length > 0 && !collapsed && (
+        <div className="border-t border-hairline bg-canvas shrink-0">
+          <button
+            type="button"
+            onClick={toggleScheduledExpanded}
+            className="w-full px-3 py-1.5 text-[10px] uppercase tracking-widest font-semibold text-mute/60 select-none flex items-center gap-1 hover:text-mute transition-colors"
+          >
+            <span
+              className="inline-block transition-transform duration-150"
+              style={{ transform: scheduledExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            >
+              ▶
+            </span>
+            Scheduled ({scheduleGroups.length})
+          </button>
+          {scheduledExpanded && (
+            <ul className="px-2 pb-2 space-y-1">
+              {scheduleGroups.map(g => renderScheduleItem(g.scheduleId, g.sessions, g.schedule))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {hiddenSessions.length > 0 && !collapsed && (
         <div className="border-t border-hairline bg-canvas shrink-0">
