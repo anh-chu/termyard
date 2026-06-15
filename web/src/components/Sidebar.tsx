@@ -53,6 +53,7 @@ interface SidebarProps {
 interface RenameState {
   key: string
   name: string
+  label: string
   host?: string
 }
 
@@ -241,7 +242,7 @@ export function Sidebar({
   const [hiddenExpanded, setHiddenExpanded] = useState(false)
   const [renamingSession, setRenamingSession] = useState<RenameState | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const [contextMenu, setContextMenu] = useState<{ key: string; id: string; name: string; host?: string; isWorktree?: boolean; x: number; y: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ key: string; id: string; name: string; label: string; host?: string; isWorktree?: boolean; x: number; y: number } | null>(null)
   const [confirmKillKey, setConfirmKillKey] = useState<string | null>(null)
   const [confirmWorktreeKillKey, setConfirmWorktreeKillKey] = useState<string | null>(null)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -425,7 +426,7 @@ export function Sidebar({
 
   const startRename = (session: RenameState) => {
     setRenamingSession(session)
-    setRenameValue(session.name)
+    setRenameValue(session.label)
     setContextMenu(null)
   }
 
@@ -460,7 +461,7 @@ export function Sidebar({
   }
 
   const submitRename = async () => {
-    if (!renamingSession || !renameValue.trim() || renameValue === renamingSession.name) {
+    if (!renamingSession || !renameValue.trim() || renameValue === renamingSession.label) {
       setRenamingSession(null)
       return
     }
@@ -694,7 +695,7 @@ export function Sidebar({
       const y = touch.clientY
       touchTimerRef.current = setTimeout(() => {
         touchTimerRef.current = null
-        setContextMenu({ key: sk, id: session.id, name: session.name, host: session.host, isWorktree: session.is_worktree ?? false, x, y })
+        setContextMenu({ key: sk, id: session.id, name: session.name, label: sessionLabel(session), host: session.host, isWorktree: session.is_worktree ?? false, x, y })
       }, 600)
     }
 
@@ -828,7 +829,7 @@ export function Sidebar({
           }}
           onContextMenu={(e) => {
             e.preventDefault()
-            setContextMenu({ key: sk, id: session.id, name: session.name, host: session.host, isWorktree: session.is_worktree ?? false, x: e.clientX, y: e.clientY })
+            setContextMenu({ key: sk, id: session.id, name: session.name, label: sessionLabel(session), host: session.host, isWorktree: session.is_worktree ?? false, x: e.clientX, y: e.clientY })
           }}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
@@ -1549,7 +1550,7 @@ export function Sidebar({
                     onMouseLeave={() => setHoveredBg(null)}
                     onContextMenu={(e) => {
                       e.preventDefault()
-                      setContextMenu({ key: sk, id: session.id, name: session.name, host: session.host, isWorktree: session.is_worktree ?? false, x: e.clientX, y: e.clientY })
+                      setContextMenu({ key: sk, id: session.id, name: session.name, label: sessionLabel(session), host: session.host, isWorktree: session.is_worktree ?? false, x: e.clientX, y: e.clientY })
                     }}
                     className={cn(
                       'relative flex items-center gap-2 w-full px-2.5 py-1 rounded-sm transition-all duration-200 min-w-0',
@@ -1624,6 +1625,7 @@ export function Sidebar({
             onClick={() => canRenameContextTarget && startRename({
               key: contextMenu.key,
               name: contextMenu.name,
+              label: contextMenu.label,
               host: contextMenu.host,
             })}
             className={cn(
