@@ -82,12 +82,18 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	go runShellNameWatcher(ctx, client, stateMgr)
 
+	attrsStore, err := sessionattrs.NewStore()
+	if err != nil {
+		logrus.WithError(err).Warn("failed to load session-attrs store, sync disabled")
+		attrsStore = nil
+	}
+
 	var health *recovery.HealthPoller
 	if !c.Bool("no-recovery") {
-		snap := recovery.NewSnapshotter(stateMgr)
+		snap := recovery.NewSnapshotter(stateMgr, attrsStore)
 		go snap.Run(ctx)
 
-		reb := recovery.NewRebuilder(client, stateMgr)
+		reb := recovery.NewRebuilder(client, stateMgr, attrsStore)
 		health = recovery.NewHealthPoller(client, 3*time.Second, func() {
 			logrus.Warn("tmux server gone, rebuilding from manifest")
 			if err := reb.Rebuild(ctx); err != nil {
@@ -163,12 +169,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}
 	if prefStore != nil {
 		applyNamerFromPrefs(prefStore.Get())
-	}
-
-	attrsStore, err := sessionattrs.NewStore()
-	if err != nil {
-		logrus.WithError(err).Warn("failed to load session-attrs store, sync disabled")
-		attrsStore = nil
 	}
 
 	schedulerStore, err := scheduler.NewStore()

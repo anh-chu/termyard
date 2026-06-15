@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/state"
 	"github.com/ekristen/guppi/pkg/tmux"
 )
@@ -14,15 +15,17 @@ import (
 // Snapshotter periodically persists manifest state.
 type Snapshotter struct {
 	stateMgr *state.Manager
+	attrs    *sessionattrs.Store
 	interval time.Duration
 	lastFP   string
 	gen      uint64
 	log      *logrus.Entry
 }
 
-func NewSnapshotter(sm *state.Manager) *Snapshotter {
+func NewSnapshotter(sm *state.Manager, attrs *sessionattrs.Store) *Snapshotter {
 	return &Snapshotter{
 		stateMgr: sm,
+		attrs:    attrs,
 		interval: 8 * time.Second,
 		log:      logrus.WithField("component", "recovery-snapshot"),
 	}
@@ -67,6 +70,9 @@ func (s *Snapshotter) snapshotOnce() error {
 			ProjectPath:    session.ProjectPath,
 			AgentType:      session.AgentType,
 			AgentSessionID: session.AgentSessionID,
+		}
+		if s.attrs != nil {
+			snap.ScheduleID = s.attrs.Get(session.Name).ScheduleID
 		}
 		windows := session.Windows
 		if len(windows) > 0 {

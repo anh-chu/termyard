@@ -251,6 +251,55 @@ func (s *Store) SetScheduleID(key, scheduleID string) (Attr, error) {
 	return cur, nil
 }
 
+// MigrateKey moves all stored attributes (schedule_id, background, hidden) from
+// a renamed session's old key to its new key, preserving the host prefix. A
+// session rename (manual, AI auto-naming, or peer-driven) otherwise orphans
+// these bits because every key is "<host>/<name>" or a bare "<name>".
+//
+// Only keys owned by this node are migrated: a bare key, or one host-qualified
+// with localHost. A same-named session owned by a peer ("<peerfp>/<name>") is
+// left untouched so a rename here never clobbers a peer's session. Returns the
+// new keys that received migrated data so the caller can fan out updates.
+func (s *Store) MigrateKey(localHost, oldName, newName string) ([]string, error) {
+	if oldName == "" || newName == "" || oldName == newName {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Collect matches first; mutating the map while ranging it is legal but
+	// makes visitation of freshly-inserted keys unspecified.
+	type move struct{ oldKey, newKey string }
+	var moves []move
+	for key := range s.attrs {
+		host, name := splitKey(key)
+		if name != oldName || (host != "" && host != localHost) {
+			continue
+		}
+		newKey := newName
+		if host != "" {
+			newKey = host + "/" + newName
+		}
+		if newKey != key {
+			moves = append(moves, move{oldKey: key, newKey: newKey})
+		}
+	}
+	if len(moves) == 0 {
+		return nil, nil
+	}
+	migrated := make([]string, 0, len(moves))
+	for _, mv := range moves {
+		attr := s.attrs[mv.oldKey]
+		attr.UpdatedAt = time.Now()
+		delete(s.attrs, mv.oldKey)
+		s.attrs[mv.newKey] = attr
+		migrated = append(migrated, mv.newKey)
+	}
+	if err := s.save(); err != nil {
+		return migrated, err
+	}
+	return migrated, nil
+}
+
 // put writes an entry, collapsing expired tombstones. Caller holds the lock.
 func (s *Store) put(key string, a Attr) {
 	if a.empty() && a.UpdatedAt.IsZero() {
@@ -272,10 +321,17 @@ func (s *Store) save() error {
 // ("<owner-fp>/<name>"). Mirrors parseSessionKey() on the frontend: the first
 // '/' separates host from name.
 func ownerOf(key string) string {
+	host, _ := splitKey(key)
+	return host
+}
+
+// splitKey divides a global session key into its host-fingerprint prefix and
+// session name on the first '/'. A bare key (single-host) yields an empty host.
+func splitKey(key string) (host, name string) {
 	for i := 0; i < len(key); i++ {
 		if key[i] == '/' {
-			return key[:i]
+			return key[:i], key[i+1:]
 		}
 	}
-	return ""
+	return "", key
 }

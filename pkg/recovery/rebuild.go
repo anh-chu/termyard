@@ -9,6 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/state"
 	"github.com/ekristen/guppi/pkg/tmux"
 )
@@ -27,13 +28,15 @@ type rebuildClient interface {
 type Rebuilder struct {
 	client   rebuildClient
 	stateMgr *state.Manager
+	attrs    *sessionattrs.Store
 	log      *logrus.Entry
 }
 
-func NewRebuilder(client rebuildClient, sm *state.Manager) *Rebuilder {
+func NewRebuilder(client rebuildClient, sm *state.Manager, attrs *sessionattrs.Store) *Rebuilder {
 	return &Rebuilder{
 		client:   client,
 		stateMgr: sm,
+		attrs:    attrs,
 		log:      logrus.WithField("component", "recovery-rebuild"),
 	}
 }
@@ -80,6 +83,13 @@ func (r *Rebuilder) rebuildSession(session SessionSnapshot) error {
 	}
 	if r.stateMgr != nil {
 		r.stateMgr.SetSessionAgentType(session.Name, session.AgentType)
+	}
+	// Restore schedule ownership so the rebuilt session rejoins its schedule
+	// group and stays subject to the concurrency cap.
+	if r.attrs != nil && session.ScheduleID != "" {
+		if _, err := r.attrs.SetScheduleID(session.Name, session.ScheduleID); err != nil {
+			r.log.WithError(err).WithField("session", session.Name).Warn("failed to restore schedule id")
+		}
 	}
 
 	for _, win := range windows {

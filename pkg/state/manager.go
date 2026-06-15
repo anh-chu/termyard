@@ -40,6 +40,11 @@ type Manager struct {
 	meta     map[string]SessionMetadata
 	namer    *namer.Namer
 
+	// onRename, when set, fires after a rename is applied (manual, AI naming, or
+	// peer-driven) so external per-session stores keyed by session name can
+	// migrate their entries.
+	onRename func(oldName, newName string)
+
 	// namesPath persists name metadata across restarts so AI/manual display
 	// names survive a server reload (tmux session names persist on their own,
 	// but shell DisplayNames and non-renamed agent names live only in meta).
@@ -527,6 +532,22 @@ func (m *Manager) ApplyRename(oldName, newName string) {
 
 	m.saveNames()
 	m.broadcast(StateEvent{Type: "session-renamed", Session: oldName, Data: map[string]string{"new_name": newName}})
+
+	m.mu.RLock()
+	hook := m.onRename
+	m.mu.RUnlock()
+	if hook != nil {
+		hook(oldName, newName)
+	}
+}
+
+// SetRenameHook installs an optional callback fired after a session rename is
+// applied. Used to migrate external per-session stores (e.g. shared session
+// attributes) keyed by session name.
+func (m *Manager) SetRenameHook(fn func(oldName, newName string)) {
+	m.mu.Lock()
+	m.onRename = fn
+	m.mu.Unlock()
 }
 
 // applyGeneratedName stores displayName for sessionName. The DisplayName is

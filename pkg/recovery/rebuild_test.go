@@ -69,7 +69,7 @@ func TestRebuildSkipsExistingSession(t *testing.T) {
 	}
 
 	h := &mockRebuildClient{hasSession: true}
-	r := NewRebuilder(h, nil)
+	r := NewRebuilder(h, nil, nil)
 	if err := r.Rebuild(context.Background()); err != nil {
 		t.Fatalf("Rebuild() failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestRebuildOrdersWindowsPanes(t *testing.T) {
 	}
 
 	h := &mockRebuildClient{}
-	r := NewRebuilder(h, nil)
+	r := NewRebuilder(h, nil, nil)
 	if err := r.Rebuild(context.Background()); err != nil {
 		t.Fatalf("Rebuild() failed: %v", err)
 	}

@@ -576,6 +576,28 @@ func Run(ctx context.Context, opts *Options) error {
 	// (per-key LWW) and bounces session-attrs-updated through the browser hub.
 	// Keys are global and host-qualified on every node — no translation layer.
 	if opts.AttrsStore != nil {
+		// Migrate shared session attributes (schedule_id, background, hidden)
+		// across a rename so a scheduled/parked session keeps its grouping and
+		// state when AI naming or a manual rename changes the tmux session key.
+		if opts.StateMgr != nil {
+			localHost := ""
+			if opts.Identity != nil {
+				localHost = opts.Identity.Fingerprint()
+			}
+			opts.StateMgr.SetRenameHook(func(oldName, newName string) {
+				migrated, err := opts.AttrsStore.MigrateKey(localHost, oldName, newName)
+				if err != nil {
+					logrus.WithError(err).WithField("session", newName).Warn("failed to persist migrated session attrs")
+				}
+				for _, key := range migrated {
+					attr := opts.AttrsStore.Get(key)
+					fanoutAttrsDeltaToPeers(opts, key, attr)
+					if hub != nil {
+						hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": key})
+					}
+				}
+			})
+		}
 		sink := attrsStoreAdapter{store: opts.AttrsStore}
 		if opts.LinkSupervisor != nil {
 			opts.LinkSupervisor.SetAttrsSink(sink)

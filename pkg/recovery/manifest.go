@@ -37,6 +37,7 @@ type SessionSnapshot struct {
 	ProjectPath    string           `json:"project_path,omitempty"`
 	AgentType      string           `json:"agent_type,omitempty"`
 	AgentSessionID string           `json:"agent_session_id,omitempty"`
+	ScheduleID     string           `json:"schedule_id,omitempty"`
 	Windows        []WindowSnapshot `json:"windows"`
 }
 
