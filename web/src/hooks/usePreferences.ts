@@ -22,6 +22,8 @@ export interface Preferences {
   sparklines_visible: boolean
   overview_refresh_interval: number
   timestamp_format: string
+  texture_enabled: boolean
+  display_font: string
   lock_timeout_minutes: number
   lock_background_faster: boolean
   lock_background_minutes: number
@@ -61,6 +63,8 @@ export const defaultPreferences: Preferences = {
   lock_background_faster: true,
   lock_background_minutes: 10,
   fullscreen_hide_alerts: true,
+  texture_enabled: true,
+  display_font: 'Space Mono',
   default_agent: 'claude',
   ai_naming: {
     enabled: false,
@@ -95,7 +99,16 @@ export function usePreferencesProvider() {
       const data = await res.json()
       // Validate shape before accepting
       if (data && typeof data.theme === 'string' && data.terminal) {
-        setPrefs(data)
+        setPrefs({
+          ...defaultPreferences,
+          ...data,
+          terminal: { ...defaultPreferences.terminal, ...(data.terminal || {}) },
+          sidebar: { ...defaultPreferences.sidebar, ...(data.sidebar || {}) },
+          notifications: { ...defaultPreferences.notifications, ...(data.notifications || {}) },
+          agent_banner: { ...defaultPreferences.agent_banner, ...(data.agent_banner || {}) },
+          ai_naming: { ...defaultPreferences.ai_naming, ...(data.ai_naming || {}) },
+          custom_theme: data.custom_theme || {},
+        })
       }
     } catch {
       // ignore fetch errors

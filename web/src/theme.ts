@@ -15,6 +15,23 @@ export const statusConfig: Record<string, { color: string; label: string; icon?:
     completed: { color: 'var(--success)', label: 'Completed', icon: '✓', bg: 'color-mix(in oklch, var(--success) 8%, transparent)' },
 }
 
+
+import type { SessionState } from './lib/sessionState'
+
+export interface SignalTreatment {
+    dot: string
+    text: string
+    pulse: boolean
+    hollow: boolean
+}
+
+export const signalTreatment: Record<SessionState, SignalTreatment> = {
+    needs_you: { dot: 'var(--warning)', text: 'var(--warning)', pulse: true, hollow: false },
+    working: { dot: 'var(--success)', text: 'var(--body-text)', pulse: false, hollow: false },
+    idle: { dot: 'var(--mute)', text: 'var(--mute)', pulse: false, hollow: true },
+    offline: { dot: 'var(--stone)', text: 'var(--mute)', pulse: false, hollow: true },
+}
+
 export interface ThemePreset {
     name: string
     label: string

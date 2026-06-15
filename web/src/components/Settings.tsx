@@ -64,10 +64,19 @@ const customizableVars = [
 
 const sectionIds = ['appearance', 'terminal', 'interface', 'naming', 'shortcuts', 'notifications', 'agents', 'peers', 'security'] as const
 
-function Section({ id, title, description, children }: { id: string; title: string; description?: string; children: React.ReactNode }) {
+type SectionId = (typeof sectionIds)[number]
+
+const bucketSections: Record<'look' | 'yard' | 'alerts' | 'network', readonly SectionId[]> = {
+  look: ['appearance', 'terminal'],
+  yard: ['interface', 'naming', 'shortcuts'],
+  alerts: ['notifications', 'agents'],
+  network: ['peers', 'security'],
+}
+
+function Section({ id, title, description, children, hidden }: { id: string; title: string; description?: string; children: React.ReactNode; hidden?: boolean }) {
   return (
-    <section id={id} className="rounded-lg border border-hairline bg-surface p-6 scroll-mt-6">
-      <h3 className="text-[13px] font-bold text-ink mb-1 uppercase tracking-widest">{title}</h3>
+    <section id={id} className={cn('rounded-lg border border-hairline bg-surface p-6 scroll-mt-6', hidden && 'hidden')}>
+      <h3 className="font-display text-[13px] font-bold text-ink mb-1">{title}</h3>
       {description && <p className="text-xs font-medium text-mute/60 mb-5">{description}</p>}
       {!description && <div className="mb-5" />}
       <div className="flex flex-col gap-4">
@@ -83,8 +92,8 @@ function Divider() {
 
 function Row({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-6 py-1">
-      <div className="flex-1">
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-1">
+      <div className="flex-1 min-w-[140px]">
         <div className="text-[13px] font-semibold text-ink tracking-tight">{label}</div>
         {description && <div className="text-xs font-medium text-mute/50 mt-1">{description}</div>}
       </div>
@@ -385,11 +394,14 @@ function PeersSection() {
   )
 }
 
-export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogout }: {
+export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogout, bucket, version, updateAvailable }: {
   pushState: string
   onPushSubscribe: () => void
   onPushUnsubscribe: () => void
   onLogout?: () => void
+  bucket?: 'look' | 'yard' | 'alerts' | 'network'
+  version?: string | null
+  updateAvailable?: boolean
 }) {
   const { prefs, updatePrefs } = usePreferences()
   const [saving, setSaving] = useState(false)
@@ -449,34 +461,38 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
     await updateNested('notifications', { statuses: next })
   }
 
-  const visibleSections = onLogout ? sectionIds : sectionIds.filter(s => s !== 'security')
+  const bucketVisible: readonly SectionId[] = bucket ? bucketSections[bucket] : sectionIds
+  const visibleSections: readonly SectionId[] = bucket ? bucketVisible : (onLogout ? sectionIds : sectionIds.filter(s => s !== 'security'))
+  const showSection = (id: SectionId) => bucketVisible.includes(id) && (onLogout ? true : id !== 'security')
   const customTheme = prefs.custom_theme || {}
   const hasCustomColors = Object.values(customTheme).some(v => !!v)
 
   return (
-    <div className="flex-1 p-10 overflow-y-auto font-sans text-[13px] font-medium bg-canvas scroll-smooth">
-      <div className="max-w-2xl mx-auto">
+    <div className={cn('flex-1 overflow-y-auto font-sans text-[13px] font-medium bg-canvas scroll-smooth', bucket ? 'px-5 pb-5 pt-5 sm:pt-12' : 'p-10')}>
+      <div className={cn(bucket ? 'max-w-full' : 'max-w-2xl mx-auto')}>
         <div className="flex items-center justify-between mb-8">
-          <h2 className="text-xl font-bold text-ink tracking-tight uppercase tracking-[0.1em]">Settings</h2>
+          <h2 className="font-display text-xl font-bold text-ink">Settings</h2>
           {saving && <span className="text-xs font-bold text-primary animate-pulse">SAVING...</span>}
         </div>
 
         {/* Jump nav */}
-        <nav className="flex gap-1.5 mb-8 flex-wrap">
-          {visibleSections.map(id => (
-            <a
-              key={id}
-              href={`#${id}`}
-              className="px-3 py-1.5 rounded-sm text-xs font-bold uppercase tracking-wider text-mute/60 hover:text-ink hover:bg-surface-elevated transition-all"
-            >
-              {sectionLabels[id]}
-            </a>
-          ))}
-        </nav>
+        {!bucket && (
+          <nav className="flex gap-1.5 mb-8 flex-wrap">
+            {visibleSections.map(id => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className="px-3 py-1.5 rounded-sm text-xs font-bold text-mute/60 hover:text-ink hover:bg-surface-elevated transition-all"
+              >
+                {sectionLabels[id]}
+              </a>
+            ))}
+          </nav>
+        )}
 
         <div className="flex flex-col gap-6">
           {/* ── Appearance ── */}
-          <Section id="appearance" title="Appearance" description="Theme, colors, fonts, and display formatting">
+          <Section hidden={!showSection('appearance')} id="appearance" title="Appearance" description="Theme, colors, fonts, and display formatting">
             <div className="grid grid-cols-2 gap-3">
               {Object.values(themePresets).map(theme => (
                 <button
@@ -557,10 +573,26 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 max={60}
               />
             </Row>
+
+            <Row label="Pane-grid Texture" description="Show faint grid texture across yard surfaces">
+              <Toggle checked={prefs.texture_enabled} onChange={(v) => update({ texture_enabled: v })} />
+            </Row>
+            <Row label="Display Font" description="Font for wordmarks and headings">
+              <SelectInput
+                value={prefs.display_font}
+                onChange={(v) => update({ display_font: v })}
+                options={[
+                  { value: 'Space Mono', label: 'Space Mono' },
+                  { value: 'VT323', label: 'VT323' },
+                  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
+                  { value: 'Inter', label: 'Inter' },
+                ]}
+              />
+            </Row>
           </Section>
 
           {/* ── Terminal ── */}
-          <Section id="terminal" title="Terminal" description="Font, scrollback, and fullscreen behavior">
+          <Section hidden={!showSection('terminal')} id="terminal" title="Terminal" description="Font, scrollback, and fullscreen behavior">
             <Row label="Font Family" description="Monospace font for the terminal">
               <SelectInput
                 value={prefs.terminal.font_family}
@@ -595,7 +627,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
           </Section>
 
           {/* ── Interface ── */}
-          <Section id="interface" title="Interface" description="Layout, sidebar, and keyboard shortcuts">
+          <Section hidden={!showSection('interface')} id="interface" title="Interface" description="Layout, sidebar, and keyboard shortcuts">
             <Row label="Default View" description="View shown on launch">
               <SelectInput
                 value={prefs.default_view}
@@ -632,7 +664,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
           </Section>
 
           {/* ── AI Naming ── */}
-          <Section id="naming" title="AI Session Naming" description="Auto-generate friendly session names from context via an OpenAI-compatible endpoint. Manually renamed sessions are never overwritten.">
+          <Section hidden={!showSection('naming')} id="naming" title="AI Session Naming" description="Auto-generate friendly session names from context via an OpenAI-compatible endpoint. Manually renamed sessions are never overwritten.">
             <Row label="Enable" description="Synthesize names from prompt, workdir, branch, agent, and shell activity">
               <Toggle
                 checked={prefs.ai_naming.enabled}
@@ -672,7 +704,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
           </Section>
 
           {/* ── Shortcuts ── */}
-          <Section id="shortcuts" title="Shortcuts" description="Keyboard shortcuts reference. Combos are chosen to avoid browser and terminal conflicts.">
+          <Section hidden={!showSection('shortcuts')} id="shortcuts" title="Shortcuts" description="Keyboard shortcuts reference. Combos are chosen to avoid browser and terminal conflicts.">
             {getShortcuts().map((item, i) => {
               if ('section' in item) {
                 return (
@@ -695,7 +727,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
           </Section>
 
           {/* ── Notifications ── */}
-          <Section id="notifications" title="Notifications" description="Push alerts and agent event notifications">
+          <Section hidden={!showSection('notifications')} id="notifications" title="Notifications" description="Push alerts and agent event notifications">
             <Row label="Push Alerts" description={
               pushState === 'unsupported'
                 ? 'Requires HTTPS or localhost with a supported browser'
@@ -748,7 +780,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
           </Section>
 
           {/* ── Agents ── */}
-          <Section id="agents" title="Agents" description="Agent installation and hook configuration status">
+          <Section hidden={!showSection('agents')} id="agents" title="Agents" description="Agent installation and hook configuration status">
             {agentStatus ? (
               <div className="flex flex-col gap-4">
                 <AgentStatusList agents={agentStatus.agents} />
@@ -769,13 +801,13 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
           </Section>
 
           {/* ── Machines / Peers ── */}
-          <Section id="peers" title="Machines" description="Connect other termyard machines to share sessions across hosts">
+          <Section hidden={!showSection('peers')} id="peers" title="Machines" description="Connect other termyard machines to share sessions across hosts">
             <PeersSection />
           </Section>
 
           {/* ── Security ── */}
           {onLogout && (
-            <Section id="security" title="Security" description="Session locking and sign out">
+            <Section hidden={!showSection('security')} id="security" title="Security" description="Session locking and sign out">
               <Row label="Auto-lock Timeout" description="Sign out after idle inactivity (0 = disabled)">
                 <div className="flex items-center gap-2">
                   <NumberInput
@@ -814,6 +846,24 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 >
                   Sign out
                 </button>
+              </Row>
+            </Section>
+          )}
+
+          {(bucket === 'network' || !bucket) && version && (
+            <Section id="about" title="About" description="Version and updates">
+              <Row label="Version" description={updateAvailable ? 'A new version is available' : 'You are up to date'}>
+                {updateAvailable ? (
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="rounded-sm border border-warning/40 bg-warning/10 px-3 py-1.5 text-[13px] font-bold text-warning hover:text-ink transition-colors"
+                    title="Reload to update"
+                  >
+                    {version} · update
+                  </button>
+                ) : (
+                  <span className="font-mono text-mute">{version}</span>
+                )}
               </Row>
             </Section>
           )}

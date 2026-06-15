@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { tinykeys } from 'tinykeys'
 import { Sidebar } from './components/Sidebar'
 import { Terminal } from './components/Terminal'
@@ -10,8 +10,7 @@ import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
 import { PaneTree, getLeaves, findLeaf, splitLeaf, insertBesideLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
 import { sessionSnapshot, snapshotStable, pruneGroupTree } from './lib/prune'
-import { StatusBar } from './components/StatusBar'
-import { Settings } from './components/Settings'
+import { SettingsDrawer } from './components/SettingsDrawer'
 import { HelpModal } from './components/HelpModal'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { Login } from './components/Login'
@@ -28,6 +27,7 @@ import { useAuth } from './hooks/useAuth'
 import { useSessionAttrs } from './hooks/useSessionAttrs'
 import { Toasts, Toast } from './components/Toasts'
 import { applyTheme } from './theme'
+import { sessionSignal } from './lib/sessionState'
 
 type View = 'overview' | 'session' | 'settings' | 'setup'
 
@@ -66,7 +66,11 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const { pushState, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications()
   const { processToolEvent } = useNotifications(pushState === 'subscribed')
   const { hosts, refresh: refreshHosts } = useHosts()
-  const [currentView, setCurrentView] = useState<View>(() => getViewFromPath().view)
+  const [currentView, setCurrentView] = useState<View>(() => {
+    const v = getViewFromPath().view
+    return v === 'settings' ? 'overview' : v
+  })
+  const [settingsOpen, setSettingsOpen] = useState(() => getViewFromPath().view === 'settings')
   const [paneTree, setPaneTree] = useState<PaneTree | null>(() => {
     const urlKey = getViewFromPath().sessionKey
     if (!urlKey) return null
@@ -258,7 +262,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   useEffect(() => {
     const onPopState = () => {
       const { view, sessionKey } = getViewFromPath()
-      setCurrentView(view)
+      setSettingsOpen(view === 'settings')
+      if (view !== 'settings') setCurrentView(view)
       if (sessionKey) {
         setPaneTree(prev => {
           if (prev && findLeaf(prev, sessionKey)) { setActiveKey(sessionKey); setSingleView(null); return prev }
@@ -508,7 +513,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       // Toggle sidebar: Cmd/Ctrl + \
       '$mod+Backslash': handler(() => setSidebarCollapsed(c => !c)),
       // Settings: Cmd/Ctrl + ,
-      '$mod+Comma': handler(() => navigateTo(null, 'settings')),
+      '$mod+Comma': handler(() => openSettings()),
       // Split pane: Cmd/Ctrl + Shift + \
       '$mod+Shift+Backslash': handler(() => {
         if (activeKey !== null) {
@@ -831,9 +836,20 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     setTimeout(() => refocusTerminal(), 200)
   }, [selectSession, refocusTerminal])
 
-  const navigateToSettings = useCallback(() => {
-    navigateTo(null, 'settings')
-  }, [navigateTo])
+  const prevPathRef = useRef<string>('/')
+  const openSettings = useCallback(() => {
+    if (window.location.pathname !== '/settings') {
+      prevPathRef.current = window.location.pathname
+      window.history.pushState(null, '', '/settings')
+    }
+    setSettingsOpen(true)
+  }, [])
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    if (window.location.pathname === '/settings') {
+      window.history.pushState(null, '', prevPathRef.current || '/')
+    }
+  }, [])
 
   const handleCreateSession = useCallback(async (
     name: string,
@@ -952,6 +968,20 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   const showingTerminal = currentView === 'session' && !!selectedSession
 
+  const glance = useMemo(() => {
+    let parked = 0
+    let working = 0
+    let waiting = 0
+    for (const session of sessions) {
+      const key = sessionKey(session)
+      const signal = sessionSignal(session, getSessionEvents(key), getSessionActivity(key), isSessionInActiveTurn(key))
+      if (signal.state === 'needs_you') waiting++
+      else if (signal.state === 'working') working++
+      else parked++
+    }
+    return { parked, working, waiting }
+  }, [sessions, getSessionEvents, getSessionActivity, isSessionInActiveTurn, allToolEvents])
+
   return (
     <div className="flex flex-col h-full w-full bg-background text-foreground relative">
       <Toasts toasts={toasts} onDismiss={dismissToast} />
@@ -1001,10 +1031,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       {(!terminalFullscreen || !prefs.fullscreen_hide_alerts) && (
         <TopBar
           currentView={currentView}
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(c => !c)}
+          settingsActive={settingsOpen}
           onOverview={() => navigateTo(null)}
-          onSettings={navigateToSettings}
+          onSettings={openSettings}
+          onHelp={() => setHelpOpen(true)}
           onNewSession={openNewSessionModal}
           onPortForwards={() => setPortForwardsOpen(true)}
           onSchedules={() => setSchedulesOpen(true)}
@@ -1020,6 +1050,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             }
             openNewSessionModal()
           }}
+          glance={glance}
         />
       )}
       {/* Middle: Sidebar + Content */}
@@ -1040,6 +1071,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             sessionNeedsAttention={sessionNeedsAttention}
             isSessionInActiveTurn={isSessionInActiveTurn}
             getSessionActivity={getSessionActivity}
+            agentCount={allToolEvents.filter(e => e.auto_detected || e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length}
+            glance={glance}
+            onToggleCollapse={() => setSidebarCollapsed(c => !c)}
             layoutGroups={groupOrder
               .map(id => {
                 if (id === activeGroupId && paneTree)
@@ -1141,8 +1175,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
           )}
           {currentView === 'setup' ? (
             <Setup onComplete={() => navigateTo(null)} />
-          ) : currentView === 'settings' ? (
-            <Settings pushState={pushState} onPushSubscribe={pushSubscribe} onPushUnsubscribe={pushUnsubscribe} onLogout={onLogout} />
           ) : currentView === 'session' && singleView ? (
             <div ref={terminalContainerRef} className="flex-1 flex flex-col overflow-hidden">
               <Terminal
@@ -1189,26 +1221,23 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
               onSessionSelect={handleSessionSelect}
               getSessionEvents={getSessionEvents}
               getSessionActivity={getSessionActivity}
-              pendingAlerts={allToolEvents.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck')}
+              isSessionInActiveTurn={isSessionInActiveTurn}
               onJumpToSession={jumpToSession}
               onDismissAlert={dismissEvent}
             />
           )}
+          <SettingsDrawer
+            open={settingsOpen}
+            onClose={closeSettings}
+            pushState={pushState}
+            onPushSubscribe={pushSubscribe}
+            onPushUnsubscribe={pushUnsubscribe}
+            onLogout={onLogout}
+            version={serverVersion}
+            updateAvailable={updateAvailable}
+          />
         </div>
       </div>
-      {/* StatusBar - full width */}
-      <StatusBar
-        sessionCount={sessions.length}
-        connected={connected}
-        activeSession={selectedSession ? sessions.find(s => sessionKey(s) === selectedSession) ?? null : null}
-        waitingCount={allToolEvents.filter(e => e.status === 'waiting' || e.status === 'stuck').length}
-        pushState={pushState}
-        version={serverVersion}
-        updateAvailable={updateAvailable}
-        hosts={hosts}
-        agentCount={allToolEvents.filter(e => e.auto_detected || e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length}
-        onHelp={() => setHelpOpen(true)}
-      />
     </div>
   )
 }
@@ -1267,6 +1296,13 @@ export default function App() {
       } catch {}
     }
   }, [prefsProvider.loaded, prefsProvider.prefs.theme, prefsProvider.prefs.custom_theme])
+
+
+  useEffect(() => {
+    const displayFont = prefsProvider.prefs.display_font || 'Space Mono'
+    document.documentElement.style.setProperty('--font-display', `"${displayFont}", "JetBrains Mono", monospace`)
+    document.documentElement.setAttribute('data-texture', prefsProvider.prefs.texture_enabled === false ? 'off' : 'on')
+  }, [prefsProvider.prefs.display_font, prefsProvider.prefs.texture_enabled])
 
   if (loading) {
     return <div className="flex items-center justify-center h-full w-full bg-background" />

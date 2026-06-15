@@ -16,6 +16,7 @@
   --hairline: #242728;
   --hairline-soft: rgba(255, 255, 255, 0.08);
   --hairline-strong: rgba(255, 255, 255, 0.16);
+  --tex-line: rgba(255, 255, 255, 0.022);
 
   /* Raycast Design Tokens — Text */
   --ink: #f4f4f6;
@@ -26,6 +27,8 @@
   --stone: #434345;
   --on-dark: #ffffff;
   --on-dark-mute: rgba(255, 255, 255, 0.72);
+
+  --font-display: "Space Mono", "JetBrains Mono", monospace;
 
   /* Raycast Design Tokens — Brand */
   --primary: #ffffff;
@@ -143,6 +146,21 @@
   --color-accent-green-soft: var(--accent-green-soft);
   --color-accent-yellow: var(--accent-yellow);
   --color-accent-yellow-soft: var(--accent-yellow-soft);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.tex-yardgrid {
+  background-image:
+    linear-gradient(var(--tex-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+html[data-texture="off"] .tex-yardgrid {
+  background-image: none;
 }
 
 @layer base {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
 import { cn } from '../lib/utils'
 
@@ -20,7 +21,7 @@ function MobileGestureKey({
   onTrigger,
   className = '',
 }: {
-  label: string
+  label: ReactNode
   directions: GestureDirection[]
   onTrigger: (direction: GestureDirection) => void
   className?: string
@@ -153,6 +154,9 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
     ctrlModifierActive,
     toggleCtrlModifier,
     clearCtrlModifier,
+    altModifierActive,
+    toggleAltModifier,
+    clearAltModifier,
   } = useTerminal(sessionName, hostId)
   const [showMobileKeyBar, setShowMobileKeyBar] = useState(false)
   const [capturedText, setCapturedText] = useState<string | null>(null)
@@ -480,32 +484,36 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
         </div>
         {showMobileKeyBar && (
           <div className="flex-none pt-1">
-            <div className="grid grid-cols-6 gap-1.5 p-1.5 bg-surface border border-hairline rounded-md">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setClipboardMenuOpen((open) => !open)}
-                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-lg relative"
-                title="Clipboard"
-                aria-label="Clipboard"
-              >
-                📋
+            <div className="grid grid-cols-8 gap-1.5 p-1.5 bg-surface border border-hairline rounded-md">
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setClipboardMenuOpen((open) => !open)}
+                  className="w-full h-10 rounded-sm border border-hairline bg-surface-elevated text-mute flex items-center justify-center transition-colors active:bg-surface"
+                  title="Clipboard"
+                  aria-label="Clipboard"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                  </svg>
+                </button>
                 {clipboardMenuOpen && (
                   <div className="absolute bottom-full left-0 mb-2 min-w-[120px] bg-surface-elevated border border-hairline rounded-md flex flex-col overflow-hidden z-50">
-                    <button type="button" onClick={handlePaste} className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-widest hover:bg-surface-elevated transition-colors border-b border-hairline/40">Paste</button>
-                    <button type="button" onClick={handleCopy} className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-widest hover:bg-surface-elevated transition-colors">Copy</button>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { handlePaste(); setClipboardMenuOpen(false) }} className="px-4 py-2.5 text-left text-xs font-medium hover:bg-surface transition-colors border-b border-hairline/40">Paste</button>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { handleCopy(); setClipboardMenuOpen(false) }} className="px-4 py-2.5 text-left text-xs font-medium hover:bg-surface transition-colors">Copy</button>
                   </div>
                 )}
-              </button>
+              </div>
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={toggleCtrlModifier}
                 className={cn(
-                  "h-10 rounded-xs border border-hairline flex items-center justify-center text-xs font-bold uppercase tracking-widest transition-all",
-                  ctrlModifierActive 
-                    ? "bg-primary text-primary-foreground border-primary" 
-                    : "bg-gradient-to-b from-[#121212] to-[#0d0d0d] text-mute"
+                  "h-10 rounded-sm border flex items-center justify-center text-[11px] font-medium transition-colors",
+                  ctrlModifierActive
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-hairline bg-surface-elevated text-mute active:bg-surface"
                 )}
               >
                 Ctrl
@@ -513,11 +521,25 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
+                onClick={toggleAltModifier}
+                className={cn(
+                  "h-10 rounded-sm border flex items-center justify-center text-[11px] font-medium transition-colors",
+                  altModifierActive
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-hairline bg-surface-elevated text-mute active:bg-surface"
+                )}
+              >
+                Alt
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   clearCtrlModifier()
+                  clearAltModifier()
                   sendSequence('\x1b')
                 }}
-                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
+                className="h-10 rounded-sm border border-hairline bg-surface-elevated flex items-center justify-center text-[11px] font-medium text-mute active:bg-surface transition-colors"
               >
                 Esc
               </button>
@@ -526,29 +548,50 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   clearCtrlModifier()
+                  clearAltModifier()
+                  sendSequence('\t')
+                }}
+                className="h-10 rounded-sm border border-hairline bg-surface-elevated flex items-center justify-center text-[11px] font-medium text-mute active:bg-surface transition-colors"
+              >
+                Tab
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  clearCtrlModifier()
+                  clearAltModifier()
                   sendSequence(new Uint8Array([0x7f]))
                 }}
-                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
+                className="h-10 rounded-sm border border-hairline bg-surface-elevated flex items-center justify-center text-base text-mute active:bg-surface transition-colors"
+                title="Backspace"
+                aria-label="Backspace"
               >
-                Bksp
+                ⌫
               </button>
               <MobileGestureKey
-                label="Pg ↕"
+                label="Pg"
                 directions={['up', 'down']}
                 onTrigger={(direction) => {
                   clearCtrlModifier()
+                  clearAltModifier()
                   sendPage(direction)
                 }}
-                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
+                className="h-10 rounded-sm border border-hairline bg-surface-elevated flex items-center justify-center text-[11px] font-medium text-mute active:bg-surface transition-colors"
               />
               <MobileGestureKey
-                label="Arrows"
+                label={(
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2v20M2 12h20M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3" />
+                  </svg>
+                )}
                 directions={['left', 'right', 'up', 'down']}
                 onTrigger={(direction) => {
                   clearCtrlModifier()
+                  clearAltModifier()
                   sendArrow(direction)
                 }}
-                className="h-10 rounded-xs border border-hairline bg-gradient-to-b from-[#121212] to-[#0d0d0d] flex items-center justify-center text-xs font-bold uppercase tracking-widest text-mute"
+                className="h-10 rounded-sm border border-hairline bg-surface-elevated flex items-center justify-center text-mute active:bg-surface transition-colors"
               />
             </div>
           </div>

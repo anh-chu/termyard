@@ -140,6 +140,8 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const [termConnected, setTermConnected] = useState(false)
   const [ctrlModifierActive, setCtrlModifierActive] = useState(false)
   const ctrlModifierRef = useRef(false)
+  const [altModifierActive, setAltModifierActive] = useState(false)
+  const altModifierRef = useRef(false)
   const suppressedInputRef = useRef<string | null>(null)
   const { prefs } = usePreferences()
 
@@ -163,6 +165,16 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const toggleCtrlModifier = useCallback(() => {
     ctrlModifierRef.current = !ctrlModifierRef.current
     setCtrlModifierActive(ctrlModifierRef.current)
+  }, [])
+
+  const clearAltModifier = useCallback(() => {
+    altModifierRef.current = false
+    setAltModifierActive(false)
+  }, [])
+
+  const toggleAltModifier = useCallback(() => {
+    altModifierRef.current = !altModifierRef.current
+    setAltModifierActive(altModifierRef.current)
   }, [])
 
   const cleanupWs = useCallback(() => {
@@ -262,6 +274,19 @@ export function useTerminal(sessionName: string, hostId?: string) {
           clearCtrlModifier()
           return false
         }
+      }
+      if (
+        e.type === 'keydown' &&
+        altModifierRef.current &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        e.key.length === 1
+      ) {
+        suppressedInputRef.current = e.key
+        sendRawBytes(new Uint8Array([0x1b, ...new TextEncoder().encode(e.key)]))
+        clearAltModifier()
+        return false
       }
       // Don't let xterm process global app shortcuts — let them bubble to the
       // window-level tinykeys handler in App.tsx / Terminal fullscreen handler.
@@ -578,5 +603,8 @@ export function useTerminal(sessionName: string, hostId?: string) {
     ctrlModifierActive,
     toggleCtrlModifier,
     clearCtrlModifier,
+    altModifierActive,
+    toggleAltModifier,
+    clearAltModifier,
   }
 }

@@ -41,6 +41,9 @@ interface SidebarProps {
   sessionNeedsAttention: (session: string) => boolean
   isSessionInActiveTurn: (session: string) => boolean
   getSessionActivity: (session: string) => ActivitySnapshot | undefined
+  agentCount?: number
+  glance?: { parked: number; working: number; waiting: number }
+  onToggleCollapse?: () => void
   layoutGroups?: { id: string; leaves: string[]; isActive: boolean; activeKey: string | null; name: string | undefined }[]
   onSwitchGroup?: (groupId: string, focusKey?: string) => void
   onRenameGroup?: (groupId: string, name: string) => void
@@ -220,6 +223,9 @@ export function Sidebar({
   sessionNeedsAttention,
   isSessionInActiveTurn,
   getSessionActivity,
+  agentCount = 0,
+  glance,
+  onToggleCollapse,
   layoutGroups,
   onSwitchGroup,
   onRenameGroup,
@@ -266,7 +272,7 @@ export function Sidebar({
     const startX = e.clientX
     const startW = width
     const onMove = (ev: MouseEvent) => {
-      const next = Math.min(560, Math.max(200, startW + (ev.clientX - startX)))
+      const next = Math.min(560, Math.max(260, startW + (ev.clientX - startX)))
       onWidthChange?.(next)
     }
     const onUp = () => {
@@ -1075,7 +1081,7 @@ export function Sidebar({
 
   return (
     <aside
-      style={!collapsed ? { width } : undefined}
+      style={!collapsed ? { width: Math.max(width, 260), minWidth: 260 } : undefined}
       className={cn(
       'relative flex flex-col h-full bg-canvas font-sans text-sm font-medium',
       !resizing && 'transition-[width] duration-300',
@@ -1124,6 +1130,18 @@ export function Sidebar({
                 <circle cx="3.5" cy="18" r="1.5" fill="currentColor" stroke="none" />
               </svg>
             </button>
+            {onToggleCollapse && (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                title="Collapse sidebar"
+                className="shrink-0 rounded-md border border-hairline bg-surface-elevated px-2 py-2 text-mute hover:text-ink transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M15 9l-3 3 3 3" />
+                </svg>
+              </button>
+            )}
           </div>
           {filterOpen && (
             <div className="mt-1 rounded-lg border border-hairline bg-surface p-2">
@@ -1657,6 +1675,29 @@ export function Sidebar({
             })}
           </ul>
         </div>
+      )}
+
+      {!collapsed && (
+        <div className="mt-auto shrink-0 border-t border-hairline px-3 py-1.5 text-[11px] font-mono text-mute/60 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+          <span>{sessions.length} session{sessions.length === 1 ? '' : 's'}</span>
+          {glance && <><span>·</span><span>{glance.working} working</span></>}
+          {glance && glance.waiting > 0 && <><span>·</span><span className="text-warning font-bold">{glance.waiting} waiting</span></>}
+          <span>·</span>
+          <span>{agentCount} agent{agentCount === 1 ? '' : 's'}</span>
+        </div>
+      )}
+
+      {collapsed && onToggleCollapse && (
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          title="Expand sidebar"
+          className="fixed left-2 top-14 z-30 p-1.5 rounded-md border border-hairline bg-surface-elevated/60 backdrop-blur-sm text-mute hover:text-ink hover:bg-surface-elevated transition-colors"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M13 9l3 3-3 3" />
+          </svg>
+        </button>
       )}
 
       {contextMenu && (
