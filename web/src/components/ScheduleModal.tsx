@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useHosts } from '../hooks/useHosts'
 import { usePreferences } from '../hooks/usePreferences'
 import { Schedule, ScheduleForm, useSchedules } from '../hooks/useSchedules'
+import { Session, sessionKey, sessionScheduleID } from '../hooks/useSessions'
 import { AgentMark } from './AgentMark'
 import { cn } from '../lib/utils'
 import { describeCron } from '../lib/cron'
@@ -232,7 +233,41 @@ export function ScheduleModal({ onClose }: Props) {
 
   const deleteSchedule = async (schedule: Schedule) => {
     if (!confirm(`Delete schedule ${schedule.name}?`)) return
+
+    // Find the sessions this schedule spawned (attrs map is authoritative; the
+    // session field is the fallback). Offer to kill them along with the schedule.
+    let scheduleSessions: Session[] = []
+    try {
+      const [sessRes, attrsRes] = await Promise.all([
+        fetch('/api/sessions'),
+        fetch('/api/session-attrs'),
+      ])
+      const sessions: Session[] = sessRes.ok ? (await sessRes.json()) || [] : []
+      const attrs = attrsRes.ok ? await attrsRes.json().catch(() => null) : null
+      const scheduleIDs: Record<string, string> = attrs?.schedule_ids || {}
+      scheduleSessions = sessions.filter(s => {
+        const sid = scheduleIDs[sessionKey(s)] || scheduleIDs[s.name] || sessionScheduleID(s)
+        return sid === schedule.id
+      })
+    } catch {
+      // non-fatal: proceed with schedule-only delete
+    }
+
+    let killSessions = false
+    if (scheduleSessions.length > 0) {
+      killSessions = confirm(`Also kill ${scheduleSessions.length} session${scheduleSessions.length === 1 ? '' : 's'} spawned by this schedule?`)
+    }
+
     setBusyId(schedule.id)
+    if (killSessions) {
+      await Promise.all(scheduleSessions.map(s =>
+        fetch('/api/session/kill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: s.id, name: s.name, host: s.host || undefined }),
+        }).catch(() => {}),
+      ))
+    }
     const err = await remove(schedule.id)
     setBusyId(null)
     if (err) setError(err)

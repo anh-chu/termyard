@@ -974,11 +974,12 @@ export function Sidebar({
     const maxExpandedChildren = 6
     const childSessions = shouldShowSessions ? sessions.slice(0, maxExpandedChildren) : [latest].filter(Boolean)
     const overflow = isExpanded && sessions.length > maxExpandedChildren ? sessions.length - maxExpandedChildren : 0
+    const deleted = !schedule
     const enabled = schedule?.enabled ?? true
     const host = schedule?.host || ''
     const hostOnline = !host || hosts?.some(item => item.id === host && item.online)
-    const stateLabel = !enabled ? 'paused' : !hostOnline ? 'peer offline' : 'active'
-    const stateColor = !enabled ? 'text-amber-400 border-amber-400/30 bg-amber-400/10' : !hostOnline ? 'text-mute/70 border-hairline bg-surface-elevated/70' : 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10'
+    const stateLabel = deleted ? 'deleted' : !enabled ? 'paused' : !hostOnline ? 'peer offline' : 'active'
+    const stateColor = deleted ? 'text-mute/70 border-hairline bg-surface-elevated/70' : !enabled ? 'text-amber-400 border-amber-400/30 bg-amber-400/10' : !hostOnline ? 'text-mute/70 border-hairline bg-surface-elevated/70' : 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10'
     const scheduleName = schedule?.name || latest?.name || scheduleId
     return (
       <li key={`schedule:${scheduleId}`} data-schedule-id={scheduleId}>
