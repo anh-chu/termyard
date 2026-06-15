@@ -91,27 +91,11 @@ func isCopilotConfigured(home string) bool {
 }
 
 func isOpenCodeConfigured(home string) bool {
-	pluginDir := filepath.Join(home, ".config", "opencode", "node_modules", "guppi")
-	if _, err := os.Stat(filepath.Join(pluginDir, "package.json")); err != nil {
-		return false
-	}
-	if _, err := os.Stat(filepath.Join(pluginDir, "index.js")); err != nil {
-		return false
-	}
-
-	configPath := filepath.Join(home, ".config", "opencode", "opencode.json")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return false
-	}
-	// agent-setup registers the plugin as a file:// URL pointing at the plugin
-	// dir (e.g. "file:///home/.../node_modules/guppi"), so a bare "guppi"
-	// substring will not match. Accept either the bare module name or the
-	// path-suffixed URL form.
-	cfg := string(data)
-	return strings.Contains(cfg, "\"guppi\"") ||
-		strings.Contains(cfg, "/guppi\"") ||
-		strings.Contains(cfg, "/node_modules/guppi")
+	// agent-setup writes the plugin canonically to plugins/guppi.js, which
+	// OpenCode auto-loads at startup (no opencode.json registration needed).
+	pluginFile := filepath.Join(home, ".config", "opencode", "plugins", "guppi.js")
+	_, err := os.Stat(pluginFile)
+	return err == nil
 }
 
 func isPiConfigured(home string) bool {
@@ -119,4 +103,3 @@ func isPiConfigured(home string) bool {
 	_, err := os.Stat(pluginPath)
 	return err == nil
 }
-

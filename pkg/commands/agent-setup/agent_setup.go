@@ -490,28 +490,8 @@ func setupOpenCode(serverURL, guppiBin string, resilient bool, extraDirs []strin
 }
 
 func setupOpenCodeDir(configDir, guppiBin string) error {
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		return err
-	}
-
-	pluginDir := filepath.Join(configDir, "node_modules", "guppi")
+	pluginDir := filepath.Join(configDir, "plugins")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
-		return err
-	}
-
-	packageJSON := map[string]interface{}{
-		"name":    "guppi",
-		"version": "1.0.0",
-		"type":    "module",
-		"main":    "index.js",
-		"private": true,
-	}
-	packageBytes, err := json.MarshalIndent(packageJSON, "", "  ")
-	if err != nil {
-		return err
-	}
-	packageBytes = append(packageBytes, '\n')
-	if err := os.WriteFile(filepath.Join(pluginDir, "package.json"), packageBytes, 0o644); err != nil {
 		return err
 	}
 
@@ -519,22 +499,24 @@ func setupOpenCodeDir(configDir, guppiBin string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "index.js"), []byte(indexJS), 0o644); err != nil {
+	pluginFile := filepath.Join(pluginDir, "guppi.js")
+	if err := os.WriteFile(pluginFile, []byte(indexJS), 0o644); err != nil {
 		return err
 	}
 
-	pluginSpec := fmt.Sprintf("file://%s", filepath.ToSlash(pluginDir))
-	if err := registerOpenCodePlugin(filepath.Join(configDir, "opencode.json"), pluginSpec); err != nil {
-		return err
-	}
-
-	legacyPlugin := filepath.Join(configDir, "plugins", "guppi.js")
-	if _, err := os.Stat(legacyPlugin); err == nil {
-		if err := os.Remove(legacyPlugin); err != nil {
-			fmt.Printf("  Warning: could not remove legacy plugin %s: %v\n", legacyPlugin, err)
+	// Clean up the previous non-canonical npm-package install: the
+	// node_modules/guppi package plus its file:// entry in opencode.json.
+	// OpenCode auto-loads files in plugins/ at startup, so neither is needed.
+	legacyPkg := filepath.Join(configDir, "node_modules", "guppi")
+	if _, err := os.Stat(legacyPkg); err == nil {
+		if err := os.RemoveAll(legacyPkg); err != nil {
+			fmt.Printf("  Warning: could not remove legacy plugin package %s: %v\n", legacyPkg, err)
 		} else {
-			fmt.Printf("  Removed legacy plugin %s\n", legacyPlugin)
+			fmt.Printf("  Removed legacy plugin package %s\n", legacyPkg)
 		}
+	}
+	if err := unregisterOpenCodePlugin(filepath.Join(configDir, "opencode.json")); err != nil {
+		fmt.Printf("  Warning: could not clean opencode.json: %v\n", err)
 	}
 
 	legacyHook := filepath.Join(configDir, "guppi-hook.sh")
@@ -546,7 +528,7 @@ func setupOpenCodeDir(configDir, guppiBin string) error {
 		}
 	}
 
-	fmt.Printf("  Wrote OpenCode plugin to %s\n", pluginDir)
+	fmt.Printf("  Wrote OpenCode plugin to %s\n", pluginFile)
 	return nil
 }
 
@@ -560,47 +542,62 @@ func buildOpenCodePlugin(guppiBin string) (string, error) {
 	return strings.ReplaceAll(openCodePluginTemplate, `"__GUPPI_BIN__"`, string(quotedBin)), nil
 }
 
-func registerOpenCodePlugin(configPath, pluginSpec string) error {
-	var config map[string]interface{}
+// unregisterOpenCodePlugin removes any guppi entry from opencode.json's plugin
+// array, cleaning up the previous file:// node_modules/guppi registration. The
+// plugin is now loaded canonically from the plugins/ directory instead.
+func unregisterOpenCodePlugin(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
+		if os.IsNotExist(err) {
+			return nil
 		}
-		config = map[string]interface{}{
-			"$schema": "https://opencode.ai/config.json",
-		}
-	} else {
-		if err := json.Unmarshal(data, &config); err != nil {
-			return fmt.Errorf("parse %s: %w", configPath, err)
-		}
+		return err
 	}
 
-	plugins := make([]interface{}, 0)
-	if raw, ok := config["plugin"]; ok {
-		if existing, ok := raw.([]interface{}); ok {
-			plugins = append(plugins, existing...)
-		}
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("parse %s: %w", configPath, err)
 	}
 
-	filtered := make([]interface{}, 0, len(plugins)+1)
-	for _, raw := range plugins {
-		switch entry := raw.(type) {
+	raw, ok := config["plugin"]
+	if !ok {
+		return nil
+	}
+	plugins, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	isGuppi := func(spec string) bool {
+		return spec == "guppi" || strings.Contains(spec, "node_modules/guppi")
+	}
+
+	filtered := make([]interface{}, 0, len(plugins))
+	for _, entry := range plugins {
+		switch v := entry.(type) {
 		case string:
-			if entry == pluginSpec || entry == "guppi" {
+			if isGuppi(v) {
 				continue
 			}
 		case []interface{}:
-			if len(entry) > 0 {
-				if spec, ok := entry[0].(string); ok && (spec == pluginSpec || spec == "guppi") {
+			if len(v) > 0 {
+				if spec, ok := v[0].(string); ok && isGuppi(spec) {
 					continue
 				}
 			}
 		}
-		filtered = append(filtered, raw)
+		filtered = append(filtered, entry)
 	}
 
-	config["plugin"] = append(filtered, pluginSpec)
+	if len(filtered) == len(plugins) {
+		return nil
+	}
+
+	if len(filtered) == 0 {
+		delete(config, "plugin")
+	} else {
+		config["plugin"] = filtered
+	}
 
 	out, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -611,7 +608,7 @@ func registerOpenCodePlugin(configPath, pluginSpec string) error {
 		return err
 	}
 
-	fmt.Printf("  Registered plugin in %s\n", configPath)
+	fmt.Printf("  Removed legacy plugin registration from %s\n", configPath)
 	return nil
 }
 

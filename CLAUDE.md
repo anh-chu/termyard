@@ -6,16 +6,16 @@ Guppi is a web dashboard for monitoring and interacting with coding agents runni
 
 ## Quick Reference
 
-| Task | Command |
-|------|---------|
-| Build everything | `/usr/bin/make build` |
-| Build frontend only | `/usr/bin/make frontend` |
-| Run dev server | `/usr/bin/make dev` |
-| Run Go binary | `go run . server` |
-| Frontend dev server | `cd web && npm run dev` |
-| Run Go tests | `go test ./...` |
-| Clean build artifacts | `/usr/bin/make clean` |
-| Cut a release | `./scripts/release.sh [patch\|minor\|major]` |
+| Task                  | Command                                      |
+| --------------------- | -------------------------------------------- |
+| Build everything      | `/usr/bin/make build`                        |
+| Build frontend only   | `/usr/bin/make frontend`                     |
+| Run dev server        | `/usr/bin/make dev`                          |
+| Run Go binary         | `go run . server`                            |
+| Frontend dev server   | `cd web && npm run dev`                      |
+| Run Go tests          | `go test ./...`                              |
+| Clean build artifacts | `/usr/bin/make clean`                        |
+| Cut a release         | `./scripts/release.sh [patch\|minor\|major]` |
 
 **Important:** Use `/usr/bin/make` (not `make`) due to a zsh shell function conflict.
 
@@ -63,6 +63,7 @@ scripts/release.sh       # Single source of truth for version bumps
 ## Code Conventions
 
 ### Go
+
 - **Module:** `github.com/ekristen/guppi`
 - **CLI framework:** urfave/cli v3
 - **Command registration:** Commands register via `init()` calling `common.RegisterCommand()`, imported as blank imports in `main.go`
@@ -73,6 +74,7 @@ scripts/release.sh       # Single source of truth for version bumps
 - **Testing:** Standard `testing` package, table-driven tests with `t.Run()` subtests
 
 ### Frontend
+
 - **React 19** with TypeScript (strict mode)
 - **Bundler:** Vite 6
 - **Styling:** Tailwind CSS 4
@@ -88,7 +90,8 @@ Agents report state by invoking `guppi notify`, which POSTs an `Event` to `POST 
 **Statuses:** `active` (working), `waiting` (needs user attention), `completed` (turn done), `error`, `stuck`.
 
 **`guppi notify` flags that carry session metadata:**
-- `--user-prompt` — the user's first message; **set-once** server-side, and **the task label is derived from it.** There is **no `--task` flag** — it was removed in `18340d5`. Passing `--task` makes the *entire* notify call fail with `exit 1` ("flag provided but not defined: -task") and silently drop the event. Do not reintroduce it in any agent extension.
+
+- `--user-prompt` — the user's first message; **set-once** server-side, and **the task label is derived from it.** There is **no `--task` flag** — it was removed in `18340d5`. Passing `--task` makes the _entire_ notify call fail with `exit 1` ("flag provided but not defined: -task") and silently drop the event. Do not reintroduce it in any agent extension.
 - `--agent-message` — the agent's last response; updated each turn.
 - `--stdin` — read a hook payload as JSON from stdin (used to map a `tool_name` to an activity label like "running commands").
 
@@ -111,7 +114,7 @@ Each agent has its own hook system. Sources live under `pkg/commands/agent-setup
 - **Claude** — `hooks.json`. `UserPromptSubmit` → `user_prompt`; `Stop` parses the transcript JSONL for the last assistant message; `PreToolUse` → activity label.
 - **Codex** — `hooks.json` (separate file). Requires `hooks = true` under `[features]` in `config.toml` (off by default; agent-setup sets it).
 - **Pi** — TypeScript extension (`pi-extension/guppi.ts`), enabled in `~/.pi/agent/settings.json`. Pi compiles it via **jiti and caches the result** (`~/.pi/agent/cache/jiti/`). **The extension is loaded once at pi process startup** — editing it requires fully restarting the pi process (not just a new prompt) to take effect. The persistent `pane_pid` is the shell wrapper; the actual pi process is its child. Prompt is captured in `before_agent_start` (the only event carrying it); the agent message is recovered from `agent_end`'s `messages[]` array.
-- **OpenCode** — npm-style plugin (`opencode-plugin/index.js`) registered by file URL; package must be `"type": "module"`. Plugin export needs an `id` field.
+- **OpenCode** — ESM plugin (`opencode-plugin/index.js`) written to `~/.config/opencode/plugins/guppi.js`, which OpenCode auto-loads at startup (the canonical local-files mechanism, no `opencode.json` registration). Export is the v1 `export default { id, server }` shape. agent-setup also cleans up the prior non-canonical install: the `node_modules/guppi` package and its `file://` entry in `opencode.json`.
 
 ## Multi-Host & Event Identity
 
@@ -130,5 +133,6 @@ Each agent has its own hook system. Sources live under `pkg/commands/agent-setup
 ## Debugging Agent Events
 
 When an agent's status/metadata is wrong, capture what `notify` actually does rather than theorizing:
+
 1. `LOG_LEVEL=trace` on the server (systemd: drop-in `Environment=LOG_LEVEL=trace`, `daemon-reload`, restart) and watch `journalctl --user -u guppi -f` for `received request` / `recording tool event`.
 2. If no events arrive, the failure is in the agent extension or `notify` itself — log the `spawnSync` result (`status`, `stderr`) from inside the extension. A non-zero exit with an "Incorrect Usage" stderr means a bad/removed flag (see the `--task` note above).
