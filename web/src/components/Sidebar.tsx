@@ -292,6 +292,13 @@ export function Sidebar({
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null)
   const [groupRenameValue, setGroupRenameValue] = useState('')
   const [aiNamingGroupId, setAiNamingGroupId] = useState<string | null>(null)
+  // Session keys (host/name) currently being AI-named, for the inline spinner.
+  const [namingSessions, setNamingSessions] = useState<Set<string>>(new Set())
+  const setNaming = (key: string, on: boolean) => setNamingSessions(prev => {
+    const next = new Set(prev)
+    if (on) next.add(key); else next.delete(key)
+    return next
+  })
   const renameInputRef = useRef<HTMLInputElement>(null)
   const groupRenameInputRef = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLDivElement>(null)
@@ -484,14 +491,23 @@ export function Sidebar({
   // the websocket state update, so no local state mutation is needed here.
   const aiNameSession = async (name: string, host?: string) => {
     setContextMenu(null)
+    const key = host ? `${host}/${name}` : name
+    setNaming(key, true)
     try {
-      await fetch('/api/session/regenerate-name', {
+      const res = await fetch('/api/session/regenerate-name', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session: name, host: host || undefined }),
       })
+      // The new name arrives via the websocket state update; failures surface
+      // as backend notice toasts. Log here too for console debugging.
+      if (!res.ok && res.status !== 204) {
+        console.error('AI name failed:', res.status, await res.text().catch(() => ''))
+      }
     } catch (err) {
       console.error('Failed to AI name session:', err)
+    } finally {
+      setNaming(key, false)
     }
   }
 
@@ -845,6 +861,11 @@ export function Sidebar({
                 title={session.agent_session_id ? `${sessionLabel(session)} · ${session.agent_session_id}` : (sessionLabel(session) !== session.name ? `${sessionLabel(session)} (${session.name})` : session.name)}
               >
                 {collapsed ? sessionLabel(session).charAt(0).toUpperCase() : sessionLabel(session)}
+              </span>
+            )}
+            {!collapsed && namingSessions.has(sessionKey(session)) && (
+              <span className="shrink-0" title="AI naming…">
+                <SparkleIcon spinning size={11} />
               </span>
             )}
             {!collapsed && (

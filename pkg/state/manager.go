@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,6 +184,32 @@ func (m *Manager) broadcast(evt StateEvent) {
 			// subscriber too slow, drop event
 		}
 	}
+}
+
+// Notice carries a human-readable backend message to the frontend so silent
+// background failures (AI naming, tmux rename, etc.) are visible in the UI
+// instead of only in server logs.
+type Notice struct {
+	Severity string `json:"severity"` // "error", "warn", or "info"
+	Source   string `json:"source"`   // short origin tag, e.g. "ai-naming"
+	Message  string `json:"message"`  // human-readable detail
+}
+
+// notice broadcasts a Notice to the frontend and mirrors it to the server log.
+func (m *Manager) notice(severity, source, session, message string) {
+	switch severity {
+	case "error":
+		logrus.WithFields(logrus.Fields{"source": source, "session": session}).Error(message)
+	case "warn":
+		logrus.WithFields(logrus.Fields{"source": source, "session": session}).Warn(message)
+	default:
+		logrus.WithFields(logrus.Fields{"source": source, "session": session}).Info(message)
+	}
+	m.broadcast(StateEvent{
+		Type:    "notice",
+		Session: session,
+		Data:    Notice{Severity: severity, Source: source, Message: message},
+	})
 }
 
 // UpdateSessions takes a snapshot of sessions from discovery, diffs against
@@ -444,7 +471,7 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 	defer cancel()
 	name, err := n.Generate(ctx, nc)
 	if err != nil {
-		logrus.WithError(err).WithField("session", sessionName).Warn("agent session naming failed")
+		m.notice("warn", "ai-naming", sessionName, fmt.Sprintf("agent session naming failed: %v", err))
 		return
 	}
 	logrus.WithFields(logrus.Fields{"session": sessionName, "name": name}).Info("agent session named")
@@ -525,7 +552,7 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	}
 
 	if err := m.client.RenameSession(sessionName, newName); err != nil {
-		logrus.WithError(err).WithFields(logrus.Fields{"old": sessionName, "new": newName}).Warn("tmux rename for AI name failed")
+		m.notice("warn", "ai-naming", sessionName, fmt.Sprintf("tmux rename to %q failed: %v", newName, err))
 		m.saveNames()
 		m.broadcast(StateEvent{Type: "sessions-changed"})
 		return
@@ -589,7 +616,7 @@ func (m *Manager) TriggerShellNaming(sessionName string, commands []string) {
 	defer cancel()
 	name, err := n.Generate(ctx, nc)
 	if err != nil {
-		logrus.WithError(err).WithField("session", sessionName).Warn("shell session naming failed")
+		m.notice("warn", "ai-naming", sessionName, fmt.Sprintf("shell session naming failed: %v", err))
 		return
 	}
 	logrus.WithFields(logrus.Fields{"session": sessionName, "name": name}).Info("shell session named")
@@ -678,6 +705,7 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 	m.mu.RUnlock()
 
 	if n == nil || !n.Enabled() {
+		m.notice("warn", "ai-naming", sessionName, "AI naming is disabled. Enable it in Settings or set GUPPI_NAMER_ENDPOINT.")
 		return "", namer.ErrDisabled
 	}
 
@@ -697,6 +725,7 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 	defer cancel()
 	name, err := n.Generate(ctx, nc)
 	if err != nil {
+		m.notice("warn", "ai-naming", sessionName, fmt.Sprintf("AI rename failed: %v", err))
 		return "", err
 	}
 

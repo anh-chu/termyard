@@ -25,6 +25,7 @@ import { usePushNotifications } from './hooks/usePushNotifications'
 import { usePreferencesProvider, usePreferences, PreferencesContext } from './hooks/usePreferences'
 import { useAuth } from './hooks/useAuth'
 import { useSessionAttrs } from './hooks/useSessionAttrs'
+import { Toasts, Toast } from './components/Toasts'
 import { applyTheme } from './theme'
 
 type View = 'overview' | 'session' | 'settings' | 'setup'
@@ -524,8 +525,27 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     }, { ignore })
   }, [navigateTo, activeKey, openNewSessionModal, openNewSessionPlain])
 
+  // Backend notices (silent failures surfaced to the UI as toasts)
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const toastIdRef = useRef(0)
+  const dismissToast = useCallback((id: number) => setToasts(t => t.filter(x => x.id !== id)), [])
+
   // Listen for state events via WebSocket
   const onEvent = useCallback((evt: any) => {
+    if (evt.type === 'notice') {
+      const d = evt.data || {}
+      setToasts(t => [
+        ...t,
+        {
+          id: ++toastIdRef.current,
+          severity: d.severity === 'error' || d.severity === 'warn' ? d.severity : 'info',
+          source: d.source || 'server',
+          message: d.message || '',
+          session: evt.session || undefined,
+        },
+      ].slice(-4))
+      return
+    }
     if (evt.type === 'welcome') {
       const v = evt.version || null
       if (!loadedVersionRef.current) {
@@ -881,6 +901,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   return (
     <div className="flex flex-col h-full w-full bg-background text-foreground relative">
+      <Toasts toasts={toasts} onDismiss={dismissToast} />
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {portForwardsOpen && (
         <PortForwardModal onClose={() => setPortForwardsOpen(false)} />
