@@ -1036,7 +1036,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             localHostId={localHostId}
             hosts={hosts}
             onSessionSelect={handleSessionSelect}
-            onSessionRenamed={migrateSessionKey}
             getSessionEvents={getSessionEvents}
             sessionNeedsAttention={sessionNeedsAttention}
             isSessionInActiveTurn={isSessionInActiveTurn}

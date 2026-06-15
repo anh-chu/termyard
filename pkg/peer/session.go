@@ -727,6 +727,21 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		}
 		sendStateUpdate(pc, deps)
 
+	case "set-display-name":
+		var params struct {
+			Session     string `json:"session"`
+			DisplayName string `json:"display_name"`
+			Clear       bool   `json:"clear"`
+		}
+		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Session == "" {
+			return
+		}
+		if deps.LocalMgr == nil {
+			log.Warn("no state manager available for set-display-name action")
+			return
+		}
+		deps.LocalMgr.SetDisplayName(params.Session, params.DisplayName, !params.Clear)
+		sendStateUpdate(pc, deps)
 	default:
 		log.WithField("action", payload.Action).Debug("unknown session action")
 	}

@@ -37,7 +37,6 @@ interface SidebarProps {
   localHostId?: string
   hosts?: Host[]
   onSessionSelect: (session: Session) => void
-  onSessionRenamed?: (oldName: string, newName: string) => void
   getSessionEvents: (session: string) => ToolEvent[]
   sessionNeedsAttention: (session: string) => boolean
   isSessionInActiveTurn: (session: string) => boolean
@@ -216,7 +215,6 @@ export function Sidebar({
   localHostId,
   hosts,
   onSessionSelect,
-  onSessionRenamed,
   getSessionEvents,
   sessionNeedsAttention,
   isSessionInActiveTurn,
@@ -467,40 +465,22 @@ export function Sidebar({
       return
     }
     const nextName = renameValue.trim()
-    const oldKey = renamingSession.key
-    const newKey = renamingSession.host ? `${renamingSession.host}/${nextName}` : nextName
     try {
-      const res = await fetch('/api/session/rename', {
+      // Rename sets the friendly display label only; the underlying tmux
+      // session name is left untouched (renaming it would break session keys,
+      // attachment, and agent hooks keyed by session name). clear=false marks
+      // it user-set so the AI namer never overwrites it. The new label arrives
+      // via the websocket state update, so no local mutation is needed.
+      await fetch('/api/session/display-name', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          old_name: renamingSession.name,
-          new_name: nextName,
+          session: renamingSession.name,
+          display_name: nextName,
+          clear: false,
           host: renamingSession.host || undefined,
         }),
       })
-      if (res.ok) {
-        // Mark the name as user-set so the AI namer never overwrites it.
-        if (!renamingSession.host) {
-          fetch('/api/session/display-name', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: nextName, display_name: '', clear: false }),
-          }).catch(() => {})
-        }
-        // Migrate server-authoritative attributes onto the new key: clear the
-        // old key and set the new one with the same bits.
-        const wasHidden = hiddenSet.has(oldKey)
-        const wasBackground = backgroundSet.has(oldKey)
-        if (wasHidden || wasBackground) {
-          setSessionAttr(oldKey, { background: false, hidden: false })
-          setSessionAttr(newKey, { background: wasBackground, hidden: wasHidden })
-        }
-        if (manualOrder.includes(oldKey)) {
-          setManualOrder(current => current.map(key => key === oldKey ? newKey : key))
-        }
-        onSessionRenamed?.(oldKey, newKey)
-      }
     } catch (err) {
       console.error('Failed to rename session:', err)
     }
@@ -1593,6 +1573,7 @@ export function Sidebar({
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.target.value)}
                         onKeyDown={(e) => {
+                          e.stopPropagation()
                           if (e.key === 'Enter') submitRename()
                           if (e.key === 'Escape') setRenamingSession(null)
                         }}

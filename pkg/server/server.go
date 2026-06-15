@@ -774,11 +774,38 @@ func Run(ctx context.Context, opts *Options) error {
 					Session     string `json:"session"`
 					DisplayName string `json:"display_name"`
 					Clear       bool   `json:"clear,omitempty"`
+					Host        string `json:"host,omitempty"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Session == "" {
 					http.Error(w, "session is required", http.StatusBadRequest)
 					return
 				}
+
+				// Remote host — forward via peer connection. The new label propagates
+				// back through the peer's state update broadcast.
+				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
+					peerConn := opts.PeerMgr.GetPeerConnection(req.Host)
+					if peerConn == nil {
+						http.Error(w, "peer not connected", http.StatusBadGateway)
+						return
+					}
+					params, _ := json.Marshal(map[string]any{
+						"session":      req.Session,
+						"display_name": req.DisplayName,
+						"clear":        req.Clear,
+					})
+					msg, _ := peer.NewMessage(peer.MsgSessionAction, peer.SessionActionPayload{
+						Action: "set-display-name",
+						Params: params,
+					})
+					if peerConn.Enqueue(msg) {
+						w.WriteHeader(http.StatusNoContent)
+					} else {
+						http.Error(w, "peer send queue full", http.StatusBadGateway)
+					}
+					return
+				}
+
 				if opts.StateMgr == nil {
 					http.Error(w, "state manager unavailable", http.StatusInternalServerError)
 					return
