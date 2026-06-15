@@ -36,11 +36,10 @@ Description=Termyard tmux server
 After=default.target
 
 [Service]
-Type=forking
-ExecStart={{.TmuxPath}} start-server
-ExecStop={{.TmuxPath}} kill-server
-Restart=on-failure
-RestartSec=5
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '{{.TmuxPath}} new-session -d -s _yardkeep; {{.TmuxPath}} set-option -g exit-empty off; {{.TmuxPath}} kill-session -t _yardkeep'
+KillMode=process
 OOMScoreAdjust=-800
 
 [Install]
