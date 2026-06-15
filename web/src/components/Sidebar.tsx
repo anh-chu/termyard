@@ -92,6 +92,16 @@ const statusBadgeConfig = {
   shell:   { label: 'shell',   color: 'var(--mute)',          bg: 'transparent',            pulse: false },
 } as const
 
+type StatusBadge = keyof typeof statusBadgeConfig
+
+const STATUS_BUCKETS: { id: string; label: string; statuses: StatusBadge[] }[] = [
+  { id: 'attention', label: 'Needs attention', statuses: ['stuck', 'waiting'] },
+  { id: 'working',   label: 'Working',         statuses: ['working'] },
+  { id: 'idle',      label: 'Idle',            statuses: ['idle'] },
+  { id: 'shell',     label: 'Shell',           statuses: ['shell'] },
+  { id: 'process',   label: 'Process',         statuses: ['process'] },
+]
+
 function Sparkline({ data, height = 16 }: { data: number[]; height?: number }) {
   if (!data || data.length === 0) return null
   const max = Math.max(...data, 1)
@@ -230,6 +240,9 @@ export function Sidebar({
   const [confirmKillKey, setConfirmKillKey] = useState<string | null>(null)
   const [confirmWorktreeKillKey, setConfirmWorktreeKillKey] = useState<string | null>(null)
   const [filterOpen, setFilterOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<'default' | 'status'>(() =>
+    localStorage.getItem('guppi:view-mode') === 'status' ? 'status' : 'default')
+  useEffect(() => { localStorage.setItem('guppi:view-mode', viewMode) }, [viewMode])
   const [resizing, setResizing] = useState(false)
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -603,6 +616,40 @@ export function Sidebar({
     return items
   }, [visibleSessions, layoutGroups, schedules, scheduleById, scheduleIDs])
 
+  // Derive the status badge for a session. Single source of truth shared by the
+  // row renderer and the status-grouped view mode.
+  const statusOf = useCallback((session: Session): StatusBadge => {
+    const sk = sessionKey(session)
+    const events = getSessionEvents(sk)
+    const hasHookHistory = !!(session.user_prompt?.trim() || session.last_agent_message?.trim())
+    const activeCmd = (() => {
+      for (const w of session.windows ?? []) {
+        for (const p of w.panes ?? []) { if (p.active) return p.current_command }
+      }
+      return session.windows?.[0]?.panes?.[0]?.current_command ?? ''
+    })()
+    const cmdIsShell = SHELL_COMMANDS.has(activeCmd)
+    if (events.some(e => e.status === 'stuck'))   return 'stuck'
+    if (events.some(e => e.status === 'waiting')) return 'waiting'
+    if (isSessionInActiveTurn(sk)) return 'working'
+    if (events.some(e => e.status === 'active' && e.auto_detected) && !hasHookHistory) return 'working'
+    if (hasHookHistory && !cmdIsShell) return 'idle'
+    return cmdIsShell ? 'shell' : 'process'
+  }, [getSessionEvents, isSessionInActiveTurn])
+
+  const statusGroups = useMemo(() => {
+    if (viewMode !== 'status') return []
+    const byStatus = new Map<StatusBadge, Session[]>()
+    for (const session of visibleSessions) {
+      const st = statusOf(session)
+      const list = byStatus.get(st)
+      if (list) list.push(session); else byStatus.set(st, [session])
+    }
+    return STATUS_BUCKETS
+      .map(bucket => ({ ...bucket, sessions: sortNewestFirst(bucket.statuses.flatMap(st => byStatus.get(st) ?? [])) }))
+      .filter(bucket => bucket.sessions.length > 0)
+  }, [viewMode, visibleSessions, statusOf])
+
   const renderSessionItem = (session: Session, isHiddenSection = false, bracketChar?: string | null) => {
     const sk = sessionKey(session)
     const isSelected = selectedSession === sk
@@ -631,7 +678,6 @@ export function Sidebar({
     const showPanes = allPanes.length > 1
 
     // Status badge: single text indicator replacing the two dot indicators
-    const hasHookHistory = !!(userPrompt || lastAgentMessage)
     // Live foreground command of the active pane. This is the reliable signal
     // for whether an agent is still running in the pane right now: while an
     // agent runs it shows as node/pi/claude/etc, and the moment it exits the
@@ -649,22 +695,7 @@ export function Sidebar({
     // Once it exits to a shell, the per-session metadata (icon/prompt/message)
     // is stale and must not linger, so we suppress it in the row below.
     const agentPresent = !cmdIsShell
-    const statusBadge = (() => {
-      if (events.some(e => e.status === 'stuck'))   return 'stuck'   as const
-      if (events.some(e => e.status === 'waiting')) return 'waiting' as const
-      // Session-level turn flag: stays set between tool calls within a turn,
-      // only cleared on completed. Prevents idle flicker during gaps.
-      if (isSessionInActiveTurn(sk)) return 'working' as const
-      // Auto-detected active: only treat as working when no hook history exists.
-      // With hook history the process is just sitting at the REPL between turns.
-      if (events.some(e => e.status === 'active' && e.auto_detected) && !hasHookHistory) return 'working' as const
-      // Agent ran here before AND is still foregrounded (not back at a shell):
-      // it's sitting at its REPL between turns -> idle. Once it exits to a shell
-      // the command reverts and we fall through to the shell badge below.
-      if (hasHookHistory && !cmdIsShell) return 'idle' as const
-      // Plain terminal (or agent has exited) — badge from the live pane command.
-      return cmdIsShell ? 'shell' as const : 'process' as const
-    })()
+    const statusBadge = statusOf(session)
 
     const handleTouchStart = (e: React.TouchEvent) => {
       if (isRenaming) return
@@ -1049,13 +1080,36 @@ export function Sidebar({
       )}
       {!collapsed && (
         <div className="px-2 pt-2" ref={filterRef}>
-          <button
-            type="button"
-            onClick={() => setFilterOpen(value => !value)}
-            className="w-full rounded-md border border-hairline bg-surface-elevated px-3 py-2 text-left text-xs text-mute hover:text-ink font-medium transition-colors"
-          >
-            {filterLabel}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setFilterOpen(value => !value)}
+              className="flex-1 min-w-0 rounded-md border border-hairline bg-surface-elevated px-3 py-2 text-left text-xs text-mute hover:text-ink font-medium transition-colors truncate"
+            >
+              {filterLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode(m => (m === 'status' ? 'default' : 'status'))}
+              title={viewMode === 'status' ? 'Grouping by status — click for default order' : 'Group sessions by status'}
+              aria-pressed={viewMode === 'status'}
+              className={cn(
+                'shrink-0 rounded-md border px-2 py-2 transition-colors',
+                viewMode === 'status'
+                  ? 'border-primary/50 bg-primary/15 text-primary'
+                  : 'border-hairline bg-surface-elevated text-mute hover:text-ink',
+              )}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <circle cx="3.5" cy="6" r="1.5" fill="currentColor" stroke="none" />
+                <circle cx="3.5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                <circle cx="3.5" cy="18" r="1.5" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+          </div>
           {filterOpen && (
             <div className="mt-1 rounded-lg border border-hairline bg-surface p-2">
               <label className="flex items-center gap-2 px-1 py-1 text-xs text-ink font-medium">
@@ -1097,8 +1151,26 @@ export function Sidebar({
             </li>
           )}
 
+          {/* Status-grouped view: flatten all sessions into status sections */}
+          {viewMode === 'status' && statusGroups.map(bucket => {
+            const cfg = statusBadgeConfig[bucket.statuses[0]]
+            return (
+              <li key={`status:${bucket.id}`}>
+                <div className="flex items-center gap-2 px-1 pt-3 pb-1">
+                  <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: cfg.color }} />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-mute/70">{bucket.label}</span>
+                  <span className="text-[10px] font-mono text-mute/40">{bucket.sessions.length}</span>
+                  <div className="flex-1 h-px bg-hairline/60" />
+                </div>
+                <ul className="space-y-0.5">
+                  {bucket.sessions.map(session => renderSessionItem(session, false, null))}
+                </ul>
+              </li>
+            )
+          })}
+
           {/* Drop target at start of list */}
-          {draggingKey && visibleSessions.length > 0 && (
+          {viewMode === 'default' && draggingKey && visibleSessions.length > 0 && (
             <li
               className="h-4 relative"
               onDragOver={(e) => {
@@ -1141,7 +1213,7 @@ export function Sidebar({
           )}
 
           {/* Unified ordered list — groups appear at their natural position */}
-          {unifiedItems.map(item => {
+          {viewMode === 'default' && unifiedItems.map(item => {
             if (item.kind === 'session') {
               return renderSessionItem(item.session, false, null)
             }
