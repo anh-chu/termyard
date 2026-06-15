@@ -276,7 +276,8 @@ func Execute(ctx context.Context, c *cli.Command) error {
 			return server.CreateSession(opts, req)
 		}, logrus.WithField("component", "scheduler"))
 		runner.SetCapEnforcer(func(job scheduler.Job) {
-			server.EnforceScheduleCap(opts, job.ID, job.MaxConcurrency)
+			// Pre-spawn: leave room for the incoming run.
+			server.EnforceScheduleCap(opts, job.ID, job.MaxConcurrency-1)
 		})
 		opts.SchedulerRunner = runner
 		go func() {

@@ -173,11 +173,12 @@ func sessionKey(host, name string) string {
 	return name
 }
 
-// EnforceScheduleCap prunes the sessions owned by scheduleID down to max-1,
-// making room for one new spawn. Oldest sessions (by tmux creation time) are
-// killed first. A non-positive max means unlimited and is a no-op.
-func EnforceScheduleCap(opts *Options, scheduleID string, max int) {
-	if opts == nil || opts.AttrsStore == nil || opts.Client == nil || max <= 0 || scheduleID == "" {
+// EnforceScheduleCap prunes the sessions owned by scheduleID until at most
+// keep remain, killing oldest first (by tmux creation time). For a pre-spawn
+// call pass max-1 to leave room for the incoming run; for an update-time prune
+// pass max. A negative keep is treated as unlimited and is a no-op.
+func EnforceScheduleCap(opts *Options, scheduleID string, keep int) {
+	if opts == nil || opts.AttrsStore == nil || opts.Client == nil || keep < 0 || scheduleID == "" {
 		return
 	}
 	keys := map[string]bool{}
@@ -203,8 +204,7 @@ func EnforceScheduleCap(opts *Options, scheduleID string, max int) {
 	sort.Slice(tagged, func(i, j int) bool {
 		return tagged[i].Created.Before(tagged[j].Created)
 	})
-	// Leave room for the incoming spawn: trim until strictly below max.
-	for len(tagged) >= max {
+	for len(tagged) > keep {
 		victim := tagged[0]
 		tagged = tagged[1:]
 		if err := opts.Client.KillSession(victim.ID, victim.Name); err != nil {
@@ -1390,6 +1390,11 @@ func Run(ctx context.Context, opts *Options) error {
 					}
 					return
 				}
+				// Lowering the cap prunes existing over-limit runs immediately
+				// instead of waiting for the next fire. Leave exactly max alive.
+				if updated.MaxConcurrency > 0 {
+					EnforceScheduleCap(opts, updated.ID, updated.MaxConcurrency)
+				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(updated)
 			})
@@ -1435,6 +1440,9 @@ func Run(ctx context.Context, opts *Options) error {
 					req.Name = "schedule"
 				}
 				req.Name = fmt.Sprintf("%s-%d", req.Name, time.Now().Unix())
+				if job.MaxConcurrency > 0 {
+					EnforceScheduleCap(opts, job.ID, job.MaxConcurrency-1)
+				}
 				if err := CreateSession(opts, req); err != nil {
 					if err.Error() == "peer not connected" {
 						http.Error(w, err.Error(), http.StatusBadGateway)
