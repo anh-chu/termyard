@@ -34,7 +34,7 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
 archives:
   - id: termyard
-    builds:
+    ids:
       - termyard
     name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ .Arm }}"
 checksum:
