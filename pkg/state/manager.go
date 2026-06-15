@@ -196,9 +196,15 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 		newMap[s.Name] = s
 	}
 
-	// Detect removed sessions
+	// Detect removed sessions. A session that vanishes from discovery (e.g.
+	// killed directly via tmux, outside guppi's UI) must also have its metadata
+	// dropped, otherwise a later session reusing the same tmux name inherits the
+	// stale DisplayName, UserPrompt, agent message, etc.
+	removed := make([]string, 0)
 	for name := range m.sessions {
 		if _, ok := newMap[name]; !ok {
+			removed = append(removed, name)
+			delete(m.meta, name)
 			m.mu.Unlock()
 			m.broadcast(StateEvent{Type: "session-removed", Session: name})
 			m.mu.Lock()
@@ -216,6 +222,12 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 
 	m.sessions = newMap
 	m.mu.Unlock()
+
+	// Persist name changes when sessions were removed so the on-disk names file
+	// does not resurrect stale labels for a future same-name session after restart.
+	if len(removed) > 0 {
+		m.saveNames()
+	}
 
 	// Broadcast a general refresh event
 	m.broadcast(StateEvent{Type: "sessions-changed"})
