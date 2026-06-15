@@ -212,6 +212,13 @@
   margin-right: auto !important;
 }
 
+/* Alt held triggers xterm column-select on Linux (Browser.isMac is false, so
+   altKey alone enables it; no terminal option disables this). Suppress the
+   crosshair cursor it forces. */
+.xterm.column-select.focus {
+  cursor: text !important;
+}
+
 /* Animations */
 @keyframes pulse {
   0%,

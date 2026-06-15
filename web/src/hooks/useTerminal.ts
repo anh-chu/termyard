@@ -216,6 +216,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
       allowProposedApi: true,
       rightClickSelectsWord: true,
       macOptionClickForcesSelection: true,
+      // Send Option/Alt as Meta (ESC-prefix) so Alt+key bindings reach the
+      // terminal app (tmux/vim/readline) on macOS too. No-op on Linux (already
+      // ESC-prefix by default).
+      macOptionIsMeta: true,
     })
 
     const fitAddon = new FitAddon()
