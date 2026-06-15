@@ -698,6 +698,7 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 	nc := namer.Context{
 		Workdir:    projectPath,
 		Current:    meta.DisplayName,
+		ForceFresh: true, // manual button = user wants a new name, not the sticky current one
 		Agent:      agentType,
 		UserPrompt: meta.UserPrompt,
 		AgentMsg:   meta.LastAgentMessage,

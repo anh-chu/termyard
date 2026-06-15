@@ -42,6 +42,7 @@ type Context struct {
 	Commands   []string // recent shell commands (shell kind only)
 	Members    []string // member session labels (group kind only)
 	Current    string   // existing display name, if any; the model is nudged to keep it
+	ForceFresh bool     // user explicitly asked for a new name; drop the keep-current nudge
 }
 
 // Config holds the endpoint settings. Endpoint + Model must be non-empty for
@@ -279,7 +280,13 @@ func extractContent(raw []byte) (string, error) {
 
 func buildUserPrompt(nc Context) string {
 	var b strings.Builder
-	if nc.Current != "" {
+	if nc.ForceFresh {
+		// Manual regenerate: the user wants a new name. Don't nudge the model to
+		// keep the current one, or sticky models just echo it back unchanged.
+		if nc.Current != "" {
+			fmt.Fprintf(&b, "Previous name: %s (the user asked for a fresh name; do not reuse it unless it is genuinely the best fit)\n", nc.Current)
+		}
+	} else if nc.Current != "" {
 		fmt.Fprintf(&b, "Current name: %s (keep it unless the focus has clearly changed)\n", nc.Current)
 	}
 	if nc.Workdir != "" {
