@@ -641,6 +641,9 @@ export function Sidebar({
     if (isSessionInActiveTurn(sk)) return 'working'
     if (events.some(e => e.status === 'active' && e.auto_detected && !NATIVE_HOOK_TOOLS.has(e.tool)) && !hasHookHistory) return 'working'
     if (hasHookHistory && !cmdIsShell) return 'idle'
+    // A recognized native-hook agent present in the pane (e.g. freshly opened,
+    // before its first prompt) is ready and idle, not a generic process.
+    if (events.some(e => e.status === 'active' && e.auto_detected && NATIVE_HOOK_TOOLS.has(e.tool))) return 'idle'
     return cmdIsShell ? 'shell' : 'process'
   }, [getSessionEvents, isSessionInActiveTurn])
 
