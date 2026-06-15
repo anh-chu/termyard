@@ -18,3 +18,6 @@ notes/
 
 # codesight generated AI context
 .codesight/
+
+# compiled binary
+/guppi

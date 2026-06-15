@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -620,6 +621,113 @@ func (m *Manager) RemoveSession(name string) {
 	m.saveNames()
 	m.broadcast(StateEvent{Type: "session-removed", Session: name})
 	m.broadcast(StateEvent{Type: "sessions-changed"})
+}
+
+// RegenerateName forces an AI name refresh for a session on demand (manual
+// button), bypassing the one-shot NameAssigned guard and clearing any prior
+// manual UserSetName lock. Agent sessions also rename the underlying tmux
+// session when detached; shell sessions only update the DisplayName. Returns
+// the new name, or namer.ErrDisabled when AI naming is off.
+func (m *Manager) RegenerateName(sessionName string) (string, error) {
+	m.mu.RLock()
+	n := m.namer
+	meta := m.meta[sessionName]
+	sess := m.sessions[sessionName]
+	attached := sess != nil && sess.Attached
+	projectPath := meta.ProjectPath
+	agentType := meta.AgentType
+	if sess != nil {
+		if sess.ProjectPath != "" {
+			projectPath = sess.ProjectPath
+		}
+		if sess.AgentType != "" {
+			agentType = sess.AgentType
+		}
+	}
+	nc := namer.Context{
+		Workdir:    projectPath,
+		Current:    meta.DisplayName,
+		Agent:      agentType,
+		UserPrompt: meta.UserPrompt,
+		AgentMsg:   meta.LastAgentMessage,
+	}
+	m.mu.RUnlock()
+
+	if n == nil || !n.Enabled() {
+		return "", namer.ErrDisabled
+	}
+
+	if agentType != "" {
+		nc.Kind = namer.KindAgent
+	} else {
+		nc.Kind = namer.KindShell
+		nc.Commands = m.foregroundCommands(sessionName)
+	}
+	if projectPath != "" {
+		if b, err := git.CurrentBranch(projectPath); err == nil {
+			nc.Branch = b
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	name, err := n.Generate(ctx, nc)
+	if err != nil {
+		return "", err
+	}
+
+	// Reset guard + manual lock so the forced name applies even when the
+	// session was already named or user-set.
+	m.mu.Lock()
+	meta = m.meta[sessionName]
+	meta.NameAssigned = false
+	meta.UserSetName = false
+	if sess := m.sessions[sessionName]; sess != nil {
+		sess.UserSetName = false
+	}
+	m.meta[sessionName] = meta
+	m.mu.Unlock()
+
+	if nc.Kind == namer.KindAgent {
+		// applyGeneratedName re-checks the (now-cleared) guard, stores the name,
+		// and renames the tmux session when detached.
+		m.applyGeneratedName(sessionName, name, !attached)
+		return name, nil
+	}
+
+	// Shell: store DisplayName only, never rename the tmux session.
+	m.mu.Lock()
+	meta = m.meta[sessionName]
+	meta.DisplayName = name
+	meta.NameAssigned = true
+	m.meta[sessionName] = meta
+	if s := m.sessions[sessionName]; s != nil {
+		s.DisplayName = name
+	}
+	m.mu.Unlock()
+	m.saveNames()
+	m.broadcast(StateEvent{Type: "sessions-changed"})
+	return name, nil
+}
+
+// foregroundCommands returns the active pane's foreground command for a
+// session, used as shell-naming context for a manual name refresh.
+func (m *Manager) foregroundCommands(session string) []string {
+	if m.client == nil {
+		return nil
+	}
+	fgs, err := m.client.ListForegroundCommands()
+	if err != nil {
+		return nil
+	}
+	for _, fg := range fgs {
+		if fg.Session == session {
+			if cmd := strings.TrimSpace(fg.Command); cmd != "" {
+				return []string{cmd}
+			}
+		}
+	}
+	return nil
 }
 
 // SetSessionAgentType explicitly stores an agent type for a session,

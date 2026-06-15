@@ -685,6 +685,23 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		}
 		sendStateUpdate(pc, deps)
 
+	case "regenerate-name":
+		var params struct {
+			Session string `json:"session"`
+		}
+		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Session == "" {
+			return
+		}
+		if deps.LocalMgr == nil {
+			log.Warn("no state manager available for regenerate-name action")
+			return
+		}
+		if _, err := deps.LocalMgr.RegenerateName(params.Session); err != nil {
+			log.WithError(err).Warn("regenerate name via peer failed")
+			return
+		}
+		sendStateUpdate(pc, deps)
+
 	default:
 		log.WithField("action", payload.Action).Debug("unknown session action")
 	}

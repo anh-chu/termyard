@@ -480,6 +480,21 @@ export function Sidebar({
     setRenamingSession(null)
   }
 
+  // Manually (re)generate an AI name for a session. The new name arrives via
+  // the websocket state update, so no local state mutation is needed here.
+  const aiNameSession = async (name: string, host?: string) => {
+    setContextMenu(null)
+    try {
+      await fetch('/api/session/regenerate-name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: name, host: host || undefined }),
+      })
+    } catch (err) {
+      console.error('Failed to AI name session:', err)
+    }
+  }
+
   const aiNameGroup = async (groupId: string, sessions: Session[], current?: string) => {
     const members = sessions.map(sessionLabel).filter(Boolean)
     if (members.length === 0) return
@@ -1510,6 +1525,15 @@ export function Sidebar({
             )}
           >
             Rename
+          </div>
+          <div
+            onClick={() => canRenameContextTarget && aiNameSession(contextMenu.name, contextMenu.host)}
+            className={cn(
+              'px-3 py-1.5 text-sm text-ink hover:bg-surface-card hover:text-ink',
+              canRenameContextTarget ? 'cursor-pointer' : 'cursor-not-allowed opacity-50',
+            )}
+          >
+            AI rename
           </div>
           <div
             onClick={() => toggleHide(contextMenu.key)}
