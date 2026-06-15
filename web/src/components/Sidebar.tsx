@@ -83,6 +83,13 @@ function getRunningCommands(session: Session): string[] {
 
 const SHELL_COMMANDS = new Set(['zsh', 'bash', 'fish', 'sh', 'dash', 'ksh', 'tcsh', 'csh'])
 
+// Agents that report their own working/idle lifecycle via hooks. For these,
+// process-tree presence is not a working signal — a freshly opened agent
+// sitting at its prompt is idle, not working. Their real "working" state comes
+// from hook events (isSessionInActiveTurn). Non-hook agents (e.g. codex) still
+// fall back to presence detection.
+const NATIVE_HOOK_TOOLS = new Set(['pi', 'claude', 'opencode'])
+
 const statusBadgeConfig = {
   working: { label: 'working', color: 'var(--accent-green)',  bg: 'rgba(89,212,153,0.12)',  pulse: true  },
   waiting: { label: 'waiting', color: 'var(--accent-yellow)', bg: 'rgba(255,197,51,0.12)',  pulse: true  },
@@ -632,7 +639,7 @@ export function Sidebar({
     if (events.some(e => e.status === 'stuck'))   return 'stuck'
     if (events.some(e => e.status === 'waiting')) return 'waiting'
     if (isSessionInActiveTurn(sk)) return 'working'
-    if (events.some(e => e.status === 'active' && e.auto_detected) && !hasHookHistory) return 'working'
+    if (events.some(e => e.status === 'active' && e.auto_detected && !NATIVE_HOOK_TOOLS.has(e.tool)) && !hasHookHistory) return 'working'
     if (hasHookHistory && !cmdIsShell) return 'idle'
     return cmdIsShell ? 'shell' : 'process'
   }, [getSessionEvents, isSessionInActiveTurn])
