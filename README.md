@@ -27,10 +27,10 @@ Termyard parks all of that in one place. It renders your live tmux sessions in t
 ### Quick install
 
 ```bash
-curl -sSL https://get.termyard.sh | sh
+curl -sSL https://raw.githubusercontent.com/anh-chu/termyard/master/scripts/install.sh | sh
 ```
 
-Detects your platform, downloads the latest release, and drops `termyard` in `/usr/local/bin` (or `~/.local/bin` if that is not writable). Pin a version with `VERSION=v0.1.0 curl -sSL https://get.termyard.sh | sh`.
+Detects your platform, downloads the latest release, and drops `termyard` in `/usr/local/bin` (or `~/.local/bin` if that is not writable). Pin a version with `VERSION=v0.12.0`, or set `BIN_DIR` to choose where it lands.
 
 ### With dist
 
@@ -273,6 +273,10 @@ go run . server
 - **Backend:** Go, chi v5, gorilla/websocket, creack/pty
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, xterm.js
 - **Build:** Single binary with `//go:embed`, GoReleaser for releases
+
+## Credits
+
+Termyard grew out of [ekristen/guppi](https://github.com/ekristen/guppi) by Erik Kristensen. Huge thanks to that project, which is the foundation and the heavy inspiration this one is built on.
 
 ## License
 
