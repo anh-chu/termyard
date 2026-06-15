@@ -6,7 +6,6 @@ import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
 import { usePreferences } from '../hooks/usePreferences'
 import { useSchedules } from '../hooks/useSchedules'
-import { statusConfig, toolColors } from '../theme'
 import { cn } from '../lib/utils'
 import { describeCron } from '../lib/cron'
 import { hostColor } from '../lib/hostColor'
@@ -80,30 +79,6 @@ function getRunningCommands(session: Session): string[] {
     }
   }
   return cmds
-}
-
-function ToolBadge({ event }: { event: ToolEvent }) {
-  const indicator = statusConfig[event.status]
-  if (!indicator) return null
-  const toolColor = toolColors[event.tool] || 'var(--muted-foreground)'
-
-  return (
-    <div
-      title={event.message || `${event.tool}: ${indicator.label}`}
-      className="inline-flex items-center gap-[3px] px-[5px] py-[1px] rounded-lg text-xs"
-      style={{
-        background: `${toolColor}18`,
-        border: `1px solid ${toolColor}40`,
-        color: toolColor,
-      }}
-    >
-      <span
-        className={cn('w-[5px] h-[5px] rounded-full inline-block', (event.status === 'waiting' || event.status === 'stuck') && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
-        style={{ background: indicator.color }}
-      />
-      {event.tool}
-    </div>
-  )
 }
 
 const SHELL_COMMANDS = new Set(['zsh', 'bash', 'fish', 'sh', 'dash', 'ksh', 'tcsh', 'csh'])
@@ -902,18 +877,8 @@ export function Sidebar({
           )}
 
           {!collapsed && prefs.sparklines_visible && act?.sparkline && (
-            <div className={cn('mt-1.5 w-full', events.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length > 0 && 'mb-1')}>
+            <div className="mt-1.5 w-full">
               <Sparkline data={act.sparkline} height={14} />
-            </div>
-          )}
-
-          {!collapsed && events.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length > 0 && (
-            <div className="flex gap-1 flex-wrap mt-1">
-              {events
-                .filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck')
-                .map((evt, i) => (
-                  <ToolBadge key={`${evt.tool}-${evt.pane}-${i}`} event={evt} />
-                ))}
             </div>
           )}
           {pairTarget === sk && (
