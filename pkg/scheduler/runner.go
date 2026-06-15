@@ -39,8 +39,18 @@ type Runner struct {
 	stateMgr *state.Manager
 	peerMgr  PeerLookup
 	createFn CreateSessionFunc
+	capFn    func(job Job)
 	log      *logrus.Entry
 	nowFn    func() time.Time
+}
+
+// SetCapEnforcer installs an optional pre-spawn hook that prunes a schedule's
+// existing sessions down to its MaxConcurrency before a new one is spawned.
+func (r *Runner) SetCapEnforcer(fn func(job Job)) {
+	if r == nil {
+		return
+	}
+	r.capFn = fn
 }
 
 func NewRunner(store *Store, client *tmux.Client, stateMgr *state.Manager, peerMgr PeerLookup, createFn CreateSessionFunc, log *logrus.Entry) *Runner {
@@ -128,6 +138,9 @@ func (r *Runner) runOnce(now time.Time) {
 			AgentType:      job.AgentType,
 			WorktreeBranch: job.WorktreeBranch,
 			ScheduleID:     job.ID,
+		}
+		if job.MaxConcurrency > 0 && r.capFn != nil {
+			r.capFn(job)
 		}
 		if err := r.createFn(req); err != nil {
 			r.log.WithError(err).WithField("job_id", job.ID).Warn("scheduler fire failed")

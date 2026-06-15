@@ -76,6 +76,7 @@ export function ScheduleModal({ onClose }: Props) {
   const [preset, setPreset] = useState<string | null>(prefs.default_agent || 'claude')
   const [worktreeMode, setWorktreeMode] = useState(false)
   const [worktreeBranch, setWorktreeBranch] = useState('')
+  const [maxConcurrency, setMaxConcurrency] = useState(0)
   const [enabled, setEnabled] = useState(true)
   const [hostId, setHostId] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -125,6 +126,7 @@ export function ScheduleModal({ onClose }: Props) {
     setPreset(next.agentType || null)
     setWorktreeMode(Boolean(next.worktreeBranch))
     setWorktreeBranch(next.worktreeBranch || '')
+    setMaxConcurrency(next.maxConcurrency || 0)
     setEnabled(next.enabled)
     setHostId(next.host || '')
     setError(null)
@@ -145,6 +147,7 @@ export function ScheduleModal({ onClose }: Props) {
     setPreset(prefs.default_agent || 'claude')
     setWorktreeMode(false)
     setWorktreeBranch('')
+    setMaxConcurrency(0)
     setEnabled(true)
     setHostId(preferredHostId)
     setError(null)
@@ -177,6 +180,7 @@ export function ScheduleModal({ onClose }: Props) {
     agentType: preset || prefs.default_agent || 'claude',
     host: hostId || '',
     worktreeBranch: worktreeMode ? worktreeBranch.trim() : '',
+    maxConcurrency: Number.isFinite(maxConcurrency) && maxConcurrency > 0 ? Math.floor(maxConcurrency) : 0,
     enabled,
   })
 
@@ -471,6 +475,23 @@ export function ScheduleModal({ onClose }: Props) {
                     className="w-full text-[13px] text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none font-mono placeholder:text-mute/40 focus:border-primary/60 transition-colors"
                   />
                 )}
+              </div>
+
+              <div>
+                <div className="text-xs font-bold text-mute/60 uppercase tracking-wider mb-2 ml-1">Max concurrent runs</div>
+                <input
+                  type="number"
+                  min={0}
+                  value={maxConcurrency || ''}
+                  onChange={(e) => setMaxConcurrency(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                  placeholder="0 = unlimited"
+                  className="w-full text-[13px] text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none font-mono placeholder:text-mute/40 focus:border-primary/60 transition-colors"
+                />
+                <div className="mt-1 ml-1 text-[11px] text-mute/70">
+                  {maxConcurrency > 0
+                    ? `Keeps newest ${maxConcurrency} run${maxConcurrency === 1 ? '' : 's'}; oldest are killed when a new one spawns.`
+                    : 'Unlimited. Runs accumulate until killed manually.'}
+                </div>
               </div>
 
               <div>

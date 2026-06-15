@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -170,6 +171,46 @@ func sessionKey(host, name string) string {
 		return host + "/" + name
 	}
 	return name
+}
+
+// EnforceScheduleCap prunes the sessions owned by scheduleID down to max-1,
+// making room for one new spawn. Oldest sessions (by tmux creation time) are
+// killed first. A non-positive max means unlimited and is a no-op.
+func EnforceScheduleCap(opts *Options, scheduleID string, max int) {
+	if opts == nil || opts.AttrsStore == nil || opts.Client == nil || max <= 0 || scheduleID == "" {
+		return
+	}
+	keys := map[string]bool{}
+	for key, sid := range opts.AttrsStore.Sets().ScheduleIDs {
+		if sid == scheduleID {
+			keys[key] = true
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+	sessions, err := opts.Client.ListSessions()
+	if err != nil {
+		logrus.WithError(err).Warn("schedule cap: list sessions failed")
+		return
+	}
+	var tagged []*tmux.Session
+	for _, s := range sessions {
+		if keys[sessionKey(s.Host, s.Name)] {
+			tagged = append(tagged, s)
+		}
+	}
+	sort.Slice(tagged, func(i, j int) bool {
+		return tagged[i].Created.Before(tagged[j].Created)
+	})
+	// Leave room for the incoming spawn: trim until strictly below max.
+	for len(tagged) >= max {
+		victim := tagged[0]
+		tagged = tagged[1:]
+		if err := opts.Client.KillSession(victim.ID, victim.Name); err != nil {
+			logrus.WithError(err).WithField("session", victim.Name).Warn("schedule cap: kill oldest failed")
+		}
+	}
 }
 
 // CreateSession centralizes spawn logic for HTTP and scheduler fires.
@@ -722,6 +763,52 @@ func Run(ctx context.Context, opts *Options) error {
 				// clear=true resets to AI/auto naming; otherwise mark user-set.
 				opts.StateMgr.SetDisplayName(req.Session, req.DisplayName, !req.Clear)
 				w.WriteHeader(http.StatusNoContent)
+			})
+
+			// Manually (re)generate an AI display name for a session on demand.
+			// Bypasses the one-shot guard and clears any prior manual name.
+			r.Post("/session/regenerate-name", func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Session string `json:"session"`
+					Host    string `json:"host,omitempty"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Session == "" {
+					http.Error(w, "session is required", http.StatusBadRequest)
+					return
+				}
+
+				// Remote host — forward via peer connection. The new name propagates
+				// back through the peer's state update broadcast.
+				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
+					peerConn := opts.PeerMgr.GetPeerConnection(req.Host)
+					if peerConn == nil {
+						http.Error(w, "peer not connected", http.StatusBadGateway)
+						return
+					}
+					params, _ := json.Marshal(map[string]string{"session": req.Session})
+					msg, _ := peer.NewMessage(peer.MsgSessionAction, peer.SessionActionPayload{
+						Action: "regenerate-name",
+						Params: params,
+					})
+					if peerConn.Enqueue(msg) {
+						w.WriteHeader(http.StatusNoContent)
+					} else {
+						http.Error(w, "peer send queue full", http.StatusBadGateway)
+					}
+					return
+				}
+
+				if opts.StateMgr == nil {
+					http.Error(w, "state manager unavailable", http.StatusInternalServerError)
+					return
+				}
+				name, err := opts.StateMgr.RegenerateName(req.Session)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"name": name})
 			})
 
 			// AI-name a layout group from its member session labels. Groups are

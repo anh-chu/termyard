@@ -24,6 +24,7 @@ type Job struct {
 	Host              string    `json:"host,omitempty"`
 	SessionNamePrefix string    `json:"session_name_prefix,omitempty"`
 	WorktreeBranch    string    `json:"worktree_branch,omitempty"`
+	MaxConcurrency    int       `json:"max_concurrency,omitempty"`
 	Enabled           bool      `json:"enabled"`
 	LastRun           time.Time `json:"last_run,omitempty"`
 	NextRun           time.Time `json:"next_run,omitempty"`

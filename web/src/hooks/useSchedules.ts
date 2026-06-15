@@ -10,6 +10,7 @@ export interface Schedule {
   host: string
   sessionNamePrefix?: string
   worktreeBranch?: string
+  maxConcurrency: number
   enabled: boolean
   lastRun?: string
   nextRun?: string
@@ -25,6 +26,7 @@ export interface ScheduleForm {
   agentType: string
   host: string
   worktreeBranch: string
+  maxConcurrency: number
   enabled: boolean
 }
 
@@ -58,6 +60,7 @@ function normalizeSchedule(raw: ScheduleWire): Schedule {
     host: text(raw.host ?? raw.Host),
     sessionNamePrefix: text(raw.sessionNamePrefix ?? raw.session_name_prefix ?? raw.SessionNamePrefix) || undefined,
     worktreeBranch: text(raw.worktreeBranch ?? raw.worktree_branch ?? raw.WorktreeBranch) || undefined,
+    maxConcurrency: num(raw.maxConcurrency ?? raw.max_concurrency ?? raw.MaxConcurrency),
     enabled: bool(raw.enabled ?? raw.Enabled),
     lastRun: text(raw.lastRun ?? raw.last_run ?? raw.LastRun) || undefined,
     nextRun: text(raw.nextRun ?? raw.next_run ?? raw.NextRun) || undefined,
@@ -82,6 +85,7 @@ function toWire(form: ScheduleForm) {
     agent_type: form.agentType,
     host: form.host,
     worktree_branch: form.worktreeBranch,
+    max_concurrency: form.maxConcurrency,
     enabled: form.enabled,
   }
 }

@@ -275,6 +275,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		runner := scheduler.NewRunner(schedulerStore, client, stateMgr, peerMgr, func(req scheduler.CreateSessionReq) error {
 			return server.CreateSession(opts, req)
 		}, logrus.WithField("component", "scheduler"))
+		runner.SetCapEnforcer(func(job scheduler.Job) {
+			server.EnforceScheduleCap(opts, job.ID, job.MaxConcurrency)
+		})
 		opts.SchedulerRunner = runner
 		go func() {
 			for opts.Hub == nil {
