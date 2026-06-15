@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/websocket"
+	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 
 	wp "github.com/SherClockHolmes/webpush-go"
@@ -38,6 +39,7 @@ import (
 	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
 	"github.com/ekristen/guppi/pkg/recovery"
+	"github.com/ekristen/guppi/pkg/scheduler"
 	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/socket"
 	"github.com/ekristen/guppi/pkg/state"
@@ -71,6 +73,9 @@ type Options struct {
 	LinkSupervisor   *peer.LinkSupervisor
 	Detector         *toolevents.Detector
 	PortForwardStore *portforward.Store
+	SchedulerStore   *scheduler.Store
+	SchedulerRunner  *scheduler.Runner
+	Hub              *ws.Hub
 }
 
 // attrsStoreAdapter bridges sessionattrs.Store to the narrow SessionAttrsSink
@@ -158,6 +163,107 @@ func fanoutAttrsDeltaToPeers(opts *Options, key string, a sessionattrs.Attr) {
 	for _, pc := range opts.PeerMgr.ConnectedPeers() {
 		pc.Enqueue(msg)
 	}
+}
+
+func sessionKey(host, name string) string {
+	if host != "" {
+		return host + "/" + name
+	}
+	return name
+}
+
+// CreateSession centralizes spawn logic for HTTP and scheduler fires.
+func CreateSession(opts *Options, req scheduler.CreateSessionReq) error {
+	req.Name = strings.TrimSpace(req.Name)
+	req.Host = strings.TrimSpace(req.Host)
+	req.Path = strings.TrimSpace(req.Path)
+	req.Command = strings.TrimSpace(req.Command)
+	if req.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if err := tmux.ValidateSessionName(req.Name); err != nil {
+		return err
+	}
+
+	// Remote host — forward via peer connection. The peer handles worktree
+	// creation locally so the worktree lands on the peer's filesystem, not ours.
+	if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
+		peerConn := opts.PeerMgr.GetPeerConnection(req.Host)
+		if peerConn == nil {
+			return fmt.Errorf("peer not connected")
+		}
+		params, _ := json.Marshal(map[string]string{
+			"name":            req.Name,
+			"path":            req.Path,
+			"command":         req.Command,
+			"worktree_branch": req.WorktreeBranch,
+			"schedule_id":     req.ScheduleID,
+		})
+		msg, _ := peer.NewMessage(peer.MsgSessionAction, peer.SessionActionPayload{
+			Action: "new",
+			Params: params,
+		})
+		if !peerConn.Enqueue(msg) {
+			return fmt.Errorf("peer send queue full")
+		}
+		if opts.AttrsStore != nil && req.ScheduleID != "" {
+			if _, err := opts.AttrsStore.SetScheduleID(sessionKey(req.Host, req.Name), req.ScheduleID); err != nil {
+				logrus.WithError(err).Warn("failed to store schedule id")
+			} else if opts.Hub != nil {
+				opts.Hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": sessionKey(req.Host, req.Name)})
+			}
+		}
+		return nil
+	}
+
+	// If a worktree branch is requested, create the linked worktree first and
+	// redirect the session path to it.
+	if req.WorktreeBranch != "" && req.Path != "" {
+		expanded := req.Path
+		if strings.HasPrefix(expanded, "~") {
+			if home, err := os.UserHomeDir(); err == nil && home != "" {
+				expanded = home + expanded[1:]
+			}
+		}
+		// Resolve bare relative paths (e.g. "guppi") against the home dir.
+		if !filepath.IsAbs(expanded) {
+			if home, err := os.UserHomeDir(); err == nil {
+				expanded = filepath.Join(home, expanded)
+			}
+		}
+		sanitized := strings.ReplaceAll(req.WorktreeBranch, "/", "-")
+		worktreesDir := filepath.Join(expanded, ".worktrees")
+		if err := os.MkdirAll(worktreesDir, 0755); err != nil {
+			return fmt.Errorf("mkdir .worktrees: %w", err)
+		}
+		destPath := filepath.Join(worktreesDir, sanitized)
+		if err := git.CreateWorktree(expanded, req.WorktreeBranch, destPath); err != nil {
+			return fmt.Errorf("git worktree add: %w", err)
+		}
+		req.Path = destPath
+	}
+
+	if err := opts.Client.NewSession(req.Name, req.Path, req.Command); err != nil {
+		return err
+	}
+	// Store explicit agent type before refresh so it survives inference.
+	if req.AgentType != "" && opts.StateMgr != nil {
+		opts.StateMgr.SetSessionAgentType(req.Name, req.AgentType)
+	}
+	if opts.AttrsStore != nil && req.ScheduleID != "" {
+		if _, err := opts.AttrsStore.SetScheduleID(sessionKey(req.Host, req.Name), req.ScheduleID); err != nil {
+			logrus.WithError(err).Warn("failed to store schedule id")
+		} else if opts.Hub != nil {
+			opts.Hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": sessionKey(req.Host, req.Name)})
+		}
+	}
+	// Trigger state refresh so WebSocket clients get notified.
+	if opts.StateMgr != nil {
+		if fresh, err := opts.Client.ListSessions(); err == nil {
+			opts.StateMgr.UpdateSessions(fresh)
+		}
+	}
+	return nil
 }
 
 // handleRemoteSession handles a terminal session request for a remote peer.
@@ -412,6 +518,7 @@ func Run(ctx context.Context, opts *Options) error {
 
 	// Build the events hub up front so routes can broadcast layout changes.
 	hub := ws.NewHub(opts.StateMgr, opts.Tracker)
+	opts.Hub = hub
 	if opts.ActivityTracker != nil {
 		var peerActivity ws.ActivitySource
 		localHostID := ""
@@ -559,6 +666,7 @@ func Run(ctx context.Context, opts *Options) error {
 					Command        string `json:"command,omitempty"`
 					AgentType      string `json:"agent_type,omitempty"`
 					WorktreeBranch string `json:"worktree_branch,omitempty"`
+					ScheduleID     string `json:"schedule_id,omitempty"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -576,75 +684,22 @@ func Run(ctx context.Context, opts *Options) error {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
-
-				// Remote host — forward via peer connection. The peer handles
-				// worktree creation locally so the worktree lands on the peer's
-				// filesystem, not ours.
-				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
-					peerConn := opts.PeerMgr.GetPeerConnection(req.Host)
-					if peerConn == nil {
-						http.Error(w, "peer not connected", http.StatusBadGateway)
-						return
-					}
-					params, _ := json.Marshal(map[string]string{
-						"name":            req.Name,
-						"path":            req.Path,
-						"command":         req.Command,
-						"worktree_branch": req.WorktreeBranch,
-					})
-					msg, _ := peer.NewMessage(peer.MsgSessionAction, peer.SessionActionPayload{
-						Action: "new",
-						Params: params,
-					})
-					if peerConn.Enqueue(msg) {
-						w.Header().Set("Content-Type", "application/json")
-						json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
-					} else {
-						http.Error(w, "peer send queue full", http.StatusBadGateway)
+				if err := CreateSession(opts, scheduler.CreateSessionReq{
+					Name:           req.Name,
+					Host:           req.Host,
+					Path:           req.Path,
+					Command:        req.Command,
+					AgentType:      req.AgentType,
+					WorktreeBranch: req.WorktreeBranch,
+					ScheduleID:     req.ScheduleID,
+				}); err != nil {
+					switch err.Error() {
+					case "peer not connected", "peer send queue full":
+						http.Error(w, err.Error(), http.StatusBadGateway)
+					default:
+						http.Error(w, err.Error(), http.StatusInternalServerError)
 					}
 					return
-				}
-
-				// If a worktree branch is requested, create the linked worktree first
-				// and redirect the session path to it.
-				if req.WorktreeBranch != "" && req.Path != "" {
-					expanded := req.Path
-					if strings.HasPrefix(expanded, "~") {
-						if home, err := os.UserHomeDir(); err == nil && home != "" {
-							expanded = home + expanded[1:]
-						}
-					}
-					// Resolve bare relative paths (e.g. "guppi") against the home dir.
-					if !filepath.IsAbs(expanded) {
-						if home, err := os.UserHomeDir(); err == nil {
-							expanded = filepath.Join(home, expanded)
-						}
-					}
-					sanitized := strings.ReplaceAll(req.WorktreeBranch, "/", "-")
-					worktreesDir := filepath.Join(expanded, ".worktrees")
-					if err := os.MkdirAll(worktreesDir, 0755); err != nil {
-						http.Error(w, "mkdir .worktrees: "+err.Error(), http.StatusInternalServerError)
-						return
-					}
-					destPath := filepath.Join(worktreesDir, sanitized)
-					if err := git.CreateWorktree(expanded, req.WorktreeBranch, destPath); err != nil {
-						http.Error(w, "git worktree add: "+err.Error(), http.StatusInternalServerError)
-						return
-					}
-					req.Path = destPath
-				}
-
-				if err := opts.Client.NewSession(req.Name, req.Path, req.Command); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				// Store explicit agent type before refresh so it survives inference
-				if req.AgentType != "" && opts.StateMgr != nil {
-					opts.StateMgr.SetSessionAgentType(req.Name, req.AgentType)
-				}
-				// Trigger state refresh so WebSocket clients get notified
-				if fresh, err := opts.Client.ListSessions(); err == nil {
-					opts.StateMgr.UpdateSessions(fresh)
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
@@ -1168,6 +1223,147 @@ func Run(ctx context.Context, opts *Options) error {
 				fanoutAttrsDeltaToPeers(opts, body.Key, a)
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(opts.AttrsStore.Sets())
+			})
+
+			// Schedule registry
+			r.Get("/schedules", func(w http.ResponseWriter, r *http.Request) {
+				if opts.SchedulerStore == nil {
+					http.Error(w, "scheduler not available", http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(opts.SchedulerStore.List())
+			})
+			r.Post("/schedules", func(w http.ResponseWriter, r *http.Request) {
+				if opts.SchedulerStore == nil {
+					http.Error(w, "scheduler not available", http.StatusServiceUnavailable)
+					return
+				}
+				var job scheduler.Job
+				if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+					http.Error(w, "invalid JSON", http.StatusBadRequest)
+					return
+				}
+				created, err := opts.SchedulerStore.Add(job)
+				if err != nil {
+					if strings.Contains(err.Error(), "invalid cron spec") || strings.Contains(err.Error(), "cron spec is required") {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+					} else {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+					}
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(created)
+			})
+			r.Put("/schedules/{id}", func(w http.ResponseWriter, r *http.Request) {
+				if opts.SchedulerStore == nil {
+					http.Error(w, "scheduler not available", http.StatusServiceUnavailable)
+					return
+				}
+				id := chi.URLParam(r, "id")
+				cur, ok := opts.SchedulerStore.Get(id)
+				if !ok {
+					http.Error(w, "job not found", http.StatusNotFound)
+					return
+				}
+				var job scheduler.Job
+				if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+					http.Error(w, "invalid JSON", http.StatusBadRequest)
+					return
+				}
+				if job.ID != "" && job.ID != id {
+					http.Error(w, "id mismatch", http.StatusBadRequest)
+					return
+				}
+				job.ID = id
+				job.CreatedAt = cur.CreatedAt
+				job.LastRun = cur.LastRun
+				job.RunCount = cur.RunCount
+				if job.SessionNamePrefix == "" {
+					job.SessionNamePrefix = cur.SessionNamePrefix
+				}
+				if job.Enabled {
+					schedule, err := cron.ParseStandard(job.CronSpec)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					job.NextRun = schedule.Next(time.Now())
+				} else {
+					job.NextRun = time.Time{}
+				}
+				updated, err := opts.SchedulerStore.Update(job)
+				if err != nil {
+					if strings.Contains(err.Error(), "invalid cron spec") || strings.Contains(err.Error(), "cron spec is required") {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+					} else {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+					}
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(updated)
+			})
+			r.Delete("/schedules/{id}", func(w http.ResponseWriter, r *http.Request) {
+				if opts.SchedulerStore == nil {
+					http.Error(w, "scheduler not available", http.StatusServiceUnavailable)
+					return
+				}
+				if err := opts.SchedulerStore.Remove(chi.URLParam(r, "id")); err != nil {
+					if strings.Contains(err.Error(), "not found") {
+						http.Error(w, err.Error(), http.StatusNotFound)
+					} else {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+					}
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})
+			r.Post("/schedules/{id}/run", func(w http.ResponseWriter, r *http.Request) {
+				if opts.SchedulerStore == nil || opts.SchedulerRunner == nil {
+					http.Error(w, "scheduler not available", http.StatusServiceUnavailable)
+					return
+				}
+				id := chi.URLParam(r, "id")
+				job, ok := opts.SchedulerStore.Get(id)
+				if !ok {
+					http.Error(w, "job not found", http.StatusNotFound)
+					return
+				}
+				req := scheduler.CreateSessionReq{
+					Name:           job.SessionNamePrefix,
+					Host:           job.Host,
+					Path:           job.Path,
+					Command:        job.Command,
+					AgentType:      job.AgentType,
+					WorktreeBranch: job.WorktreeBranch,
+					ScheduleID:     job.ID,
+				}
+				if req.Name == "" {
+					req.Name = job.Name
+				}
+				if req.Name == "" {
+					req.Name = "schedule"
+				}
+				req.Name = fmt.Sprintf("%s-%d", req.Name, time.Now().Unix())
+				if err := CreateSession(opts, req); err != nil {
+					if err.Error() == "peer not connected" {
+						http.Error(w, err.Error(), http.StatusBadGateway)
+					} else {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+					}
+					return
+				}
+				nextRun := job.NextRun
+				if _, err := opts.SchedulerStore.MarkRan(job.ID, time.Now(), nextRun); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				updated, _ := opts.SchedulerStore.Get(job.ID)
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(updated)
 			})
 
 			// Port forward registry

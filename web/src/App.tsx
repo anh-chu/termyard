@@ -5,6 +5,7 @@ import { Terminal } from './components/Terminal'
 import { Overview } from './components/Overview'
 import { NewSessionModal } from './components/NewSessionModal'
 import { PortForwardModal } from './components/PortForwardModal'
+import { ScheduleModal } from './components/ScheduleModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
 import { PaneTree, getLeaves, findLeaf, splitLeaf, insertBesideLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
@@ -164,6 +165,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const [helpOpen, setHelpOpen] = useState(false)
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false)
   const [portForwardsOpen, setPortForwardsOpen] = useState(false)
+  const [schedulesOpen, setSchedulesOpen] = useState(false)
   const [mainDragOver, setMainDragOver] = useState<{ type: 'new-session' | 'sidebar'; zone: 'left' | 'right' | 'top' | 'bottom' | 'center' } | null>(null)
   const mainDragOverRef = useRef<{ type: 'new-session' | 'sidebar'; zone: 'left' | 'right' | 'top' | 'bottom' | 'center' } | null>(null)
   const pendingSessionRef = useRef<string | null>(null)
@@ -883,6 +885,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       {portForwardsOpen && (
         <PortForwardModal onClose={() => setPortForwardsOpen(false)} />
       )}
+      {schedulesOpen && (
+        <ScheduleModal onClose={() => setSchedulesOpen(false)} />
+      )}
       {quickSwitcherOpen && (
         <QuickSwitcher
           sessions={sessions}
@@ -928,6 +933,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
           onSettings={navigateToSettings}
           onNewSession={openNewSessionModal}
           onPortForwards={() => setPortForwardsOpen(true)}
+          onSchedules={() => setSchedulesOpen(true)}
           events={allToolEvents}
           connected={connected}
           onJumpToSession={jumpToSession}

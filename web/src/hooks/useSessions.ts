@@ -42,6 +42,8 @@ export interface Session {
   last_agent_message?: string
   display_name?: string   // AI-generated or user-set friendly label
   user_set_name?: boolean // user manually set display_name
+  scheduleID?: string
+  schedule_id?: string
 }
 
 // Label to show for a session: friendly display name if present, else tmux name.
@@ -54,6 +56,10 @@ export function sessionLabel(session: Session): string {
 // Unique key for a session across hosts
 export function sessionKey(session: Session): string {
   return session.host ? `${session.host}/${session.name}` : session.name
+}
+
+export function sessionScheduleID(session: Session): string {
+  return session.scheduleID || session.schedule_id || ''
 }
 
 // Parse a session key back into host + name

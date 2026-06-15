@@ -19,6 +19,7 @@ import (
 	"github.com/ekristen/guppi/pkg/portforward"
 	"github.com/ekristen/guppi/pkg/preferences"
 	"github.com/ekristen/guppi/pkg/recovery"
+	"github.com/ekristen/guppi/pkg/scheduler"
 	"github.com/ekristen/guppi/pkg/server"
 	"github.com/ekristen/guppi/pkg/sessionattrs"
 	"github.com/ekristen/guppi/pkg/state"
@@ -170,6 +171,12 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		attrsStore = nil
 	}
 
+	schedulerStore, err := scheduler.NewStore()
+	if err != nil {
+		logrus.WithError(err).Warn("failed to load scheduler store, schedules disabled")
+		schedulerStore = nil
+	}
+
 	var pushKeys *webpush.VAPIDKeys
 	var pushStore *webpush.Store
 	vapidKeys, err := webpush.LoadOrCreateKeys()
@@ -261,7 +268,24 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		LinkSupervisor:   supervisor,
 		Detector:         detector,
 		PortForwardStore: portforward.NewStore(),
+		SchedulerStore:   schedulerStore,
 		OnPrefsChanged:   applyNamerFromPrefs,
+	}
+	if schedulerStore != nil {
+		runner := scheduler.NewRunner(schedulerStore, client, stateMgr, peerMgr, func(req scheduler.CreateSessionReq) error {
+			return server.CreateSession(opts, req)
+		}, logrus.WithField("component", "scheduler"))
+		opts.SchedulerRunner = runner
+		go func() {
+			for opts.Hub == nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			runner.Run(ctx)
+		}()
 	}
 
 	return server.Run(ctx, opts)

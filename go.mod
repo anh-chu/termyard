@@ -8,6 +8,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/rancher/wrangler v1.1.2
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/urfave/cli/v3 v3.6.1
 	golang.org/x/crypto v0.31.0

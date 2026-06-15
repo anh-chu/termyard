@@ -40,6 +40,7 @@ import (
 type Attr struct {
 	Background bool      `json:"background"`
 	Hidden     bool      `json:"hidden"`
+	ScheduleID string    `json:"schedule_id,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
@@ -104,21 +105,25 @@ func (s *Store) Snapshot() map[string]Attr {
 // Sets is the flat, client-facing view: the set of keys currently backgrounded
 // and the set currently hidden. Tombstones (both-false) are omitted.
 type Sets struct {
-	Background []string `json:"background"`
-	Hidden     []string `json:"hidden"`
+	Background  []string          `json:"background"`
+	Hidden      []string          `json:"hidden"`
+	ScheduleIDs map[string]string `json:"schedule_ids,omitempty"`
 }
 
 // Sets returns the flat client-facing view.
 func (s *Store) Sets() Sets {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := Sets{Background: []string{}, Hidden: []string{}}
+	out := Sets{Background: []string{}, Hidden: []string{}, ScheduleIDs: map[string]string{}}
 	for k, v := range s.attrs {
 		if v.Background {
 			out.Background = append(out.Background, k)
 		}
 		if v.Hidden {
 			out.Hidden = append(out.Hidden, k)
+		}
+		if v.ScheduleID != "" {
+			out.ScheduleIDs[k] = v.ScheduleID
 		}
 	}
 	return out
@@ -127,9 +132,10 @@ func (s *Store) Sets() Sets {
 // Set applies a local (browser-originated) single-key update, stamping it with
 // the current time. Returns the stored attr so the caller can fan it out.
 func (s *Store) Set(key string, background, hidden bool) (Attr, error) {
-	a := Attr{Background: background, Hidden: hidden, UpdatedAt: time.Now()}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cur := s.attrs[key]
+	a := Attr{Background: background, Hidden: hidden, ScheduleID: cur.ScheduleID, UpdatedAt: time.Now()}
 	s.put(key, a)
 	if err := s.save(); err != nil {
 		return Attr{}, err
@@ -145,6 +151,8 @@ func (s *Store) ApplyRemote(key string, in Attr) (Attr, bool, error) {
 	defer s.mu.Unlock()
 	if cur, ok := s.attrs[key]; ok && !in.UpdatedAt.After(cur.UpdatedAt) {
 		return cur, false, nil
+	} else if ok && in.ScheduleID == "" {
+		in.ScheduleID = cur.ScheduleID
 	}
 	s.put(key, in)
 	if err := s.save(); err != nil {
@@ -162,6 +170,8 @@ func (s *Store) ApplySnapshot(snap map[string]Attr) ([]string, error) {
 	for k, in := range snap {
 		if cur, ok := s.attrs[k]; ok && !in.UpdatedAt.After(cur.UpdatedAt) {
 			continue
+		} else if ok && in.ScheduleID == "" {
+			in.ScheduleID = cur.ScheduleID
 		}
 		s.put(k, in)
 		changed = append(changed, k)
@@ -225,6 +235,20 @@ func (s *Store) Get(key string) Attr {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.attrs[key]
+}
+
+// SetScheduleID records owning schedule metadata for one session key.
+func (s *Store) SetScheduleID(key, scheduleID string) (Attr, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := s.attrs[key]
+	cur.ScheduleID = scheduleID
+	cur.UpdatedAt = time.Now()
+	s.put(key, cur)
+	if err := s.save(); err != nil {
+		return Attr{}, err
+	}
+	return cur, nil
 }
 
 // put writes an entry, collapsing expired tombstones. Caller holds the lock.

@@ -12,6 +12,7 @@ interface TopBarProps {
   onSettings: () => void
   onNewSession?: () => void
   onPortForwards?: () => void
+  onSchedules?: () => void
   events: ToolEvent[]
   connected: boolean | null
   onJumpToSession: (session: string, windowIndex?: number, pane?: string) => void
@@ -34,6 +35,7 @@ export function TopBar({
   onSettings,
   onNewSession,
   onPortForwards,
+  onSchedules,
   events,
   connected,
   onJumpToSession,
@@ -212,6 +214,18 @@ export function TopBar({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14" />
               <polyline points="14 5 19 12 14 19" />
+            </svg>
+          </button>
+        )}
+        {onSchedules && (
+          <button
+            onClick={onSchedules}
+            title="Schedules"
+            className="p-1.5 rounded-sm hover:bg-surface-elevated text-ink transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 8v5l3 2" />
             </svg>
           </button>
         )}

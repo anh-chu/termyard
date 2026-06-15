@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Session, sessionKey, sessionLabel } from '../hooks/useSessions'
+import { Session, sessionKey, sessionLabel, sessionScheduleID } from '../hooks/useSessions'
 import type { SessionAttrSets } from '../hooks/useSessionAttrs'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
 import { usePreferences } from '../hooks/usePreferences'
+import { useSchedules } from '../hooks/useSchedules'
 import { statusConfig, toolColors } from '../theme'
 import { cn } from '../lib/utils'
+import { describeCron } from '../lib/cron'
 import { hostColor } from '../lib/hostColor'
 import { AgentMark } from './AgentMark'
 
@@ -162,6 +164,29 @@ function pathLeaf(path?: string): string {
   return parts[parts.length - 1] || trimmed
 }
 
+function sortNewestFirst<T extends { created?: string; last_activity?: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const aTime = new Date(a.created || a.last_activity || 0).getTime()
+    const bTime = new Date(b.created || b.last_activity || 0).getTime()
+    return bTime - aTime
+  })
+}
+
+function formatRelativeTime(iso?: string): string {
+  if (!iso) return '—'
+  const ts = new Date(iso).getTime()
+  if (!Number.isFinite(ts)) return '—'
+  const diff = ts - Date.now()
+  const future = diff > 0
+  const abs = Math.abs(diff)
+  const mins = Math.round(abs / 60000)
+  if (mins < 1) return future ? 'now' : 'just now'
+  if (mins < 60) return future ? `in ${mins}m` : `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`
+  const days = Math.round(hours / 24)
+  return future ? `in ${days}d` : `${days}d ago`
+}
 
 function formatUptime(created?: string): string {
   if (!created) return ''
@@ -213,11 +238,14 @@ export function Sidebar({
   setSessionAttr,
 }: SidebarProps) {
   const { prefs } = usePreferences()
+  const { schedules } = useSchedules()
   // background/hidden are SERVER-AUTHORITATIVE and arrive via props. They are
   // NOT cached in localStorage — the server owns the truth and broadcasts
   // session-attrs-updated, which App refetches and passes back down here.
   const hiddenSet = sessionAttrs.hidden
   const backgroundSet = sessionAttrs.background
+  const scheduleIDs = sessionAttrs.scheduleIDs
+  const scheduleById = useMemo(() => new Map(schedules.map(schedule => [schedule.id, schedule])), [schedules])
   const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('guppi:session-order'))
   const [projectFilters, setProjectFilters] = useState<string[]>(() => readStoredList('guppi:project-filters'))
   const [hiddenExpanded, setHiddenExpanded] = useState(false)
@@ -260,12 +288,28 @@ export function Sidebar({
     } catch {}
     return new Set()
   })
+  const [expandedScheduleGroups, setExpandedScheduleGroups] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('guppi:expanded-schedule-groups')
+      if (stored) return new Set(JSON.parse(stored))
+    } catch {}
+    return new Set()
+  })
   const toggleGroupCollapsed = useCallback((id: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       try { localStorage.setItem('guppi:collapsed-groups', JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }, [])
+  const toggleScheduleExpanded = useCallback((id: string) => {
+    setExpandedScheduleGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      try { localStorage.setItem('guppi:expanded-schedule-groups', JSON.stringify([...next])) } catch {}
       return next
     })
   }, [])
@@ -498,13 +542,30 @@ export function Sidebar({
   type UnifiedItem =
     | { kind: 'session'; session: Session }
     | { kind: 'group'; group: NonNullable<typeof layoutGroups>[number]; sessions: Session[] }
+    | { kind: 'schedule'; scheduleId: string; schedule: (typeof schedules)[number] | undefined; sessions: Session[] }
 
   const unifiedItems = useMemo((): UnifiedItem[] => {
     const items: UnifiedItem[] = []
     const seenGroups = new Set<string>()
+    const seenScheduleGroups = new Set<string>()
     for (const session of visibleSessions) {
-      const sk = sessionKey(session)
-      const group = layoutGroups?.find(g => g.leaves.includes(sk))
+      const scheduleId = scheduleIDs.get(sessionKey(session)) || scheduleIDs.get(session.name) || sessionScheduleID(session)
+      if (scheduleId) {
+        if (!seenScheduleGroups.has(scheduleId)) {
+          seenScheduleGroups.add(scheduleId)
+          const scheduleSessions = sortNewestFirst(
+            visibleSessions.filter(item => (scheduleIDs.get(sessionKey(item)) || scheduleIDs.get(item.name) || sessionScheduleID(item)) === scheduleId),
+          )
+          items.push({
+            kind: 'schedule',
+            scheduleId,
+            schedule: scheduleById.get(scheduleId),
+            sessions: scheduleSessions,
+          })
+        }
+        continue
+      }
+      const group = layoutGroups?.find(g => g.leaves.includes(sessionKey(session)))
       if (group) {
         if (!seenGroups.has(group.id)) {
           seenGroups.add(group.id)
@@ -513,12 +574,10 @@ export function Sidebar({
             .filter((s): s is Session => !!s)
           items.push({ kind: 'group', group, sessions: groupSessions })
         }
-        // else: already emitted as part of the bracket above
       } else {
         items.push({ kind: 'session', session })
       }
     }
-    // Groups whose members aren't in visibleSessions yet (remote/offline)
     for (const group of layoutGroups ?? []) {
       if (!seenGroups.has(group.id)) {
         const groupSessions = group.leaves
@@ -529,7 +588,7 @@ export function Sidebar({
       }
     }
     return items
-  }, [visibleSessions, layoutGroups])
+  }, [visibleSessions, layoutGroups, schedules, scheduleById, scheduleIDs])
 
   const renderSessionItem = (session: Session, isHiddenSection = false, bracketChar?: string | null) => {
     const sk = sessionKey(session)
@@ -907,6 +966,51 @@ export function Sidebar({
     )
   }
 
+  const renderScheduleItem = (scheduleId: string, sessions: Session[], schedule?: (typeof schedules)[number]) => {
+    const latest = sessions[0]
+    const isExpanded = expandedScheduleGroups.has(scheduleId)
+    const shouldShowSessions = isExpanded || sessions.length === 1
+    const maxExpandedChildren = 6
+    const childSessions = shouldShowSessions ? sessions.slice(0, maxExpandedChildren) : [latest].filter(Boolean)
+    const overflow = isExpanded && sessions.length > maxExpandedChildren ? sessions.length - maxExpandedChildren : 0
+    const enabled = schedule?.enabled ?? true
+    const host = schedule?.host || ''
+    const hostOnline = !host || hosts?.some(item => item.id === host && item.online)
+    const stateLabel = !enabled ? 'paused' : !hostOnline ? 'peer offline' : 'active'
+    const stateColor = !enabled ? 'text-amber-400 border-amber-400/30 bg-amber-400/10' : !hostOnline ? 'text-mute/70 border-hairline bg-surface-elevated/70' : 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10'
+    const scheduleName = schedule?.name || latest?.name || scheduleId
+    return (
+      <li key={`schedule:${scheduleId}`} data-schedule-id={scheduleId}>
+        <div className={cn('rounded-sm border border-hairline bg-surface/70 overflow-hidden', !enabled && 'opacity-75')}>
+          <button
+            type="button"
+            onClick={() => toggleScheduleExpanded(scheduleId)}
+            className="w-full text-left px-2.5 py-2 flex items-start gap-2 transition-colors hover:bg-white/[0.05]"
+          >
+            <span className="text-[11px] text-mute/70 font-mono pt-0.5 shrink-0">{isExpanded ? '▾' : '▸'}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[12px] font-semibold text-ink truncate">{scheduleName}</span>
+                <span className={cn('shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-xs border uppercase tracking-widest', stateColor)}>
+                  {stateLabel}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[10px] text-mute/60 truncate" title={schedule?.cronSpec}>
+                {(schedule?.cronSpec ? describeCron(schedule.cronSpec) : null) ?? schedule?.cronSpec ?? '—'}  ·  next {formatRelativeTime(schedule?.nextRun)}  ·  {schedule?.runCount ?? sessions.length} runs
+              </div>
+            </div>
+          </button>
+          <div className="px-1.5 pb-1.5 pl-5 space-y-0.5">
+            {childSessions.map((session, idx) => renderSessionItem(session, false, null))}
+            {overflow > 0 && (
+              <div className="px-2 pt-1 text-[10px] text-mute/60 font-medium">+{overflow} more</div>
+            )}
+          </div>
+        </div>
+      </li>
+    )
+  }
+
   const isHidden = collapsed && collapseMode === 'hidden'
   const filterLabel = projectFilters.length === 0 ? 'All projects' : `${projectFilters.length} projects`
   const contextTargetSession = contextMenu
@@ -1031,6 +1135,9 @@ export function Sidebar({
           {unifiedItems.map(item => {
             if (item.kind === 'session') {
               return renderSessionItem(item.session, false, null)
+            }
+            if (item.kind === 'schedule') {
+              return renderScheduleItem(item.scheduleId, item.sessions, item.schedule)
             }
             const { group, sessions: groupSessions } = item
             const firstLeaf = group.leaves[0]

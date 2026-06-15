@@ -19,14 +19,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type SessionAttrSets = {
   background: Set<string>
   hidden: Set<string>
+  scheduleIDs: Map<string, string>
 }
 
-type WireSets = { background: string[]; hidden: string[] }
+type WireSets = { background: string[]; hidden: string[]; schedule_ids?: Record<string, string> }
 
 function toSets(w: WireSets | null | undefined): SessionAttrSets {
   return {
     background: new Set(w?.background ?? []),
     hidden: new Set(w?.hidden ?? []),
+    scheduleIDs: new Map(Object.entries(w?.schedule_ids ?? {})),
   }
 }
 
@@ -34,6 +36,7 @@ export function useSessionAttrs(authenticated: boolean) {
   const [sets, setSets] = useState<SessionAttrSets>(() => ({
     background: new Set(),
     hidden: new Set(),
+    scheduleIDs: new Map(),
   }))
   const inFlightKeys = useRef<Set<string>>(new Set())
 
@@ -65,7 +68,7 @@ export function useSessionAttrs(authenticated: boolean) {
         const hd = new Set(prev.hidden)
         if (background) bg.add(key); else bg.delete(key)
         if (hidden) hd.add(key); else hd.delete(key)
-        return { background: bg, hidden: hd }
+        return { background: bg, hidden: hd, scheduleIDs: prev.scheduleIDs }
       })
       inFlightKeys.current.add(key)
       try {
