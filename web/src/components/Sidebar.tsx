@@ -1351,24 +1351,6 @@ export function Sidebar({
             )
           })}
 
-          {hiddenSessions.length > 0 && !collapsed && (
-            <>
-              <li
-                onClick={() => setHiddenExpanded(!hiddenExpanded)}
-                className="px-3 mt-2 text-xs text-mute cursor-pointer select-none flex items-center gap-1"
-              >
-                <span
-                  className="inline-block text-xs transition-transform duration-150"
-                  style={{ transform: hiddenExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
-                >
-                  ▶
-                </span>
-                Hidden ({hiddenSessions.length})
-              </li>
-              {hiddenExpanded && hiddenSessions.map(session => renderSessionItem(session, true))}
-            </>
-          )}
-
           {/* Drop target at end of list */}
           {draggingKey && (
             <li
@@ -1414,6 +1396,29 @@ export function Sidebar({
 
         </ul>
       </nav>
+
+      {hiddenSessions.length > 0 && !collapsed && (
+        <div className="border-t border-hairline bg-canvas shrink-0">
+          <button
+            type="button"
+            onClick={() => setHiddenExpanded(!hiddenExpanded)}
+            className="w-full px-3 py-1.5 text-[10px] uppercase tracking-widest font-semibold text-mute/60 select-none flex items-center gap-1 hover:text-mute transition-colors"
+          >
+            <span
+              className="inline-block transition-transform duration-150"
+              style={{ transform: hiddenExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            >
+              ▶
+            </span>
+            Hidden ({hiddenSessions.length})
+          </button>
+          {hiddenExpanded && (
+            <ul className="px-2 pb-2 space-y-0.5">
+              {hiddenSessions.map(session => renderSessionItem(session, true))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {backgroundSessions.length > 0 && !collapsed && (
         <div className="border-t border-hairline bg-canvas shrink-0">
