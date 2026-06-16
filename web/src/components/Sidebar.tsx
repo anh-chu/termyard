@@ -305,6 +305,13 @@ export function Sidebar({
     } catch {}
     return new Set()
   })
+  const [collapsedHosts, setCollapsedHosts] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('termyard:collapsed-hosts')
+      if (stored) return new Set(JSON.parse(stored))
+    } catch {}
+    return new Set()
+  })
   const toggleGroupCollapsed = useCallback((id: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev)
@@ -320,6 +327,15 @@ export function Sidebar({
       if (next.has(id)) next.delete(id)
       else next.add(id)
       try { localStorage.setItem('termyard:expanded-schedule-groups', JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }, [])
+  const toggleHostCollapsed = useCallback((id: string) => {
+    setCollapsedHosts(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      try { localStorage.setItem('termyard:collapsed-hosts', JSON.stringify([...next])) } catch {}
       return next
     })
   }, [])
@@ -605,6 +621,85 @@ export function Sidebar({
     return items
   }, [visibleSessions, layoutGroups, scheduleIDs])
 
+
+  type HostBucket = {
+    kind: 'host' | 'mixed'
+    hostId: string
+    name: string
+    online: boolean
+    sessions: Session[]
+    items: UnifiedItem[]
+  }
+
+  const hostGroups = useMemo((): HostBucket[] => {
+    if (!hasMultipleHosts) return []
+    const localBucketId = localHostId ?? ''
+    const mixedBucketId = '__mixed__'
+    const buckets = new Map<string, HostBucket>()
+
+    const ensureBucket = (hostId: string, name: string, kind: HostBucket['kind']) => {
+      const existing = buckets.get(hostId)
+      if (existing) return existing
+      const bucket: HostBucket = { kind, hostId, name, online: false, sessions: [], items: [] }
+      buckets.set(hostId, bucket)
+      return bucket
+    }
+
+    const hostNameFor = (hostId: string, fallback?: string) => (
+      hostId === localBucketId
+        ? 'This machine'
+        : hosts?.find(host => host.id === hostId)?.name ?? fallback ?? hostId
+    )
+
+    const sessionHostId = (session: Session) => (session.host && session.host !== localHostId ? session.host : localBucketId)
+
+    for (const item of unifiedItems) {
+      if (item.kind === 'session') {
+        const hostId = sessionHostId(item.session)
+        const bucket = ensureBucket(hostId, hostNameFor(hostId, item.session.host_name), 'host')
+        bucket.items.push(item)
+        bucket.sessions.push(item.session)
+        bucket.online ||= item.session.host_online !== false
+        continue
+      }
+
+      const groupHostIds = new Set(item.sessions.map(sessionHostId))
+      if (groupHostIds.size === 1) {
+        const hostId = groupHostIds.values().next().value as string
+        const bucket = ensureBucket(hostId, hostNameFor(hostId, item.sessions[0]?.host_name), 'host')
+        bucket.items.push(item)
+        bucket.sessions.push(...item.sessions)
+        bucket.online ||= item.sessions.some(session => session.host_online !== false)
+      } else {
+        const bucket = ensureBucket(mixedBucketId, 'Mixed hosts', 'mixed')
+        bucket.items.push(item)
+        bucket.sessions.push(...item.sessions)
+        bucket.online ||= item.sessions.some(session => session.host_online !== false)
+      }
+    }
+
+    // Surface connected online peers even with zero sessions, so the list
+    // confirms a machine is linked rather than hiding idle peers. Offline
+    // idle peers stay hidden to avoid clutter.
+    for (const host of hosts ?? []) {
+      if (host.local || host.id === localBucketId || !host.online) continue
+      const bucket = ensureBucket(host.id, hostNameFor(host.id, host.name), 'host')
+      bucket.online = true
+    }
+
+    const localBucket = buckets.get(localBucketId)
+    const remoteBuckets = Array.from(buckets.values())
+      .filter(bucket => bucket.kind === 'host' && bucket.hostId !== localBucketId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+    const mixedBucket = buckets.get(mixedBucketId)
+
+    return [
+      ...(localBucket && localBucket.items.length > 0 ? [localBucket] : []),
+      ...remoteBuckets,
+      ...(mixedBucket && mixedBucket.items.length > 0 ? [mixedBucket] : []),
+    ]
+  }, [hasMultipleHosts, hosts, localHostId, unifiedItems])
+
   // Schedule groups render in a dedicated pinned block above the Hidden section,
   // out of the scrolling session list — recurring/background work, not active.
   const scheduleGroups = useMemo(() => {
@@ -659,7 +754,7 @@ export function Sidebar({
       .filter(bucket => bucket.sessions.length > 0)
   }, [viewMode, visibleSessions, statusOf])
 
-  const renderSessionItem = (session: Session, isHiddenSection = false, bracketChar?: string | null) => {
+  const renderSessionItem = (session: Session, isHiddenSection = false, bracketChar?: string | null, inHostGroup = false) => {
     const sk = sessionKey(session)
     const isSelected = selectedSession === sk
     const needsAttention = sessionNeedsAttention(sk)
@@ -878,7 +973,7 @@ export function Sidebar({
               </span>
             )}
             {!collapsed && <AgentMark agentType={agentPresent ? agentType : undefined} className="h-4 w-4 shrink-0" />}
-            {!collapsed && stripeColor && (
+            {!collapsed && stripeColor && !inHostGroup && (
               <span
                 className="w-2 h-2 rounded-full shrink-0 pointer-events-none"
                 style={{ backgroundColor: stripeColor }}
@@ -976,6 +1071,7 @@ export function Sidebar({
             <div className="mt-2 pt-1.5 border-t border-hairline">
               <ul className="space-y-px">
                 {allPanes.map(pane => {
+
                   const pathParts = pane.current_path?.split('/').filter(Boolean) ?? []
                   const pathBase = pathParts[pathParts.length - 1] ?? ''
                   return (
@@ -1008,6 +1104,254 @@ export function Sidebar({
           )}
           {dropIndicator?.key === sk && dropIndicator.position === 'below' && (
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-accent-green rounded-full pointer-events-none z-10 shadow-[0_0_8px_rgba(89,212,153,0.4)]" />
+          )}
+        </div>
+      </li>
+    )
+  }
+
+
+  const renderGroupItem = (group: NonNullable<typeof layoutGroups>[number], groupSessions: Session[], inHostGroup = false) => {
+    const firstLeaf = group.leaves[0]
+    const isGroupCollapsed = !collapsed && collapsedGroups.has(group.id)
+    const collapsedAgentTypes = (() => {
+      const seen = new Set<string>()
+      return groupSessions
+        .map(s => s.agent_type)
+        .filter((t): t is string => !!t && (seen.has(t) ? false : (seen.add(t), true)))
+        .slice(0, 3)
+    })()
+    const collapsedNewest = groupSessions.reduce((a, b) =>
+      (a.created || '') > (b.created || '') ? a : b
+    , groupSessions[0])
+    const collapsedProject = pathLeaf(groupSessions.find(s => s.project_path)?.project_path)
+    return (
+      <li key={group.id} className="flex items-stretch">
+        {/* Bracket: drag to reorder, click to collapse/expand */}
+        {!collapsed && (
+          <div
+            draggable={!!firstLeaf}
+            role="button"
+            tabIndex={0}
+            onClick={() => toggleGroupCollapsed(group.id)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroupCollapsed(group.id) } }}
+            title={`${isGroupCollapsed ? 'Expand' : 'Collapse'} group — drag to reorder`}
+            className={cn(
+              'w-5 shrink-0 flex flex-col items-center py-0.5 rounded-l-sm cursor-pointer active:cursor-grabbing transition-colors hover:bg-surface-elevated group/bracket',
+              !group.isActive && 'opacity-60'
+            )}
+            onDragStart={(e) => {
+              if (!firstLeaf) return
+              e.dataTransfer.setData('text/plain', firstLeaf)
+              e.dataTransfer.effectAllowed = 'move'
+              setDraggingKey(firstLeaf)
+            }}
+            onDragEnd={() => {
+              setDraggingKey(null)
+              setPairTarget(null)
+              setDropIndicator(null)
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (!draggingKey || draggingKey === firstLeaf) return
+              setDropIndicator({ key: firstLeaf, position: 'above' })
+              setPairTarget(null)
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setDropIndicator(null)
+              }
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (!draggingKey || !firstLeaf || draggingKey === firstLeaf) return
+              const dragGroup = layoutGroups?.find(g => g.leaves.includes(draggingKey)) ?? null
+              const targetGroup = group
+              const keys = visibleSessions.map(sessionKey)
+              const applyOrder = (newOrder: string[]) => {
+                const full = orderedSessions.map(sessionKey)
+                const s = new Set(newOrder); let i = 0
+                setManualOrder(full.map(k => s.has(k) ? newOrder[i++] : k))
+              }
+              if (dragGroup) {
+                const withoutDrag = keys.filter(k => !dragGroup.leaves.includes(k))
+                const insertAt = targetGroup.leaves.map(k => withoutDrag.indexOf(k)).filter(i => i !== -1).reduce((a, b) => Math.min(a, b), Infinity)
+                if (isFinite(insertAt)) { withoutDrag.splice(insertAt, 0, ...dragGroup.leaves); applyOrder(withoutDrag) }
+              } else {
+                const withoutDrag = keys.filter(k => k !== draggingKey)
+                const insertAt = targetGroup.leaves.map(k => withoutDrag.indexOf(k)).filter(i => i !== -1).reduce((a, b) => Math.min(a, b), Infinity)
+                if (isFinite(insertAt)) { withoutDrag.splice(insertAt, 0, draggingKey); applyOrder(withoutDrag) }
+              }
+              setDraggingKey(null); setDropIndicator(null)
+            }}
+          >
+            {/* Collapse indicator arrow */}
+            <span
+              aria-hidden
+              className="text-mute/70 leading-none mt-0.5 shrink-0 select-none transition-transform duration-200"
+              style={{ fontSize: '9px' }}
+            >
+              {isGroupCollapsed ? '▸' : '▾'}
+            </span>
+            <div className={cn(
+              'w-0.5 rounded-full flex-1 min-h-[0.5rem] transition-colors mt-0.5',
+              group.isActive ? 'bg-primary/40 group-hover/bracket:bg-primary/70' : 'bg-primary/20'
+            )} />
+          </div>
+        )}
+        {/* Sessions or collapsed summary */}
+        <div className={cn('flex-1 min-w-0', !group.isActive && 'opacity-70')}>
+          {isGroupCollapsed ? (
+            /* Collapsed: compact summary row — click always selects, chevron toggles */
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                if (renamingGroupId === group.id) return
+                if (group.isActive) {
+                  const activeSession = groupSessions.find(s => sessionKey(s) === group.activeKey) ?? groupSessions[0]
+                  if (activeSession) onSessionSelect(activeSession)
+                } else {
+                  onSwitchGroup?.(group.id)
+                }
+              }}
+              className={cn(
+                'relative flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink cursor-pointer select-none',
+                'hover:bg-white/[0.05]',
+                group.isActive ? 'bg-white/[0.08] border border-white/20' : 'border border-transparent',
+              )}
+            >
+              <div className="flex items-center gap-2 w-full group/collname">
+                <span className="text-[10px] font-mono text-mute/50 shrink-0 w-3">{groupSessions.length}</span>
+                {collapsedAgentTypes.map((t, i) => (
+                  <AgentMark key={i} agentType={t} className="h-3.5 min-w-5 px-0.5 shrink-0" />
+                ))}
+                {renamingGroupId === group.id ? (
+                  <input
+                    ref={groupRenameInputRef}
+                    value={groupRenameValue}
+                    onChange={(e) => setGroupRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') submitGroupRename()
+                      if (e.key === 'Escape') setRenamingGroupId(null)
+                    }}
+                    onBlur={submitGroupRename}
+                    onClick={(e) => e.stopPropagation()}
+                    placeholder={groupSessions.map(s => s.name).join(' · ')}
+                    className="flex-1 text-sm text-ink bg-surface-elevated border border-primary rounded-xs px-1.5 py-0 outline-none font-sans font-medium"
+                  />
+                ) : (
+                  <span className="flex-1 text-sm font-medium text-ink truncate">
+                    {group.name || groupSessions.map(s => s.name).join(' · ')}
+                  </span>
+                )}
+                {formatUptime(collapsedNewest?.created) && !renamingGroupId && (
+                  <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 text-xs text-mute font-medium">
+                    {formatUptime(collapsedNewest.created)}
+                  </span>
+                )}
+                {/* AI name */}
+                {!renamingGroupId && (
+                  <button
+                    type="button"
+                    title="AI name this group"
+                    disabled={aiNamingGroupId === group.id}
+                    onClick={(e) => { e.stopPropagation(); aiNameGroup(group.id, groupSessions, group.name) }}
+                    className="opacity-0 group-hover/collname:opacity-100 transition-opacity text-mute/40 hover:text-primary shrink-0 flex items-center disabled:opacity-100"
+                  >
+                    <SparkleIcon spinning={aiNamingGroupId === group.id} size={11} />
+                  </button>
+                )}
+                {/* Rename pencil */}
+                {!renamingGroupId && (
+                  <button
+                    type="button"
+                    title="Rename group"
+                    onClick={(e) => { e.stopPropagation(); setRenamingGroupId(group.id); setGroupRenameValue(group.name || '') }}
+                    className="opacity-0 group-hover/collname:opacity-100 transition-opacity text-mute/40 hover:text-ink shrink-0 flex items-center"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </button>
+                )}
+                {group.isActive && !renamingGroupId && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                )}
+              </div>
+              {collapsedProject && (
+                <div className="mt-1 flex items-center gap-2 text-xs text-mute font-medium">
+                  <span className="truncate">{collapsedProject}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Group name label row (expanded) */}
+              {!collapsed && (
+                <div className="group/gname flex items-center gap-1.5 px-2 pt-1 pb-0.5 min-h-[20px]">
+                  {renamingGroupId === group.id ? (
+                    <input
+                      ref={groupRenameInputRef}
+                      value={groupRenameValue}
+                      onChange={(e) => setGroupRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') submitGroupRename()
+                        if (e.key === 'Escape') setRenamingGroupId(null)
+                      }}
+                      onBlur={submitGroupRename}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="Group name…"
+                      className="flex-1 text-[11px] text-ink bg-surface-elevated border border-primary rounded-xs px-1.5 py-0 outline-none font-sans font-medium"
+                    />
+                  ) : (
+                    <>
+                      <span className={cn(
+                        'text-[10px] font-semibold tracking-wider uppercase truncate flex-1 select-none',
+                        group.name ? 'text-mute/70' : 'text-mute/25'
+                      )}>
+                        {group.name || 'unnamed'}
+                      </span>
+                      <button
+                        type="button"
+                        title="AI name this group"
+                        disabled={aiNamingGroupId === group.id}
+                        onClick={(e) => { e.stopPropagation(); aiNameGroup(group.id, groupSessions, group.name) }}
+                        className="opacity-0 group-hover/gname:opacity-100 transition-opacity text-mute/40 hover:text-primary shrink-0 flex items-center disabled:opacity-100"
+                      >
+                        <SparkleIcon spinning={aiNamingGroupId === group.id} size={10} />
+                      </button>
+                      <button
+                        type="button"
+                        title="Rename group"
+                        onClick={(e) => { e.stopPropagation(); setRenamingGroupId(group.id); setGroupRenameValue(group.name || '') }}
+                        className="opacity-0 group-hover/gname:opacity-100 transition-opacity text-mute/40 hover:text-ink shrink-0 flex items-center"
+                      >
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              <ul className="space-y-0.5">
+                {groupSessions.map((session, idx, arr) => {
+                  const bc = !collapsed && arr.length > 1
+                    ? (idx === 0 ? '┬' : idx === arr.length - 1 ? '└' : '├')
+                    : null
+                  return (
+                    <div key={sessionKey(session)} onClick={() =>
+                      group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
+                    }>
+                      {renderSessionItem(session, false, bc, inHostGroup)}
+                    </div>
+                  )
+                })}
+              </ul>
+            </>
           )}
         </div>
       </li>
@@ -1209,7 +1553,6 @@ export function Sidebar({
               onDragOver={(e) => {
                 e.preventDefault()
                 setDropIndicator({ key: '__list-start__', position: 'above' })
-                setPairTarget(null)
               }}
               onDragLeave={(e) => {
                 if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -1227,13 +1570,13 @@ export function Sidebar({
                   setManualOrder(full.map(k => s.has(k) ? newOrder[i++] : k))
                 }
                 if (dragGroup) {
-                  const without = keys.filter(k => !dragGroup.leaves.includes(k))
-                  without.unshift(...dragGroup.leaves)
-                  applyOrder(without)
+                  const withoutDrag = keys.filter(k => !dragGroup.leaves.includes(k))
+                  withoutDrag.unshift(...dragGroup.leaves)
+                  applyOrder(withoutDrag)
                 } else {
-                  const without = keys.filter(k => k !== draggingKey)
-                  without.unshift(draggingKey)
-                  applyOrder(without)
+                  const withoutDrag = keys.filter(k => k !== draggingKey)
+                  withoutDrag.unshift(draggingKey)
+                  applyOrder(withoutDrag)
                 }
                 setDraggingKey(null)
                 setDropIndicator(null)
@@ -1246,299 +1589,72 @@ export function Sidebar({
           )}
 
           {/* Unified ordered list — groups appear at their natural position */}
-          {viewMode === 'default' && unifiedItems.map(item => {
-            if (item.kind === 'session') {
-              return renderSessionItem(item.session, false, null)
-            }
-            const { group, sessions: groupSessions } = item
-            const firstLeaf = group.leaves[0]
-            const isGroupCollapsed = !collapsed && collapsedGroups.has(group.id)
-            const collapsedAgentTypes = (() => {
-              const seen = new Set<string>()
-              return groupSessions
-                .map(s => s.agent_type)
-                .filter((t): t is string => !!t && (seen.has(t) ? false : (seen.add(t), true)))
-                .slice(0, 3)
-            })()
-            const collapsedNewest = groupSessions.reduce((a, b) =>
-              (a.created || '') > (b.created || '') ? a : b
-            , groupSessions[0])
-            const collapsedProject = pathLeaf(groupSessions.find(s => s.project_path)?.project_path)
-            return (
-              <li key={group.id} className="flex items-stretch">
-                {/* Bracket: drag to reorder, click to collapse/expand */}
-                {!collapsed && (
-                  <div
-                    draggable={!!firstLeaf}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleGroupCollapsed(group.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroupCollapsed(group.id) } }}
-                    title={`${isGroupCollapsed ? 'Expand' : 'Collapse'} group — drag to reorder`}
-                    className={cn(
-                      'w-5 shrink-0 flex flex-col items-center py-0.5 rounded-l-sm cursor-pointer active:cursor-grabbing transition-colors hover:bg-surface-elevated group/bracket',
-                      !group.isActive && 'opacity-60'
-                    )}
-                    onDragStart={(e) => {
-                      if (!firstLeaf) return
-                      e.dataTransfer.setData('text/plain', firstLeaf)
-                      e.dataTransfer.effectAllowed = 'move'
-                      setDraggingKey(firstLeaf)
-                    }}
-                    onDragEnd={() => {
-                      setDraggingKey(null)
-                      setPairTarget(null)
-                      setDropIndicator(null)
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                      if (!draggingKey || draggingKey === firstLeaf) return
-                      setDropIndicator({ key: firstLeaf, position: 'above' })
-                      setPairTarget(null)
-                    }}
-                    onDragLeave={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                        setDropIndicator(null)
-                      }
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      if (!draggingKey || !firstLeaf || draggingKey === firstLeaf) return
-                      const dragGroup = layoutGroups?.find(g => g.leaves.includes(draggingKey)) ?? null
-                      const targetGroup = group
-                      const keys = visibleSessions.map(sessionKey)
-                      const applyOrder = (newOrder: string[]) => {
-                        const full = orderedSessions.map(sessionKey)
-                        const s = new Set(newOrder); let i = 0
-                        setManualOrder(full.map(k => s.has(k) ? newOrder[i++] : k))
-                      }
-                      if (dragGroup) {
-                        const withoutDrag = keys.filter(k => !dragGroup.leaves.includes(k))
-                        const insertAt = targetGroup.leaves.map(k => withoutDrag.indexOf(k)).filter(i => i !== -1).reduce((a, b) => Math.min(a, b), Infinity)
-                        if (isFinite(insertAt)) { withoutDrag.splice(insertAt, 0, ...dragGroup.leaves); applyOrder(withoutDrag) }
-                      } else {
-                        const withoutDrag = keys.filter(k => k !== draggingKey)
-                        const insertAt = targetGroup.leaves.map(k => withoutDrag.indexOf(k)).filter(i => i !== -1).reduce((a, b) => Math.min(a, b), Infinity)
-                        if (isFinite(insertAt)) { withoutDrag.splice(insertAt, 0, draggingKey); applyOrder(withoutDrag) }
-                      }
-                      setDraggingKey(null); setDropIndicator(null)
-                    }}
+          {viewMode === 'default' && (hasMultipleHosts && !collapsed ? (
+            <>
+              {hostGroups.map(hostGroup => {
+                const isMixedBucket = hostGroup.kind === 'mixed'
+                const open = isMixedBucket ? true : !collapsedHosts.has(hostGroup.hostId)
+                const bucketKey = hostGroup.kind === 'host' ? hostGroup.hostId || '__local__' : '__mixed__'
+                return (
+                  <li
+                    key={`host:${bucketKey}`}
+                    data-host-id={bucketKey}
+                    className={cn('flex flex-col rounded-sm', !hostGroup.online && 'opacity-75')}
                   >
-                    {/* Collapse indicator arrow */}
-                    <span
-                      aria-hidden
-                      className="text-mute/70 leading-none mt-0.5 shrink-0 select-none transition-transform duration-200"
-                      style={{ fontSize: '9px' }}
-                    >
-                      {isGroupCollapsed ? '▸' : '▾'}
-                    </span>
-                    <div className={cn(
-                      'w-0.5 rounded-full flex-1 min-h-[0.5rem] transition-colors mt-0.5',
-                      group.isActive ? 'bg-primary/40 group-hover/bracket:bg-primary/70' : 'bg-primary/20'
-                    )} />
-                  </div>
-                )}
-                {/* Sessions or collapsed summary */}
-                <div className={cn('flex-1 min-w-0', !group.isActive && 'opacity-70')}>
-                  {isGroupCollapsed ? (
-                    /* Collapsed: compact summary row — click always selects, chevron toggles */
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        if (renamingGroupId === group.id) return
-                        if (group.isActive) {
-                          const activeSession = groupSessions.find(s => sessionKey(s) === group.activeKey) ?? groupSessions[0]
-                          if (activeSession) onSessionSelect(activeSession)
-                        } else {
-                          onSwitchGroup?.(group.id)
-                        }
-                      }}
-                      className={cn(
-                        'relative flex flex-col w-full p-2.5 rounded-sm transition-all duration-200 text-ink cursor-pointer select-none',
-                        'hover:bg-white/[0.05]',
-                        group.isActive ? 'bg-white/[0.08] border border-white/20' : 'border border-transparent',
-                      )}
-                    >
-                      <div className="flex items-center gap-2 w-full group/collname">
-                        <span className="text-[10px] font-mono text-mute/50 shrink-0 w-3">{groupSessions.length}</span>
-                        {collapsedAgentTypes.map((t, i) => (
-                          <AgentMark key={i} agentType={t} className="h-3.5 min-w-5 px-0.5 shrink-0" />
-                        ))}
-                        {renamingGroupId === group.id ? (
-                          <input
-                            ref={groupRenameInputRef}
-                            value={groupRenameValue}
-                            onChange={(e) => setGroupRenameValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') submitGroupRename()
-                              if (e.key === 'Escape') setRenamingGroupId(null)
-                            }}
-                            onBlur={submitGroupRename}
-                            onClick={(e) => e.stopPropagation()}
-                            placeholder={groupSessions.map(s => s.name).join(' · ')}
-                            className="flex-1 text-sm text-ink bg-surface-elevated border border-primary rounded-xs px-1.5 py-0 outline-none font-sans font-medium"
-                          />
-                        ) : (
-                          <span className="flex-1 text-sm font-medium text-ink truncate">
-                            {group.name || groupSessions.map(s => s.name).join(' · ')}
+                    {hostGroup.kind === 'host' ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleHostCollapsed(hostGroup.hostId)}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 text-left rounded-sm bg-white/[0.04] transition-colors hover:bg-white/[0.07]"
+                      >
+                        <span className="text-[10px] font-mono text-mute/60 shrink-0 w-3">
+                          {open ? '▾' : '▸'}
+                        </span>
+                        <span className="text-[11px] font-medium truncate flex-1 text-left">
+                          {hostGroup.name}
+                        </span>
+                        {!hostGroup.online && (
+                          <span className="text-[9px] font-semibold uppercase tracking-widest rounded-xs border border-hairline px-1.5 py-0.5 text-mute/50">
+                            offline
                           </span>
                         )}
-                        {formatUptime(collapsedNewest?.created) && !renamingGroupId && (
-                          <span className="shrink-0 rounded-xs border border-hairline px-1.5 py-0.5 text-xs text-mute font-medium">
-                            {formatUptime(collapsedNewest.created)}
-                          </span>
-                        )}
-                        {/* AI name */}
-                        {!renamingGroupId && (
-                          <button
-                            type="button"
-                            title="AI name this group"
-                            disabled={aiNamingGroupId === group.id}
-                            onClick={(e) => { e.stopPropagation(); aiNameGroup(group.id, groupSessions, group.name) }}
-                            className="opacity-0 group-hover/collname:opacity-100 transition-opacity text-mute/40 hover:text-primary shrink-0 flex items-center disabled:opacity-100"
-                          >
-                            <SparkleIcon spinning={aiNamingGroupId === group.id} size={11} />
-                          </button>
-                        )}
-                        {/* Rename pencil */}
-                        {!renamingGroupId && (
-                          <button
-                            type="button"
-                            title="Rename group"
-                            onClick={(e) => { e.stopPropagation(); setRenamingGroupId(group.id); setGroupRenameValue(group.name || '') }}
-                            className="opacity-0 group-hover/collname:opacity-100 transition-opacity text-mute/40 hover:text-ink shrink-0 flex items-center"
-                          >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                        )}
-                        {group.isActive && !renamingGroupId && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                        )}
+                        <span className="text-[10px] font-mono text-mute/50 shrink-0">
+                          · {hostGroup.sessions.length}
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="w-full flex items-center gap-2 px-2.5 py-2 text-left rounded-sm bg-white/[0.04] border-b border-hairline/40">
+                        <span className="text-[10px] font-mono text-mute/60 shrink-0 w-3">•</span>
+                        <span className="text-[11px] font-medium truncate flex-1 text-left">
+                          {hostGroup.name}
+                        </span>
+                        <span className="text-[10px] font-mono text-mute/50 shrink-0">
+                          · {hostGroup.sessions.length}
+                        </span>
                       </div>
-                      {collapsedProject && (
-                        <div className="mt-1 flex items-center gap-2 text-xs text-mute font-medium">
-                          <span className="truncate">{collapsedProject}</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {/* Group name label row (expanded) */}
-                      {!collapsed && (
-                        <div className="group/gname flex items-center gap-1.5 px-2 pt-1 pb-0.5 min-h-[20px]">
-                          {renamingGroupId === group.id ? (
-                            <input
-                              ref={groupRenameInputRef}
-                              value={groupRenameValue}
-                              onChange={(e) => setGroupRenameValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') submitGroupRename()
-                                if (e.key === 'Escape') setRenamingGroupId(null)
-                              }}
-                              onBlur={submitGroupRename}
-                              onClick={(e) => e.stopPropagation()}
-                              placeholder="Group name…"
-                              className="flex-1 text-[11px] text-ink bg-surface-elevated border border-primary rounded-xs px-1.5 py-0 outline-none font-sans font-medium"
-                            />
-                          ) : (
-                            <>
-                              <span className={cn(
-                                'text-[10px] font-semibold tracking-wider uppercase truncate flex-1 select-none',
-                                group.name ? 'text-mute/70' : 'text-mute/25'
-                              )}>
-                                {group.name || 'unnamed'}
-                              </span>
-                              <button
-                                type="button"
-                                title="AI name this group"
-                                disabled={aiNamingGroupId === group.id}
-                                onClick={(e) => { e.stopPropagation(); aiNameGroup(group.id, groupSessions, group.name) }}
-                                className="opacity-0 group-hover/gname:opacity-100 transition-opacity text-mute/40 hover:text-primary shrink-0 flex items-center disabled:opacity-100"
-                              >
-                                <SparkleIcon spinning={aiNamingGroupId === group.id} size={10} />
-                              </button>
-                              <button
-                                type="button"
-                                title="Rename group"
-                                onClick={(e) => { e.stopPropagation(); setRenamingGroupId(group.id); setGroupRenameValue(group.name || '') }}
-                                className="opacity-0 group-hover/gname:opacity-100 transition-opacity text-mute/40 hover:text-ink shrink-0 flex items-center"
-                              >
-                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                </svg>
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                      <ul className="space-y-0.5">
-                        {groupSessions.map((session, idx, arr) => {
-                          const bc = !collapsed && arr.length > 1
-                            ? (idx === 0 ? '┬' : idx === arr.length - 1 ? '└' : '├')
-                            : null
-                          return (
-                            <div key={sessionKey(session)} onClick={() =>
-                              group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
-                            }>
-                              {renderSessionItem(session, false, bc)}
-                            </div>
-                          )
-                        })}
+                    )}
+                    {open && (hostGroup.items.length > 0 ? (
+                      <ul className="space-y-0.5 pl-1">
+                        {hostGroup.items.map(item => item.kind === 'session'
+                          ? renderSessionItem(item.session, false, null, true)
+                          : renderGroupItem(item.group, item.sessions, true)
+                        )}
                       </ul>
-                    </>
-                  )}
-                </div>
-              </li>
-            )
-          })}
-
-          {/* Drop target at end of list */}
-          {draggingKey && (
-            <li
-              className="h-4 relative"
-              onDragOver={(e) => {
-                e.preventDefault()
-                setDropIndicator({ key: '__list-end__', position: 'above' })
-                setPairTarget(null)
-              }}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setDropIndicator(null)
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                if (!draggingKey) return
-                const dragGroup = layoutGroups?.find(g => g.leaves.includes(draggingKey)) ?? null
-                const keys = visibleSessions.map(sessionKey)
-                const applyOrder = (newOrder: string[]) => {
-                  const full = orderedSessions.map(sessionKey)
-                  const s = new Set(newOrder); let i = 0
-                  setManualOrder(full.map(k => s.has(k) ? newOrder[i++] : k))
-                }
-                if (dragGroup) {
-                  const without = keys.filter(k => !dragGroup.leaves.includes(k))
-                  without.push(...dragGroup.leaves)
-                  applyOrder(without)
-                } else {
-                  const without = keys.filter(k => k !== draggingKey)
-                  without.push(draggingKey)
-                  applyOrder(without)
-                }
-                setDraggingKey(null)
-                setDropIndicator(null)
-              }}
-            >
-              {dropIndicator?.key === '__list-end__' && (
-                <div className="absolute top-0 left-0 right-0 h-1 bg-accent-green rounded-full pointer-events-none z-10 shadow-[0_0_8px_rgba(89,212,153,0.4)]" />
-              )}
-            </li>
-          )}
+                    ) : (
+                      <p className="pl-6 pr-2.5 pb-2 text-[11px] text-mute/40 select-none">no sessions</p>
+                    ))}
+                  </li>
+                )
+              })}
+            </>
+          ) : (
+            unifiedItems.map(item => {
+              if (item.kind === 'session') {
+                return renderSessionItem(item.session, false, null)
+              }
+              return renderGroupItem(item.group, item.sessions, false)
+            })
+          ))}
 
         </ul>
       </nav>
