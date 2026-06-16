@@ -661,6 +661,14 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     })
   }, [sessions, sessionsLoading, paneTree, singleView]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Release the pending-session guard once the freshly created session shows
+  // up in state (remote creates arrive via a delayed peer broadcast).
+  useEffect(() => {
+    const pending = pendingSessionRef.current
+    if (!pending) return
+    if (sessions.some(s => sessionKey(s) === pending)) pendingSessionRef.current = null
+  }, [sessions])
+
   // Prune saved groups from removed sessions
   useEffect(() => {
     if (sessionsLoading || sessions.length === 0 || !sessionSnapshotStableRef.current) return
@@ -881,6 +889,14 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         const resolvedName = payload?.name || name
         const sessKey = hostId ? `${hostId}/${resolvedName}` : resolvedName
         pendingSessionRef.current = sessKey
+        // Remote creates round-trip through the peer, so the session is not in
+        // hub state right after refresh(). Keep the pending key protected from
+        // the prune effect until it materializes (cleared by the effect below);
+        // fall back to a timeout so a failed create can't pin it forever.
+        const pendingKey = sessKey
+        window.setTimeout(() => {
+          if (pendingSessionRef.current === pendingKey) pendingSessionRef.current = null
+        }, 15000)
         // Direct parameter takes priority over ref (avoids race when drag fires twice)
         const target = splitTarget ?? splitTargetRef.current
         splitTargetRef.current = null
@@ -896,12 +912,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
           })
           setActiveKey(sessKey)
           await refresh()
-          pendingSessionRef.current = null
           setTimeout(() => refocusTerminal(), 300)
         } else {
           selectSession(sessKey)
           await refresh()
-          pendingSessionRef.current = null
           setTimeout(() => refocusTerminal(), 300)
         }
       }
