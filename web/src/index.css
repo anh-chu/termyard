@@ -2,6 +2,14 @@
 
 @import url("https://fonts.googleapis.com/css2?family=VT323&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Fira+Code:wght@400;700&family=Inter:wght@400;500;600;700&display=swap");
 
+@font-face {
+  font-family: "Symbols Nerd Font";
+  src: url("/fonts/SymbolsNerdFont-Regular.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --app-height: 100dvh;
   --app-width: 100vw;
