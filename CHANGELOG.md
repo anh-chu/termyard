@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.0](https://github.com/anh-chu/termyard/compare/v1.2.1...v1.3.0)
+
+### Performance
+
+- **peer:** make remote sessions hyper-performant — split the control channel into hi/lo priority lanes so bulky state snapshots never block keystroke echoes, ship PTY data as raw binary frames (no base64/JSON per chunk), move marshaling off the single writer, deepen the interactive queue, and raise WebSocket buffers to 32KB. Eliminates typing latency, jitter, and head-of-line blocking on remote peer sessions.
+
 ## [1.2.0](https://github.com/anh-chu/termyard/compare/v1.1.0...v1.2.0)
 
 ### Features
