@@ -617,6 +617,12 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 step={500}
               />
             </Row>
+            <Row label="Ligatures" description="Render coding ligatures (=>, !=, ->). Requires a ligature font (Fira Code / JetBrains Mono) installed locally; Chromium-only, prompts for local-font access">
+              <Toggle
+                checked={prefs.terminal.ligatures}
+                onChange={(v) => updateNested('terminal', { ligatures: v })}
+              />
+            </Row>
             <Divider />
             <Row label="Hide Alerts in Fullscreen" description="Hide the agent alert banner when terminal is fullscreen">
               <Toggle

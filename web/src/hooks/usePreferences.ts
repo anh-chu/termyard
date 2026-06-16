@@ -5,6 +5,7 @@ export interface Preferences {
     font_size: number
     font_family: string
     scrollback: number
+    ligatures: boolean
   }
   theme: string
   custom_theme: Record<string, string>
@@ -42,6 +43,7 @@ export const defaultPreferences: Preferences = {
     font_size: 13,
     font_family: 'Space Mono',
     scrollback: 5000,
+    ligatures: false,
   },
   theme: 'raycast',
   custom_theme: {},

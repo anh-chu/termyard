@@ -11,6 +11,7 @@ type Terminal struct {
 	FontSize   int    `json:"font_size"`
 	FontFamily string `json:"font_family"`
 	Scrollback int    `json:"scrollback"`
+	Ligatures  bool   `json:"ligatures"`
 }
 
 type Sidebar struct {
@@ -66,6 +67,7 @@ func Default() *Preferences {
 			FontSize:   13,
 			FontFamily: "Space Mono",
 			Scrollback: 5000,
+			Ligatures:  false,
 		},
 		Theme:       "raycast",
 		CustomTheme: map[string]string{},

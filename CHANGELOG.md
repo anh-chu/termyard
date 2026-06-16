@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0](https://github.com/anh-chu/termyard/compare/v1.1.0...v1.2.0)
+
+### Features
+
+- **terminal:** add opt-in coding ligature support (Fira Code / JetBrains Mono) via `@xterm/addon-ligatures`, gated behind a Settings → Terminal toggle (default off)
 ## [0.5.0](https://github.com/ekristen/guppi/compare/v0.4.0...v0.5.0) (2026-06-13)
 
 ### Bug Fixes
