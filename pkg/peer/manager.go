@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -36,22 +37,47 @@ type HostState struct {
 	Conn       *PeerConnection // nil for local host
 }
 
-// PeerConnection wraps a control WebSocket to a peer. Send is gated behind
-// Enqueue/Close so concurrent producers cannot race the channel-close.
+// wireFrame is a pre-serialized WebSocket frame ready for the wire. Marshaling
+// happens in the producer goroutine (off the single writer) so the writer only
+// does the syscall.
+type wireFrame struct {
+	binary bool
+	data   []byte
+}
+
+// Queue depths. The hi lane carries interactive PTY traffic (keystrokes,
+// output, resize) and is deep so a burst of output never starves input. The
+// lo lane carries bulky, latency-tolerant control plane (state snapshots,
+// stats, activity sparklines, tool events).
+const (
+	hiQueueDepth = 1024
+	loQueueDepth = 128
+)
+
+// PeerConnection wraps a control WebSocket to a peer. Sends are gated behind
+// Enqueue*/Close so concurrent producers cannot race the close, and split into
+// two priority lanes so bulky control-plane messages never block PTY frames
+// (head-of-line blocking was the dominant source of typing jitter).
 type PeerConnection struct {
 	HostID string
 
 	mu     sync.Mutex
-	send   chan *Message
+	hi     chan wireFrame
+	lo     chan wireFrame
 	done   chan struct{}
 	closed bool
 }
 
-// NewPeerConnection constructs a PeerConnection with a buffered send queue.
+// NewPeerConnection constructs a PeerConnection with buffered priority lanes.
+// bufSize seeds the low-priority lane; the hi lane is fixed-deep.
 func NewPeerConnection(hostID string, bufSize int) *PeerConnection {
+	if bufSize < loQueueDepth {
+		bufSize = loQueueDepth
+	}
 	return &PeerConnection{
 		HostID: hostID,
-		send:   make(chan *Message, bufSize),
+		hi:     make(chan wireFrame, hiQueueDepth),
+		lo:     make(chan wireFrame, bufSize),
 		done:   make(chan struct{}),
 	}
 }
@@ -63,30 +89,53 @@ func (pc *PeerConnection) Done() <-chan struct{} {
 	return pc.done
 }
 
-// Enqueue best-effort queues a message. Returns true if accepted; false if
-// the connection was closed or the queue is full.
-func (pc *PeerConnection) Enqueue(msg *Message) bool {
+// HiLane / LoLane expose the lanes to the writer goroutine for priority drain.
+func (pc *PeerConnection) HiLane() <-chan wireFrame { return pc.hi }
+func (pc *PeerConnection) LoLane() <-chan wireFrame { return pc.lo }
+
+func (pc *PeerConnection) enqueue(ch chan wireFrame, f wireFrame) bool {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 	if pc.closed {
 		return false
 	}
 	select {
-	case pc.send <- msg:
+	case ch <- f:
 		return true
 	default:
 		return false
 	}
 }
 
-// Recv returns the underlying receive channel for the writer goroutine. The
-// writer must stop iterating when the channel closes.
-func (pc *PeerConnection) Recv() <-chan *Message {
-	return pc.send
+// Enqueue best-effort queues a control-plane JSON message on the low-priority
+// lane. Returns false if the connection was closed or the lane is full.
+func (pc *PeerConnection) Enqueue(msg *Message) bool {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return false
+	}
+	return pc.enqueue(pc.lo, wireFrame{binary: false, data: data})
 }
 
-// Close marks the connection closed and closes the channel. Idempotent.
-// Producers using Enqueue will see false after Close.
+// EnqueueHi best-effort queues a small interactive JSON message (e.g. PTY
+// resize/control) on the high-priority lane.
+func (pc *PeerConnection) EnqueueHi(msg *Message) bool {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return false
+	}
+	return pc.enqueue(pc.hi, wireFrame{binary: false, data: data})
+}
+
+// EnqueueBinaryHi best-effort queues a pre-encoded binary frame (PTY data) on
+// the high-priority lane. data must be owned by the caller (not reused).
+func (pc *PeerConnection) EnqueueBinaryHi(data []byte) bool {
+	return pc.enqueue(pc.hi, wireFrame{binary: true, data: data})
+}
+
+// Close marks the connection closed. Idempotent. The lanes are never closed
+// (producers gate on the closed flag under mu), so there is no send-on-closed
+// race; the writer goroutine exits via Done.
 func (pc *PeerConnection) Close() {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
@@ -94,7 +143,6 @@ func (pc *PeerConnection) Close() {
 		return
 	}
 	pc.closed = true
-	close(pc.send)
 	close(pc.done)
 }
 

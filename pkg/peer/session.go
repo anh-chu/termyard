@@ -76,13 +76,18 @@ type connWriter struct {
 	conn *websocket.Conn
 }
 
-func (w *connWriter) writeJSON(msg *Message) error {
+// writeFrame writes one pre-serialized frame. Bound the write so a stuck/
+// half-open peer socket can't block the writer goroutine indefinitely and
+// silently back up the send lanes.
+func (w *connWriter) writeFrame(f wireFrame) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	// Bound the write so a stuck/half-open peer socket can't block the writer
-	// goroutine indefinitely and silently back up the send queue.
 	_ = w.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	err := w.conn.WriteJSON(msg)
+	msgType := websocket.TextMessage
+	if f.binary {
+		msgType = websocket.BinaryMessage
+	}
+	err := w.conn.WriteMessage(msgType, f.data)
 	_ = w.conn.SetWriteDeadline(time.Time{})
 	return err
 }
@@ -149,14 +154,40 @@ func runSession(
 	})
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-	// Writer goroutine drains pc.Recv() to conn. Any write failure cancels the
-	// session so the read loop unblocks.
+	// Writer goroutine drains the two priority lanes to conn, always draining
+	// the hi (interactive PTY) lane before the lo (bulky control-plane) lane so
+	// a fat state snapshot never delays a keystroke echo. Any write failure
+	// cancels the session so the read loop unblocks.
 	go func() {
 		defer close(writerDone)
-		for msg := range pc.Recv() {
-			if err := cw.writeJSON(msg); err != nil {
-				log.WithError(err).Debug("session write failed")
-				cancel()
+		hi, lo := pc.HiLane(), pc.LoLane()
+		for {
+			// Fast path: drain everything queued on hi first.
+			select {
+			case f := <-hi:
+				if err := cw.writeFrame(f); err != nil {
+					log.WithError(err).Debug("session write failed")
+					cancel()
+					return
+				}
+				continue
+			default:
+			}
+			// Nothing urgent: block on hi, lo, or teardown.
+			select {
+			case f := <-hi:
+				if err := cw.writeFrame(f); err != nil {
+					log.WithError(err).Debug("session write failed")
+					cancel()
+					return
+				}
+			case f := <-lo:
+				if err := cw.writeFrame(f); err != nil {
+					log.WithError(err).Debug("session write failed")
+					cancel()
+					return
+				}
+			case <-pc.Done():
 				return
 			}
 		}
@@ -178,12 +209,22 @@ func runSession(
 	_ = role
 
 	for {
-		var msg Message
-		if err := conn.ReadJSON(&msg); err != nil {
+		msgType, raw, err := conn.ReadMessage()
+		if err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				log.WithError(err).Debug("session read error")
 			}
 			return err
+		}
+		// Binary frames are PTY data — dispatch directly, skipping JSON entirely.
+		if msgType == websocket.BinaryMessage {
+			handleBinaryFrame(raw, deps)
+			continue
+		}
+		var msg Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			log.WithError(err).Debug("session read error")
+			continue
 		}
 		if msg.Type == MsgForget {
 			log.Info("peer sent forget — removing")
@@ -388,6 +429,25 @@ func forwardPeerStateChanges(ctx context.Context, pc *PeerConnection, deps Sessi
 				continue
 			}
 			pc.Enqueue(msg)
+		}
+	}
+}
+
+// handleBinaryFrame routes a binary PTY frame straight to the PTY layer with
+// no JSON parse and no base64 decode.
+func handleBinaryFrame(raw []byte, deps SessionDeps) {
+	frameType, streamID, data, ok := DecodePTYFrame(raw)
+	if !ok {
+		return
+	}
+	switch frameType {
+	case FramePTYOutput:
+		if deps.PTYRelay != nil {
+			deps.PTYRelay.DeliverOutput(streamID, data)
+		}
+	case FramePTYInput:
+		if deps.PTYManager != nil {
+			deps.PTYManager.Write(streamID, data)
 		}
 	}
 }

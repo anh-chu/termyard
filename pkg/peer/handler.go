@@ -17,8 +17,8 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024 * 16,
+	ReadBufferSize:  1024 * 32,
+	WriteBufferSize: 1024 * 32,
 }
 
 // Handler handles incoming peer WebSocket connections on /ws/peer.

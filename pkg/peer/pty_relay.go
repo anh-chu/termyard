@@ -3,7 +3,6 @@ package peer
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"sync"
 
@@ -112,15 +111,10 @@ func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn,
 		}
 		switch msgType {
 		case websocket.BinaryMessage:
-			payload := PTYDataPayload{
-				StreamID: streamID,
-				Data:     base64.StdEncoding.EncodeToString(data),
-			}
-			msg, err := NewMessage(MsgPTYInput, payload)
-			if err != nil {
-				continue
-			}
-			if !pc.Enqueue(msg) {
+			// Keystrokes go out as a binary frame on the hi-priority lane: no
+			// base64, no JSON, never queued behind bulky control-plane traffic.
+			frame := EncodePTYFrame(FramePTYInput, streamID, data)
+			if !pc.EnqueueBinaryHi(frame) {
 				log.Debug("pty-input queue full, dropping")
 			}
 		case websocket.TextMessage:
@@ -155,7 +149,8 @@ func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn,
 			if err != nil {
 				continue
 			}
-			if !pc.Enqueue(msg) {
+			// Resize/control is interactive — hi lane.
+			if !pc.EnqueueHi(msg) {
 				log.Debug("pty-control queue full, dropping")
 			}
 		}

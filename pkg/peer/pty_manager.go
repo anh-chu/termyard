@@ -1,7 +1,6 @@
 package peer
 
 import (
-	"encoding/base64"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -84,15 +83,9 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 			if pm.activity != nil {
 				pm.activity.Record(req.Session, n)
 			}
-			payload := PTYDataPayload{
-				StreamID: req.StreamID,
-				Data:     base64.StdEncoding.EncodeToString(buf[:n]),
-			}
-			msg, err := NewMessage(MsgPTYOutput, payload)
-			if err != nil {
-				return
-			}
-			if !pc.Enqueue(msg) {
+			// Binary frame on the hi-priority lane: no base64, no JSON.
+			frame := EncodePTYFrame(FramePTYOutput, req.StreamID, buf[:n])
+			if !pc.EnqueueBinaryHi(frame) {
 				return
 			}
 		}

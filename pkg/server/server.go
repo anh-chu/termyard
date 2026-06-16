@@ -340,7 +340,7 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	// Upgrade browser to WebSocket
 	upgrader := websocket.Upgrader{
 		CheckOrigin:    ws.CheckSameOrigin,
-		ReadBufferSize: 1024, WriteBufferSize: 1024 * 16,
+		ReadBufferSize: 1024, WriteBufferSize: 1024 * 32,
 	}
 	browserWS, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

@@ -201,6 +201,40 @@ type SessionActionPayload struct {
 	Params json.RawMessage `json:"params"`
 }
 
+// Binary frame types. PTY data bypasses the JSON envelope entirely: it is
+// sent as a WebSocket BinaryMessage with a tiny header so the hot path does
+// no base64 inflation and no JSON marshal/unmarshal per keystroke or chunk.
+//
+// Wire layout: [1B type][1B streamIDLen][streamID bytes][raw payload...]
+const (
+	FramePTYOutput byte = 1 // listener -> dialer (PTY stdout)
+	FramePTYInput  byte = 2 // dialer  -> listener (keystrokes)
+)
+
+// EncodePTYFrame builds a binary PTY frame. The returned slice is owned by the
+// caller (data is copied), so reusing the source buffer afterwards is safe.
+func EncodePTYFrame(frameType byte, streamID string, data []byte) []byte {
+	sid := []byte(streamID)
+	buf := make([]byte, 2+len(sid)+len(data))
+	buf[0] = frameType
+	buf[1] = byte(len(sid))
+	copy(buf[2:], sid)
+	copy(buf[2+len(sid):], data)
+	return buf
+}
+
+// DecodePTYFrame parses a binary PTY frame. data aliases buf; copy if retained.
+func DecodePTYFrame(buf []byte) (frameType byte, streamID string, data []byte, ok bool) {
+	if len(buf) < 2 {
+		return 0, "", nil, false
+	}
+	sl := int(buf[1])
+	if len(buf) < 2+sl {
+		return 0, "", nil, false
+	}
+	return buf[0], string(buf[2 : 2+sl]), buf[2+sl:], true
+}
+
 // NewMessage creates a Message with a typed payload
 func NewMessage(msgType string, payload interface{}) (*Message, error) {
 	data, err := json.Marshal(payload)

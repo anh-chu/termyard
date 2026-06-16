@@ -183,7 +183,7 @@ func TestPeerConnectionSafeSend(t *testing.T) {
 		t.Fatal("first enqueue should succeed")
 	}
 	// Drain.
-	<-pc.Recv()
+	<-pc.LoLane()
 	pc.Close()
 	if pc.Enqueue(msg) {
 		t.Fatal("enqueue after close should fail")

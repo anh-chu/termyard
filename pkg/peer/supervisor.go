@@ -321,7 +321,12 @@ func (s *LinkSupervisor) dialOnce(ctx context.Context, link *peerLink) error {
 	}
 	u := &url.URL{Scheme: "ws", Host: addr, Path: "/ws/peer"}
 
-	dialer := websocket.DefaultDialer
+	dialer := &websocket.Dialer{
+		Proxy:            websocket.DefaultDialer.Proxy,
+		HandshakeTimeout: 45 * time.Second,
+		ReadBufferSize:   1024 * 32,
+		WriteBufferSize:  1024 * 32,
+	}
 	conn, _, err := dialer.DialContext(ctx, u.String(), nil)
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", u.String(), err)
