@@ -154,26 +154,36 @@ func runSession(
 	})
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-	// Writer goroutine drains the two priority lanes to conn, always draining
-	// the hi (interactive PTY) lane before the lo (bulky control-plane) lane so
-	// a fat state snapshot never delays a keystroke echo. Any write failure
+	// Writer goroutine drains the two priority lanes to conn, favouring the
+	// hi (interactive PTY) lane over the lo (bulky control-plane) lane so a fat
+	// state snapshot never delays a keystroke echo. The hi drain is capped per
+	// cycle: an unbounded burst would starve lo entirely under continuous PTY
+	// output, stranding lo-lane traffic (state sync, etc.). After the burst we
+	// fall to a fair select where lo gets an equal chance. Any write failure
 	// cancels the session so the read loop unblocks.
 	go func() {
 		defer close(writerDone)
 		hi, lo := pc.HiLane(), pc.LoLane()
+		const maxHiBurst = 64
 		for {
-			// Fast path: drain everything queued on hi first.
-			select {
-			case f := <-hi:
-				if err := cw.writeFrame(f); err != nil {
-					log.WithError(err).Debug("session write failed")
-					cancel()
-					return
+			// Fast path: drain hi, but at most maxHiBurst frames before yielding.
+			burst := 0
+			for burst < maxHiBurst {
+				select {
+				case f := <-hi:
+					if err := cw.writeFrame(f); err != nil {
+						log.WithError(err).Debug("session write failed")
+						cancel()
+						return
+					}
+					burst++
+					continue
+				default:
 				}
-				continue
-			default:
+				break
 			}
-			// Nothing urgent: block on hi, lo, or teardown.
+			// Block on hi, lo, or teardown. select picks a ready case at random,
+			// so lo can't be starved even when hi is continuously ready.
 			select {
 			case f := <-hi:
 				if err := cw.writeFrame(f); err != nil {

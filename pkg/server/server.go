@@ -354,14 +354,17 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	opts.PTYRelay.Register(streamID, hostID, browserWS)
 	defer opts.PTYRelay.Remove(streamID)
 
-	// Tell the peer to open a PTY.
+	// Tell the peer to open a PTY. This gates the whole stream, so it rides
+	// the hi lane: on a busy mutual-view link the lo lane can be starved by
+	// continuous PTY output, which would otherwise leave the open request
+	// stuck and the terminal blank.
 	msg, _ := peer.NewMessage(peer.MsgPTYOpen, peer.PTYOpenPayload{
 		StreamID: streamID,
 		Session:  sessionName,
 		Cols:     cols,
 		Rows:     rows,
 	})
-	if !peerConn.Enqueue(msg) {
+	if !peerConn.EnqueueHi(msg) {
 		return
 	}
 
@@ -371,7 +374,7 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 
 	// Tell the peer to close the PTY.
 	closeMsg, _ := peer.NewMessage(peer.MsgPTYClose, peer.PTYClosePayload{StreamID: streamID})
-	peerConn.Enqueue(closeMsg)
+	peerConn.EnqueueHi(closeMsg)
 }
 
 // absPathRe matches HTML attribute values that begin with a single /
