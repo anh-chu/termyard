@@ -9,6 +9,7 @@ interface TopBarProps {
   currentView: string
   settingsActive?: boolean
   selfUpdateAvailable?: boolean
+  updateVersion?: string
   onOverview: () => void
   onSettings: () => void
   onNewSession?: () => void
@@ -121,6 +122,7 @@ export function TopBar({
   panesCount,
   onSplitPane,
   glance,
+  updateVersion,
 }: TopBarProps) {
   const actionable = useMemo(() => events.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck'), [events])
   const [showAll, setShowAll] = useState(false)
@@ -204,6 +206,20 @@ export function TopBar({
       </div>
 
       <div ref={alertRef} className="relative flex-1 min-w-0">
+        {!primary && selfUpdateAvailable && (
+          <button
+            type="button"
+            onClick={onSettings}
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-sm border border-warning/30 bg-warning/8 text-left min-h-8"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-warning animate-[pulse_1.5s_ease-in-out_infinite] shrink-0" />
+            <span className="text-[11px] font-bold shrink-0 text-warning">UPDATE</span>
+            <span className="text-[11px] text-ink truncate">
+              {updateVersion ? `${updateVersion} available` : 'A new version is available'}
+            </span>
+            <span className="text-[11px] text-mute/70 truncate">— click to install</span>
+          </button>
+        )}
         {primary && (
           <div className="relative">
             <button

@@ -1080,6 +1080,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
           currentView={currentView}
           settingsActive={settingsOpen}
           selfUpdateAvailable={selfUpdate.status?.update_available ?? false}
+          updateVersion={selfUpdate.status?.latest_version}
           onOverview={() => navigateTo(null)}
           onSettings={openSettings}
           onHelp={() => setHelpOpen(true)}
