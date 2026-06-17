@@ -25,10 +25,7 @@ func NewPTYSession(tmuxPath, sessionName string, cols, rows uint16) (*PTYSession
 	if id := client.SessionIDByName(sessionName); id != "" {
 		sessionName = id
 	}
-	// -d detaches any other client on this session so the new attach becomes the
-	// sole client and tmux sends it a full repaint. Without it, a reconnect/switch
-	// can attach a second same-size client that gets no initial paint (blank screen).
-	cmd := exec.Command(tmuxPath, "attach-session", "-d", "-t", sessionName)
+	cmd := exec.Command(tmuxPath, "attach-session", "-t", sessionName)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{
