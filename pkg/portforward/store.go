@@ -26,10 +26,6 @@ type Forward struct {
 	// Must differ from Port because the service already owns Port on 127.0.0.1.
 	ExternalPort int `json:"external_port,omitempty"`
 
-	// BaseURL is injected by the hub for remote proxy-mode listings so the UI
-	// can open the correct peer origin. Not persisted.
-	BaseURL string `json:"base_url,omitempty"`
-
 	// socatPID is the PID of the socat child process, or 0 if not running.
 	// Not exported — callers use Store methods.
 	socatPID int

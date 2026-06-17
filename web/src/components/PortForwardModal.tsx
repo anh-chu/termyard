@@ -1,10 +1,8 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { usePortForwards, ForwardMode } from '../hooks/usePortForwards'
-import { useHosts } from '../hooks/useHosts'
 import { cn } from '../lib/utils'
 
 interface Props {
-  hostId?: string
   onClose: () => void
 }
 
@@ -21,12 +19,8 @@ const modeLabels: Record<ForwardMode, { short: string; desc: string; color: stri
   },
 }
 
-export function PortForwardModal({ hostId, onClose }: Props) {
-  const { hosts } = useHosts()
-  const localHostId = hosts.find(h => h.local)?.id || ''
-  const [selectedHostId, setSelectedHostId] = useState(hostId || localHostId)
-  const effectiveHostId = selectedHostId && selectedHostId !== localHostId ? selectedHostId : undefined
-  const { forwards, add, remove } = usePortForwards(effectiveHostId)
+export function PortForwardModal({ onClose }: Props) {
+  const { forwards, add, remove } = usePortForwards()
   const [port, setPort] = useState('')
   const [label, setLabel] = useState('')
   const [mode, setMode] = useState<ForwardMode>('proxy')
@@ -34,12 +28,6 @@ export function PortForwardModal({ hostId, onClose }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const portRef = useRef<HTMLInputElement>(null)
-
-  const selectedHost = useMemo(() => hosts.find(h => h.id === selectedHostId), [hosts, selectedHostId])
-  const hostOptions = useMemo(
-    () => [...hosts].sort((a, b) => Number(!!b.local) - Number(!!a.local) || a.name.localeCompare(b.name)),
-    [hosts],
-  )
 
   // Keep external port in sync with port unless user has overridden it
   const [externalPortTouched, setExternalPortTouched] = useState(false)
@@ -51,12 +39,6 @@ export function PortForwardModal({ hostId, onClose }: Props) {
   useEffect(() => {
     if (mode !== 'socat') setExternalPortTouched(false)
   }, [mode])
-
-  useEffect(() => {
-    if (!selectedHostId && localHostId) {
-      setSelectedHostId(localHostId)
-    }
-  }, [localHostId, selectedHostId])
 
   useEffect(() => { portRef.current?.focus() }, [])
 
@@ -112,21 +94,6 @@ export function PortForwardModal({ hostId, onClose }: Props) {
           </button>
         </div>
 
-        <div className="px-5 pt-4 pb-2 space-y-2">
-          <label className="block text-[10px] uppercase tracking-widest font-semibold text-mute/60">Host</label>
-          <select
-            value={selectedHostId || localHostId || ''}
-            onChange={e => setSelectedHostId(e.target.value)}
-            className="w-full rounded-lg border border-hairline bg-surface-elevated text-sm text-ink px-3 py-2 outline-none focus:border-primary"
-          >
-            {hostOptions.map(h => (
-              <option key={h.id} value={h.id}>
-                {h.local ? `Local · ${h.name}` : `${h.name}${h.online ? '' : ' (offline)'}`}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* Active forwards */}
         <div className="px-5 py-3">
           {forwards.length === 0 ? (
@@ -136,7 +103,6 @@ export function PortForwardModal({ hostId, onClose }: Props) {
               {forwards.map(f => {
                 const meta = modeLabels[f.mode] ?? modeLabels.proxy
                 const isProxy = f.mode === 'proxy'
-                const peerLabel = selectedHost?.name || selectedHostId || 'Peer'
                 return (
                   <li
                     key={f.port}
@@ -161,10 +127,10 @@ export function PortForwardModal({ hostId, onClose }: Props) {
                     {/* Open link — proxy only */}
                     {isProxy && (
                       <a
-                        href={f.base_url ? `${f.base_url}/proxy/${f.port}/` : `/proxy/${f.port}/`}
+                        href={`/proxy/${f.port}/`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        title={`Open ${f.base_url ? `${f.base_url}/proxy/${f.port}/` : `/proxy/${f.port}/`}`}
+                        title={`Open /proxy/${f.port}/`}
                         className="shrink-0 flex items-center gap-1 text-[11px] text-mute hover:text-primary transition-colors"
                       >
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -179,13 +145,9 @@ export function PortForwardModal({ hostId, onClose }: Props) {
                         className="shrink-0 text-[11px] text-mute/50 font-mono"
                         title="Direct TCP — connect with any client"
                       >
-                        {selectedHost?.local
-                          ? (f.external_port && f.external_port !== f.port
-                            ? `0.0.0.0:${f.external_port} → :${f.port}`
-                            : `0.0.0.0:${f.port}`)
-                          : (f.external_port && f.external_port !== f.port
-                            ? `${peerLabel}:${f.external_port} → :${f.port}`
-                            : `${peerLabel}:${f.port}`)}
+                        {f.external_port && f.external_port !== f.port
+                          ? `0.0.0.0:${f.external_port} → :${f.port}`
+                          : `0.0.0.0:${f.port}`}
                       </span>
                     )}
 

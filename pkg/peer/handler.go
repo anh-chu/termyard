@@ -113,6 +113,7 @@ func (h *Handler) HandlePeer(w http.ResponseWriter, r *http.Request) {
 	// Race resolution: if we already have a live connection for this peer,
 	// reject the newer one with "already connected" so the dialer flips role.
 	if h.deps.Manager.HasLiveConnection(peer.Fingerprint()) {
+		log.WithFields(logrus.Fields{"peer": peer.Name, "id": peer.Fingerprint()}).Warn("rejecting redial: already have live connection (stale conn would block recovery)")
 		sendAuthFail(conn, "already connected")
 		conn.Close()
 		return
