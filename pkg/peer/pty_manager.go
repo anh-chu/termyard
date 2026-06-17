@@ -60,14 +60,8 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 	}
 
 	pm.mu.Lock()
-	old := pm.sessions[req.StreamID]
 	pm.sessions[req.StreamID] = active
 	pm.mu.Unlock()
-
-	if old != nil {
-		old.once.Do(func() { close(old.cancel) })
-		old.PTY.Close()
-	}
 
 	log.Info("PTY relay started (control-multiplexed)")
 
@@ -75,7 +69,7 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 	go func() {
 		buf := make([]byte, 32*1024)
 		defer func() {
-			pm.cleanup(req.StreamID, active)
+			pm.cleanup(req.StreamID)
 		}()
 		for {
 			select {
@@ -145,7 +139,7 @@ func (pm *PTYManager) HandleControl(streamID string, data []byte) {
 
 // Close closes a PTY session by stream ID.
 func (pm *PTYManager) Close(streamID string) {
-	pm.cleanup(streamID, nil)
+	pm.cleanup(streamID)
 }
 
 // Resize resizes a PTY session.
@@ -160,19 +154,14 @@ func (pm *PTYManager) Resize(streamID string, cols, rows uint16) {
 	}
 }
 
-func (pm *PTYManager) cleanup(streamID string, expect *ActivePTY) {
+func (pm *PTYManager) cleanup(streamID string) {
 	pm.mu.Lock()
 	active, ok := pm.sessions[streamID]
-	if ok && (expect == nil || active == expect) {
+	if ok {
 		delete(pm.sessions, streamID)
 	}
 	pm.mu.Unlock()
 
-	if expect != nil {
-		expect.once.Do(func() { close(expect.cancel) })
-		expect.PTY.Close()
-		return
-	}
 	if ok {
 		active.once.Do(func() { close(active.cancel) })
 		active.PTY.Close()
