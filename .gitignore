@@ -21,3 +21,7 @@ notes/
 
 # compiled binary
 /termyard
+
+# agent artifacts
+.handoffs/
+.pi/tasks/
