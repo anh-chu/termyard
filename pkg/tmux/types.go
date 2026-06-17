@@ -15,6 +15,7 @@ type Session struct {
 	LastActivity     time.Time `json:"last_activity"`
 	ProjectPath      string    `json:"project_path,omitempty"`
 	IsWorktree       bool      `json:"is_worktree,omitempty"`
+	WorktreeParent   string    `json:"worktree_parent,omitempty"` // main worktree root path (linked worktrees only)
 	AgentType        string    `json:"agent_type,omitempty"`
 	PromptPreview    string    `json:"prompt_preview,omitempty"`
 	AgentSessionID   string    `json:"agent_session_id,omitempty"`

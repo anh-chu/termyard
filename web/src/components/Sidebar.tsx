@@ -794,6 +794,7 @@ export function Sidebar({
     const activeEvent = events.find(e => e.status === 'active' && !e.auto_detected)
     const activityLabel = activeEvent?.message
     const projectName = pathLeaf(session.project_path)
+    const worktreeParent = session.is_worktree ? pathLeaf(session.worktree_parent) : ''
     const agentType = session.agent_type || events[0]?.tool
     const allPanes = !collapsed
       ? (session.windows ?? []).flatMap(w => (w.panes ?? []).map(p => ({ ...p, windowIndex: w.index })))
@@ -1022,6 +1023,27 @@ export function Sidebar({
               />
             ) : (
               <span className="flex-1 flex items-baseline gap-1 min-w-0 overflow-hidden text-left">
+                {!collapsed && worktreeParent && (
+                  <span
+                    className="shrink min-w-0 truncate text-[12px] font-medium tracking-tight text-mute/40"
+                    title={session.worktree_parent}
+                  >
+                    {worktreeParent}
+                  </span>
+                )}
+                {!collapsed && worktreeParent && (
+                  <svg
+                    className="shrink-0 self-center text-primary/50"
+                    width="11" height="11" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <line x1="6" x2="6" y1="3" y2="15" />
+                    <circle cx="18" cy="6" r="3" />
+                    <circle cx="6" cy="18" r="3" />
+                    <path d="M18 9a9 9 0 0 1-9 9" />
+                  </svg>
+                )}
                 {!collapsed && projectName && (
                   <span
                     className="shrink min-w-0 truncate text-[12px] font-medium tracking-tight text-mute/60"
@@ -1062,11 +1084,6 @@ export function Sidebar({
 
           {!collapsed && (
             <div className="mt-1 flex items-center gap-1.5 min-w-0">
-              {session.is_worktree && (
-                <span className="shrink-0 rounded-xs border border-hairline px-1 py-0.5 text-[9px] leading-none bg-surface-card/50 text-primary/70" title="git worktree">
-                  ⎇
-                </span>
-              )}
               <span className={cn('min-w-0 truncate text-[10px]', activityIsLive ? 'text-mute/70' : 'text-mute/40')} title={activityDisplay}>
                 {activityDisplay}
               </span>

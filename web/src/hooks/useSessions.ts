@@ -35,6 +35,7 @@ export interface Session {
   last_activity: string
   project_path?: string
   is_worktree?: boolean
+  worktree_parent?: string  // main worktree root path (linked worktrees only)
   agent_type?: string
   prompt_preview?: string
   agent_session_id?: string

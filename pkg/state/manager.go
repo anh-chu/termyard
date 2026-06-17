@@ -314,6 +314,11 @@ func (m *Manager) loadSessionDetails(session *tmux.Session) error {
 	if session.ProjectPath != "" {
 		if ok, err := git.IsWorktree(session.ProjectPath); err == nil {
 			session.IsWorktree = ok
+			if ok {
+				if root, err := git.FindMainWorktreeRoot(session.ProjectPath); err == nil {
+					session.WorktreeParent = root
+				}
+			}
 		} else {
 			logrus.WithError(err).WithField("path", session.ProjectPath).Debug("git worktree check failed")
 		}
