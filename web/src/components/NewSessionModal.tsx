@@ -4,6 +4,7 @@ import { Session } from '../hooks/useSessions'
 import { usePreferences } from '../hooks/usePreferences'
 import { cn } from '../lib/utils'
 import { AgentMark } from './AgentMark'
+import { HostSelect } from './HostSelect'
 
 interface NewSessionModalProps {
   hosts: Host[]
@@ -368,17 +369,12 @@ export function NewSessionModal({ hosts, sessions, onCreateSession, onClose }: N
           {showHostSelect && (
             <div className="mt-4">
               <div className="text-xs font-bold text-mute/60 uppercase tracking-wider mb-2 ml-1">Host</div>
-              <select
+              <HostSelect
                 value={selectedHost}
-                onChange={e => setSelectedHost(e.target.value)}
+                onChange={setSelectedHost}
+                options={onlineHosts.map(h => ({ value: h.id, label: `${h.name}${h.local ? ' (LOCAL)' : ''}` }))}
                 className="w-full text-[13px] font-bold text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none focus:border-primary/60 transition-colors cursor-pointer"
-              >
-                {onlineHosts.map(h => (
-                  <option key={h.id} value={h.id}>
-                    {h.name}{h.local ? ' (LOCAL)' : ''}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           )}
         </div>

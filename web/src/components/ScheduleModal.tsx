@@ -4,6 +4,7 @@ import { usePreferences } from '../hooks/usePreferences'
 import { Schedule, ScheduleForm, useSchedules } from '../hooks/useSchedules'
 import { Session, sessionKey, sessionScheduleID } from '../hooks/useSessions'
 import { AgentMark } from './AgentMark'
+import { HostSelect } from './HostSelect'
 import { cn } from '../lib/utils'
 import { describeCron } from '../lib/cron'
 import { formatRelativeTime, formatRunCount } from '../lib/time'
@@ -513,16 +514,12 @@ export function ScheduleModal({ onClose }: Props) {
               <div>
                 <div className="text-xs font-bold text-mute/60 uppercase tracking-wider mb-2 ml-1">Host</div>
                 {onlineHosts.length > 1 ? (
-                  <select
+                  <HostSelect
                     value={hostId}
-                    onChange={(e) => setHostId(e.target.value)}
+                    onChange={setHostId}
+                    options={[{ value: '', label: 'Local' }, ...onlineHosts.filter(host => !host.local).map(host => ({ value: host.id, label: host.name }))]}
                     className="w-full text-[13px] font-bold text-ink bg-surface-elevated border border-hairline rounded-sm px-3 py-2 outline-none focus:border-primary/60 transition-colors cursor-pointer"
-                  >
-                    <option value="">Local</option>
-                    {onlineHosts.filter(host => !host.local).map(host => (
-                      <option key={host.id} value={host.id}>{host.name}</option>
-                    ))}
-                  </select>
+                  />
                 ) : (
                   <div className="text-[13px] text-mute/70 bg-surface-elevated border border-hairline rounded-sm px-3 py-2">
                     {hostName}
