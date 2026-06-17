@@ -9,8 +9,8 @@
 # Override the install directory:
 #   BIN_DIR=~/.local/bin curl -sSL .../install.sh | sh
 #
-# Auto-install tmux (required at runtime) via the system package manager:
-#   INSTALL_TMUX=1 curl -sSL .../install.sh | sh
+# tmux (required at runtime) is installed automatically. Skip it with:
+#   SKIP_TMUX=1 curl -sSL .../install.sh | sh
 
 set -eu
 
@@ -111,8 +111,8 @@ case ":${PATH}:" in
      info "  export PATH=\"${DEST}:\$PATH\"" ;;
 esac
 
-# --- tmux dependency ---
-# termyard needs tmux at runtime. Detect it; offer to install with INSTALL_TMUX=1.
+# --- tmux dependency (required at runtime) ---
+# termyard cannot run without tmux. Install it by default; skip with SKIP_TMUX=1.
 if ! command -v tmux >/dev/null 2>&1; then
   if [ "$OS" = "darwin" ]; then
     tmux_cmd="brew install tmux"
@@ -132,22 +132,19 @@ if ! command -v tmux >/dev/null 2>&1; then
     tmux_cmd=""
   fi
 
-  if [ "${INSTALL_TMUX:-}" = "1" ] && [ -n "$tmux_cmd" ]; then
-    info "Installing tmux: ${tmux_cmd}"
-    if sh -c "$tmux_cmd"; then
-      info "tmux installed."
-    else
-      info "tmux install failed, install it manually: ${tmux_cmd}"
-    fi
-  else
+  if [ "${SKIP_TMUX:-}" = "1" ]; then
     info ""
-    info "Note: tmux is required to run ${BIN} but was not found."
-    if [ -n "$tmux_cmd" ]; then
-      info "  Install it:  ${tmux_cmd}"
-      info "  Or re-run this installer with INSTALL_TMUX=1 to install it automatically."
-    else
-      info "  Install tmux with your package manager."
-    fi
+    info "Note: tmux is required to run ${BIN} but was not found (SKIP_TMUX=1)."
+    [ -n "$tmux_cmd" ] && info "  Install it:  ${tmux_cmd}"
+  elif [ "$OS" = "darwin" ] && ! command -v brew >/dev/null 2>&1; then
+    err "tmux is required but not installed, and Homebrew was not found. Install tmux (e.g. via Homebrew), then re-run."
+  elif [ -n "$tmux_cmd" ]; then
+    info "tmux not found; installing (${tmux_cmd})..."
+    sh -c "$tmux_cmd" || err "tmux install failed. Install it manually (${tmux_cmd}) and re-run."
+    command -v tmux >/dev/null 2>&1 || err "tmux still not found after install. Install it manually and re-run."
+    info "tmux installed."
+  else
+    err "tmux is required but not installed, and no supported package manager was found. Install tmux and re-run."
   fi
 fi
 
