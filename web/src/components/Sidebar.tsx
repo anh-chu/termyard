@@ -155,6 +155,7 @@ function writeStoredList(key: string, values: string[]) {
 function pathLeaf(path?: string): string {
   if (!path) return ''
   const trimmed = path.replace(/[\\/]+$/, '')
+  if (/^(\/home\/[^/]+|\/Users\/[^/]+|\/root)$/.test(trimmed)) return '~'
   const parts = trimmed.split(/[\\/]/)
   return parts[parts.length - 1] || trimmed
 }
@@ -1007,14 +1008,24 @@ export function Sidebar({
                 className="flex-1 text-sm text-ink bg-surface-elevated border border-primary rounded-sm px-1.5 py-0.5 outline-none font-sans font-medium"
               />
             ) : (
-              <span
-                className={cn(
-                  'text-[12px] font-medium tracking-tight flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left',
-                  isSelected && '!text-primary',
+              <span className="flex-1 flex items-baseline gap-1 min-w-0 overflow-hidden text-left">
+                {!collapsed && projectName && (
+                  <span
+                    className="shrink min-w-0 truncate text-[12px] font-medium tracking-tight text-mute/60"
+                    title={session.project_path}
+                  >
+                    {projectName}<span className="text-mute/30">/</span>
+                  </span>
                 )}
-                title={session.agent_session_id ? `${sessionLabel(session)} · ${session.agent_session_id}` : (sessionLabel(session) !== session.name ? `${sessionLabel(session)} (${session.name})` : session.name)}
-              >
-                {collapsed ? sessionLabel(session).charAt(0).toUpperCase() : sessionLabel(session)}
+                <span
+                  className={cn(
+                    'shrink-0 max-w-full text-[12px] font-medium tracking-tight overflow-hidden text-ellipsis whitespace-nowrap',
+                    isSelected && '!text-primary',
+                  )}
+                  title={session.agent_session_id ? `${sessionLabel(session)} · ${session.agent_session_id}` : (sessionLabel(session) !== session.name ? `${sessionLabel(session)} (${session.name})` : session.name)}
+                >
+                  {collapsed ? sessionLabel(session).charAt(0).toUpperCase() : sessionLabel(session)}
+                </span>
               </span>
             )}
             {!collapsed && namingSessions.has(sessionKey(session)) && (
@@ -1046,16 +1057,11 @@ export function Sidebar({
             </div>
           )}
 
-          {!collapsed && ((agentPresent && activityDisplay) || projectName || session.is_worktree) && (
+          {!collapsed && ((agentPresent && activityDisplay) || session.is_worktree) && (
             <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
               {session.is_worktree && (
                 <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-primary/70" title="git worktree">
                   ⎇
-                </span>
-              )}
-              {projectName && (
-                <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-mute" title={session.project_path}>
-                  {projectName}
                 </span>
               )}
               {agentPresent && activityDisplay && (
