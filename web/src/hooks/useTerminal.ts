@@ -3,7 +3,6 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ClipboardAddon, type IClipboardProvider, type ClipboardSelectionType } from '@xterm/addon-clipboard'
-import { LigaturesAddon } from '@xterm/addon-ligatures'
 import { usePreferences } from './usePreferences'
 import { getXtermTheme } from '../theme'
 // xterm CSS is imported in main.tsx (before index.css) so our overrides win.
@@ -253,7 +252,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
     // permission). It no-ops gracefully on Firefox/Safari or when the font
     // is not installed locally. Must load after term.open() (needs renderer).
     if (prefs.terminal.ligatures) {
-      try { term.loadAddon(new LigaturesAddon()) } catch { /* ignored */ }
+      // Lazy-loaded: ~200KB addon, default-off, not on critical path.
+      import('@xterm/addon-ligatures')
+        .then(({ LigaturesAddon }) => { try { term.loadAddon(new LigaturesAddon()) } catch { /* ignored */ } })
+        .catch(() => { /* ignored */ })
     }
     const helperTextarea = container.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null
 

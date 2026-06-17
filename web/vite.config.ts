@@ -11,8 +11,11 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          xterm: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links', '@xterm/addon-clipboard'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('@xterm/addon-ligatures')) return // keep lazy, own async chunk
+          if (id.includes('@xterm')) return 'xterm'
+          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react'
         },
       },
     },
