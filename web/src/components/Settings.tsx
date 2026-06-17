@@ -395,7 +395,7 @@ function PeersSection() {
   )
 }
 
-export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogout, bucket, version, updateAvailable, binaryUpdate, onApplyUpdate, updateApplying, updateRestartMode, updateError }: {
+export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogout, bucket, version, updateAvailable, binaryUpdate, onApplyUpdate, updateApplying, updateRestartMode, updateError, updateChecking, onCheckUpdate }: {
   pushState: string
   onPushSubscribe: () => void
   onPushUnsubscribe: () => void
@@ -408,6 +408,8 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
   updateApplying?: boolean
   updateRestartMode?: 'auto' | 'manual' | null
   updateError?: string | null
+  updateChecking?: boolean
+  onCheckUpdate?: () => void
 }) {
   const { prefs, updatePrefs } = usePreferences()
   const [saving, setSaving] = useState(false)
@@ -899,7 +901,17 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                     Update to {binaryUpdate.latest_version}
                   </button>
                 ) : (
-                  <span className="font-mono text-mute">{binaryUpdate?.current_version || version}</span>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="font-mono text-mute">{binaryUpdate?.current_version || version}</span>
+                    <button
+                      onClick={() => onCheckUpdate?.()}
+                      disabled={updateChecking}
+                      className="rounded-sm border border-hairline px-2 py-1 text-[11px] font-bold text-mute hover:text-ink transition-colors disabled:opacity-50"
+                      title="Check for app updates"
+                    >
+                      {updateChecking ? 'Checking…' : 'Check now'}
+                    </button>
+                  </span>
                 )}
               </Row>
             </Section>

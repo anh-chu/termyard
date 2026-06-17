@@ -1291,6 +1291,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             updateApplying={selfUpdate.applying}
             updateRestartMode={selfUpdate.restartMode}
             updateError={selfUpdate.error}
+            updateChecking={selfUpdate.checking}
+            onCheckUpdate={selfUpdate.checkNow}
           />
         </div>
       </div>

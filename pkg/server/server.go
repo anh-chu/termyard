@@ -705,6 +705,9 @@ func Run(ctx context.Context, opts *Options) error {
 			r.Post("/update/apply", func(w http.ResponseWriter, r *http.Request) {
 				handleUpdateApply(w, r, opts)
 			})
+			r.Post("/update/check", func(w http.ResponseWriter, r *http.Request) {
+				handleUpdateCheck(w, r, opts)
+			})
 
 			r.Get("/sessions", func(w http.ResponseWriter, r *http.Request) {
 				var sessions []*tmux.Session

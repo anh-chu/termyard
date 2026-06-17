@@ -70,6 +70,18 @@ func handleUpdateApply(w http.ResponseWriter, r *http.Request, opts *Options) {
 	}
 }
 
+func handleUpdateCheck(w http.ResponseWriter, r *http.Request, opts *Options) {
+	status, err := update.CheckLatest(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+		return
+	}
+	setUpdateStatus(status, opts)
+	_ = json.NewEncoder(w).Encode(status)
+}
+
 func setUpdateStatus(status update.Status, opts *Options) {
 	updateState.mu.Lock()
 	prev := updateState.status

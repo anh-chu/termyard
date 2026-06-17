@@ -18,6 +18,8 @@ interface SettingsDrawerProps {
   updateApplying?: boolean
   updateRestartMode?: 'auto' | 'manual' | null
   updateError?: string | null
+  updateChecking?: boolean
+  onCheckUpdate?: () => void
 }
 
 const buckets: { id: Bucket; label: string }[] = [
@@ -27,7 +29,7 @@ const buckets: { id: Bucket; label: string }[] = [
   { id: 'network', label: 'System' },
 ]
 
-export function SettingsDrawer({ open, onClose, pushState, onPushSubscribe, onPushUnsubscribe, onLogout, version, updateAvailable, binaryUpdate, onApplyUpdate, updateApplying, updateRestartMode, updateError }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, pushState, onPushSubscribe, onPushUnsubscribe, onLogout, version, updateAvailable, binaryUpdate, onApplyUpdate, updateApplying, updateRestartMode, updateError, updateChecking, onCheckUpdate }: SettingsDrawerProps) {
   const [bucket, setBucket] = useState<Bucket>('look')
 
   useEffect(() => {
@@ -82,6 +84,8 @@ export function SettingsDrawer({ open, onClose, pushState, onPushSubscribe, onPu
             updateApplying={updateApplying}
             updateRestartMode={updateRestartMode}
             updateError={updateError}
+            updateChecking={updateChecking}
+            onCheckUpdate={onCheckUpdate}
           />
         </div>
       </div>

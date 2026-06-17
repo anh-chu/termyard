@@ -11,6 +11,7 @@ export interface UpdateStatus {
 export function useSelfUpdate(wsStatus: UpdateStatus | null) {
   const [status, setStatus] = useState<UpdateStatus | null>(null)
   const [applying, setApplying] = useState(false)
+  const [checking, setChecking] = useState(false)
   const [restartMode, setRestartMode] = useState<'auto' | 'manual' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const applyingRef = useRef(applying)
@@ -87,5 +88,19 @@ export function useSelfUpdate(wsStatus: UpdateStatus | null) {
     }
   }, [])
 
-  return { status, applying, restartMode, error, apply }
+  const checkNow = useCallback(async () => {
+    setChecking(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/update/check', { method: 'POST' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setStatus(await res.json() as UpdateStatus)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'check failed')
+    } finally {
+      setChecking(false)
+    }
+  }, [])
+
+  return { status, applying, checking, restartMode, error, apply, checkNow }
 }
