@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { Session, sessionKey, sessionLabel, sessionScheduleID } from '../hooks/useSessions'
 import type { SessionAttrSets } from '../hooks/useSessionAttrs'
 import { Host } from '../hooks/useHosts'
@@ -259,6 +259,7 @@ export function Sidebar({
   const [renamingSession, setRenamingSession] = useState<RenameState | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [contextMenu, setContextMenu] = useState<{ key: string; id: string; name: string; label: string; host?: string; isWorktree?: boolean; x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const [confirmKillKey, setConfirmKillKey] = useState<string | null>(null)
   const [confirmWorktreeKillKey, setConfirmWorktreeKillKey] = useState<string | null>(null)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -387,6 +388,22 @@ export function Sidebar({
     window.addEventListener('click', handler)
     return () => window.removeEventListener('click', handler)
   }, [contextMenu, filterOpen])
+
+  // Clamp context menu into viewport so it never clips off-screen.
+  useLayoutEffect(() => {
+    const el = menuRef.current
+    if (!contextMenu || !el) return
+    const pad = 8
+    const rect = el.getBoundingClientRect()
+    let left = contextMenu.x
+    let top = contextMenu.y
+    if (left + rect.width + pad > window.innerWidth) left = window.innerWidth - rect.width - pad
+    if (top + rect.height + pad > window.innerHeight) top = window.innerHeight - rect.height - pad
+    left = Math.max(pad, left)
+    top = Math.max(pad, top)
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+  }, [contextMenu])
 
   // session-order: per-device manual ordering. NOT synced (stays local).
   useEffect(() => {
@@ -1818,6 +1835,7 @@ export function Sidebar({
 
       {contextMenu && (
         <div
+          ref={menuRef}
           className="fixed bg-surface-elevated border border-hairline rounded-md py-1 z-[1000] min-w-[140px]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
