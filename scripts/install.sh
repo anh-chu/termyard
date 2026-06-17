@@ -114,20 +114,29 @@ esac
 # --- tmux dependency (required at runtime) ---
 # termyard cannot run without tmux. Install it by default; skip with SKIP_TMUX=1.
 if ! command -v tmux >/dev/null 2>&1; then
+  # Linux package managers need root. Use sudo only when not already root.
+  if [ "$(id -u)" = "0" ]; then
+    SUDO=""
+  elif command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo "
+  else
+    SUDO=""
+  fi
+
   if [ "$OS" = "darwin" ]; then
     tmux_cmd="brew install tmux"
   elif command -v apt-get >/dev/null 2>&1; then
-    tmux_cmd="sudo apt-get install -y tmux"
+    tmux_cmd="${SUDO}apt-get install -y tmux"
   elif command -v dnf >/dev/null 2>&1; then
-    tmux_cmd="sudo dnf install -y tmux"
+    tmux_cmd="${SUDO}dnf install -y tmux"
   elif command -v yum >/dev/null 2>&1; then
-    tmux_cmd="sudo yum install -y tmux"
+    tmux_cmd="${SUDO}yum install -y tmux"
   elif command -v pacman >/dev/null 2>&1; then
-    tmux_cmd="sudo pacman -S --noconfirm tmux"
+    tmux_cmd="${SUDO}pacman -S --noconfirm tmux"
   elif command -v zypper >/dev/null 2>&1; then
-    tmux_cmd="sudo zypper install -y tmux"
+    tmux_cmd="${SUDO}zypper install -y tmux"
   elif command -v apk >/dev/null 2>&1; then
-    tmux_cmd="sudo apk add tmux"
+    tmux_cmd="${SUDO}apk add tmux"
   else
     tmux_cmd=""
   fi
