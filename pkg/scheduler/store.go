@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anh-chu/termyard/pkg/config"
 	"github.com/robfig/cron/v3"
 )
 
@@ -39,16 +40,8 @@ type Store struct {
 	jobs map[string]Job
 }
 
-func configDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "termyard"), nil
-}
-
 func NewStore() (*Store, error) {
-	dir, err := configDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return nil, err
 	}
@@ -95,11 +88,7 @@ func (s *Store) saveLocked() error {
 		}
 		return jobs[i].ID < jobs[j].ID
 	})
-	raw, err := json.MarshalIndent(jobs, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.path, raw, 0o644)
+	return config.WriteJSON(s.path, jobs, 0o644)
 }
 
 func (s *Store) validate(job Job) error {

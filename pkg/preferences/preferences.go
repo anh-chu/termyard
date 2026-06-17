@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/anh-chu/termyard/pkg/config"
 )
 
 type Terminal struct {
@@ -103,16 +105,8 @@ type Store struct {
 	data *Preferences
 }
 
-func configDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "termyard"), nil
-}
-
 func NewStore() (*Store, error) {
-	dir, err := configDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +141,7 @@ func (s *Store) load() error {
 }
 
 func (s *Store) save() error {
-	raw, err := json.MarshalIndent(s.data, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.path, raw, 0o644)
+	return config.WriteJSON(s.path, s.data, 0o644)
 }
 
 func (s *Store) Get() *Preferences {

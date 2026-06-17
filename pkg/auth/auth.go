@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anh-chu/termyard/pkg/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -27,17 +28,9 @@ type PasswordStore struct {
 	hash []byte
 }
 
-func configDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "termyard"), nil
-}
-
 // NewPasswordStore creates a store backed by ~/.config/termyard/auth.json.
 func NewPasswordStore() (*PasswordStore, error) {
-	dir, err := configDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return nil, err
 	}
@@ -74,11 +67,7 @@ func (ps *PasswordStore) SetPassword(password string) error {
 	defer ps.mu.Unlock()
 	ps.hash = hash
 	stored := storedAuth{PasswordHash: string(hash)}
-	data, err := json.MarshalIndent(stored, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(ps.path, data, 0o600)
+	return config.WriteJSON(ps.path, stored, 0o600)
 }
 
 // Verify checks a password against the stored hash.
@@ -108,7 +97,7 @@ func NewSessionManager(ttl time.Duration) *SessionManager {
 		sessions: make(map[string]time.Time),
 		ttl:      ttl,
 	}
-	if dir, err := configDir(); err == nil {
+	if dir, err := config.Dir(); err == nil {
 		if err := os.MkdirAll(dir, 0o755); err == nil {
 			sm.path = filepath.Join(dir, "sessions.json")
 			sm.load()

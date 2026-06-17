@@ -31,6 +31,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/anh-chu/termyard/pkg/config"
 )
 
 // Attr is the shared attribute set for one session key. A key is retained in
@@ -58,17 +60,9 @@ type Store struct {
 	attrs map[string]Attr
 }
 
-func configDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "termyard"), nil
-}
-
 // NewStore loads or creates the session-attrs store.
 func NewStore() (*Store, error) {
-	dir, err := configDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return nil, err
 	}
@@ -310,11 +304,7 @@ func (s *Store) put(key string, a Attr) {
 }
 
 func (s *Store) save() error {
-	raw, err := json.MarshalIndent(s.attrs, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.path, raw, 0o644)
+	return config.WriteJSON(s.path, s.attrs, 0o644)
 }
 
 // ownerOf returns the host-fingerprint prefix of a global session key

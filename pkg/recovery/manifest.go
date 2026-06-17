@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/anh-chu/termyard/pkg/config"
 )
 
 const CurrentVersion = 1
@@ -49,17 +51,9 @@ type Manifest struct {
 	Sessions   []SessionSnapshot `json:"sessions"`
 }
 
-func configDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "termyard"), nil
-}
-
 // ManifestPath returns manifest file path.
 func ManifestPath() (string, error) {
-	dir, err := configDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return "", err
 	}
