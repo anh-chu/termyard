@@ -2,6 +2,7 @@ package peer
 
 import (
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -86,7 +87,25 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 			// Binary frame on the hi-priority lane: no base64, no JSON.
 			frame := EncodePTYFrame(FramePTYOutput, req.StreamID, buf[:n])
 			if !pc.EnqueueBinaryHi(frame) {
-				return
+				select {
+				case <-pc.Done():
+					return
+				default:
+				}
+				log.Debug("pty-output queue full, retrying")
+				select {
+				case <-pc.Done():
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+				if !pc.EnqueueBinaryHi(frame) {
+					select {
+					case <-pc.Done():
+						return
+					default:
+					}
+					log.Debug("pty-output queue still full, dropping frame")
+				}
 			}
 		}
 	}()

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
@@ -72,10 +73,16 @@ func (r *PTYRelay) DeliverOutput(streamID string, data []byte) bool {
 	if !ok {
 		return false
 	}
+
 	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if err := s.browserWS.WriteMessage(websocket.BinaryMessage, data); err != nil {
+	_ = s.browserWS.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	err := s.browserWS.WriteMessage(websocket.BinaryMessage, data)
+	_ = s.browserWS.SetWriteDeadline(time.Time{})
+	s.writeMu.Unlock()
+	if err != nil {
 		logrus.WithField("stream", streamID).WithError(err).Debug("browser write failed")
+		r.Remove(streamID)
+		_ = s.browserWS.Close()
 		return false
 	}
 	return true
