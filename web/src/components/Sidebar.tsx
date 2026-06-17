@@ -826,9 +826,10 @@ export function Sidebar({
     const agentPresent = !cmdIsShell || !!detectedAgent
     // Bottom row, always non-empty: live activity → last agent message → terminal
     // capture, falling back to a waiting hint (agent) or the live command (shell).
-    const activityIsLive = !!(activityLabel || lastAgentMessage || promptPreview)
-    const activityDisplay = activityLabel || lastAgentMessage || promptPreview
-      || (agentPresent ? 'Waiting for prompt' : (activeCmd ? `❯ ${activeCmd}` : 'idle'))
+    const activityIsLive = agentPresent && !!(activityLabel || lastAgentMessage || promptPreview)
+    const activityDisplay = agentPresent
+      ? (activityLabel || lastAgentMessage || promptPreview || 'Waiting for prompt')
+      : (activeCmd ? `❯ ${activeCmd}` : 'idle')
     const statusBadge = statusOf(session)
 
     const handleTouchStart = (e: React.TouchEvent) => {
