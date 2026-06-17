@@ -1061,7 +1061,7 @@ export function Sidebar({
           )}
 
           {!collapsed && (
-            <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
+            <div className="mt-1 flex items-center gap-1.5 min-w-0">
               {session.is_worktree && (
                 <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-primary/70" title="git worktree">
                   ⎇
