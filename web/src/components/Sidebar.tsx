@@ -771,7 +771,7 @@ export function Sidebar({
       .filter(bucket => bucket.sessions.length > 0)
   }, [viewMode, visibleSessions, statusOf])
 
-  const renderSessionItem = (session: Session, isHiddenSection = false, bracketChar?: string | null, inHostGroup = false) => {
+  const renderSessionItem = (session: Session, isHiddenSection = false, inHostGroup = false) => {
     const sk = sessionKey(session)
     const isSelected = selectedSession === sk
     const needsAttention = sessionNeedsAttention(sk)
@@ -984,11 +984,6 @@ export function Sidebar({
             />
           )}
           <div className="flex items-center gap-2 w-full">
-            {!collapsed && bracketChar && (
-              <span className="text-[11px] font-mono text-mute/60 select-none w-3 shrink-0">
-                {bracketChar}
-              </span>
-            )}
             {!collapsed && <AgentMark agentType={agentPresent ? agentType : undefined} className="h-4 w-4 shrink-0" />}
             {!collapsed && stripeColor && !inHostGroup && (
               <span
@@ -1355,15 +1350,12 @@ export function Sidebar({
                 </div>
               )}
               <ul className="space-y-0.5">
-                {groupSessions.map((session, idx, arr) => {
-                  const bc = !collapsed && arr.length > 1
-                    ? (idx === 0 ? '┬' : idx === arr.length - 1 ? '└' : '├')
-                    : null
+                {groupSessions.map((session) => {
                   return (
                     <div key={sessionKey(session)} onClick={() =>
                       group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
                     }>
-                      {renderSessionItem(session, false, bc, inHostGroup)}
+                      {renderSessionItem(session, false, inHostGroup)}
                     </div>
                   )
                 })}
@@ -1422,7 +1414,7 @@ export function Sidebar({
           </button>
           {childSessions.length > 0 && (
             <div className="px-1.5 pb-1.5 pl-5 space-y-0.5">
-              {childSessions.map((session, idx) => renderSessionItem(session, false, null))}
+              {childSessions.map((session) => renderSessionItem(session, false))}
               {overflow > 0 && (
                 <div className="px-2 pt-1 text-[10px] text-mute/60 font-medium">+{overflow} more</div>
               )}
@@ -1557,7 +1549,7 @@ export function Sidebar({
                   <div className="flex-1 h-px bg-hairline/60" />
                 </div>
                 <ul className="space-y-0.5">
-                  {bucket.sessions.map(session => renderSessionItem(session, false, null))}
+                  {bucket.sessions.map(session => renderSessionItem(session, false))}
                 </ul>
               </li>
             )
@@ -1653,7 +1645,7 @@ export function Sidebar({
                     {open && (hostGroup.items.length > 0 ? (
                       <ul className="space-y-0.5 pl-1">
                         {hostGroup.items.map(item => item.kind === 'session'
-                          ? renderSessionItem(item.session, false, null, true)
+                          ? renderSessionItem(item.session, false, true)
                           : renderGroupItem(item.group, item.sessions, true)
                         )}
                       </ul>
@@ -1667,7 +1659,7 @@ export function Sidebar({
           ) : (
             unifiedItems.map(item => {
               if (item.kind === 'session') {
-                return renderSessionItem(item.session, false, null)
+                return renderSessionItem(item.session, false)
               }
               return renderGroupItem(item.group, item.sessions, false)
             })

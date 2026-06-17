@@ -9,7 +9,7 @@ import { ScheduleModal } from './components/ScheduleModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
 import { PaneTree, getLeaves, findLeaf, splitLeaf, insertBesideLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
-import { sessionSnapshot, snapshotStable, pruneGroupTree } from './lib/prune'
+import { sessionSnapshot, snapshotStable, pruneGroupTree, evaluateMissing } from './lib/prune'
 import { SettingsDrawer } from './components/SettingsDrawer'
 import { HelpModal } from './components/HelpModal'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -30,6 +30,10 @@ import { applyTheme } from './theme'
 import { sessionSignal } from './lib/sessionState'
 
 type View = 'overview' | 'session' | 'settings' | 'setup'
+
+// A leaf session must stay continuously absent from the live list this long
+// before it is pruned from a group. Survives tmux-restart / peer-sync blips.
+const MISSING_GRACE_MS = 45_000
 
 type LayoutGroup = {
   id: string
@@ -180,6 +184,11 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   activeKeyRef.current = activeKey
   const sessionSnapshotRef = useRef('')
   const sessionSnapshotStableRef = useRef(false)
+  // First-seen-missing timestamps per leaf key. A key must stay absent for
+  // MISSING_GRACE_MS before it is pruned, so recovery transients never dissolve groups.
+  const missingSinceRef = useRef<Map<string, number>>(new Map())
+  const pruneTimerRef = useRef<number | null>(null)
+  const [pruneTick, setPruneTick] = useState(0)
   const { prefs } = usePreferences()
 
   // Shared session attributes (background / hidden) — server-authoritative,
@@ -635,31 +644,68 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     sessionSnapshotRef.current = snapshot
   }, [sessions, sessionsLoading])
 
-  // Prune only after same snapshot twice so recovery transients don't dissolve groups.
+  // Prune leaves only after a session has been continuously absent for
+  // MISSING_GRACE_MS. The snapshot-stable gate filters single-poll noise; the
+  // grace window then survives longer recovery transients (tmux restarts,
+  // peer-sync lag) so grouped sessions are never dissolved out from under the
+  // user. Re-armed by pruneTick when a grace window elapses with no new poll.
   useEffect(() => {
-    if (sessionsLoading || sessions.length === 0 || paneTree === null || !sessionSnapshotStableRef.current) return
-    const validKeys = new Set(sessions.map(s => sessionKey(s)))
-    const keysToRemove = getLeaves(paneTree).filter(k => k !== pendingSessionRef.current && !validKeys.has(k))
-    if (keysToRemove.length === 0) return
-    setPaneTree(prev => {
-      if (prev === null) return null
-      let tree: PaneTree | null = prev
-      for (const key of keysToRemove) {
-        if (tree === null) break
-        tree = removeLeaf(tree, key)
+    if (sessionsLoading || sessions.length === 0 || !sessionSnapshotStableRef.current) return
+    const liveKeys = new Set(sessions.map(s => sessionKey(s)))
+    if (pendingSessionRef.current) liveKeys.add(pendingSessionRef.current)
+
+    const trackedKeys = [
+      ...(paneTree ? getLeaves(paneTree) : []),
+      ...savedGroups.flatMap(g => getLeaves(g.tree)),
+    ]
+    const { expired, nextDelayMs } = evaluateMissing(
+      trackedKeys, liveKeys, missingSinceRef.current, Date.now(), MISSING_GRACE_MS,
+    )
+
+    // Re-check when the soonest pending grace window elapses (no poll will fire otherwise).
+    if (pruneTimerRef.current !== null) { window.clearTimeout(pruneTimerRef.current); pruneTimerRef.current = null }
+    if (nextDelayMs !== null) {
+      pruneTimerRef.current = window.setTimeout(() => {
+        pruneTimerRef.current = null
+        setPruneTick(t => t + 1)
+      }, nextDelayMs + 50)
+    }
+
+    if (expired.size === 0) return
+
+    // Everything except expired leaves is kept (transiently-missing leaves survive).
+    const keepKeys = new Set(trackedKeys.filter(k => !expired.has(k)))
+    for (const k of liveKeys) keepKeys.add(k)
+
+    if (paneTree) {
+      const toRemove = getLeaves(paneTree).filter(k => expired.has(k))
+      if (toRemove.length > 0) {
+        setPaneTree(prev => {
+          if (prev === null) return null
+          let tree: PaneTree | null = prev
+          for (const key of toRemove) {
+            if (tree === null) break
+            tree = removeLeaf(tree, key)
+          }
+          if (tree && activeKeyRef.current && toRemove.includes(activeKeyRef.current)) {
+            setActiveKey(getLeaves(tree)[0] || null)
+          }
+          return tree
+        })
       }
-      if (tree && activeKeyRef.current && keysToRemove.includes(activeKeyRef.current)) {
-        const leaves = getLeaves(tree)
-        setActiveKey(leaves[0] || null)
-      }
-      return tree
-    })
-    setSingleView(prev => {
-      if (!prev) return prev
-      if (validKeys.has(prev)) return prev
-      return null
-    })
-  }, [sessions, sessionsLoading, paneTree, singleView]) // eslint-disable-line react-hooks/exhaustive-deps
+    }
+
+    setSingleView(prev => (prev && expired.has(prev)) ? null : prev)
+
+    setSavedGroups(prev =>
+      prev.map(group => {
+        const pruned = pruneGroupTree(group.tree, group.activeKey, keepKeys)
+        if (!pruned) return null
+        if (pruned.tree === group.tree && pruned.activeKey === group.activeKey) return group
+        return { ...group, tree: pruned.tree, activeKey: pruned.activeKey }
+      }).filter(Boolean) as LayoutGroup[]
+    )
+  }, [sessions, sessionsLoading, paneTree, savedGroups, singleView, pruneTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Release the pending-session guard once the freshly created session shows
   // up in state (remote creates arrive via a delayed peer broadcast).
@@ -669,19 +715,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (sessions.some(s => sessionKey(s) === pending)) pendingSessionRef.current = null
   }, [sessions])
 
-  // Prune saved groups from removed sessions
-  useEffect(() => {
-    if (sessionsLoading || sessions.length === 0 || !sessionSnapshotStableRef.current) return
-    const validKeys = new Set(sessions.map(s => sessionKey(s)))
-    setSavedGroups(prev =>
-      prev.map(group => {
-        const pruned = pruneGroupTree(group.tree, group.activeKey, validKeys)
-        if (!pruned) return null
-        if (pruned.tree === group.tree && pruned.activeKey === group.activeKey) return group
-        return { ...group, tree: pruned.tree, activeKey: pruned.activeKey }
-      }).filter(Boolean) as LayoutGroup[]
-    )
-  }, [sessions, sessionsLoading])
+  // Clear any pending prune re-check timer on unmount.
+  useEffect(() => () => {
+    if (pruneTimerRef.current !== null) window.clearTimeout(pruneTimerRef.current)
+  }, [])
+
+  // (saved-group pruning is handled by the unified grace-based effect above)
 
 
 

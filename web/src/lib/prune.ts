@@ -13,6 +13,46 @@ export function snapshotStable(prev: string, next: string, loading: boolean): bo
   return !loading && prev === next
 }
 
+export interface MissingEval {
+  // Keys absent long enough to prune.
+  expired: Set<string>
+  // Soonest grace window still pending, in ms (null = nothing pending).
+  nextDelayMs: number | null
+}
+
+// Track keys missing from the live session set. A tracked key must stay
+// continuously absent for graceMs before it becomes eligible for pruning, so
+// recovery transients (tmux restarts, peer-sync lag) never dissolve a group.
+// `missingSince` is mutated in place: alive/untracked keys are cleared, newly
+// missing keys get a first-seen timestamp.
+export function evaluateMissing(
+  trackedKeys: string[],
+  liveKeys: Set<string>,
+  missingSince: Map<string, number>,
+  now: number,
+  graceMs: number,
+): MissingEval {
+  const tracked = new Set(trackedKeys)
+  for (const k of [...missingSince.keys()]) {
+    if (!tracked.has(k) || liveKeys.has(k)) missingSince.delete(k)
+  }
+  const expired = new Set<string>()
+  let nextDelayMs: number | null = null
+  for (const k of tracked) {
+    if (liveKeys.has(k)) continue
+    let since = missingSince.get(k)
+    if (since === undefined) { since = now; missingSince.set(k, now) }
+    const elapsed = now - since
+    if (elapsed >= graceMs) {
+      expired.add(k)
+    } else {
+      const remaining = graceMs - elapsed
+      nextDelayMs = nextDelayMs === null ? remaining : Math.min(nextDelayMs, remaining)
+    }
+  }
+  return { expired, nextDelayMs }
+}
+
 // Prune leaves whose keys are gone from validKeys. Returns the updated group,
 // or null when the group should dissolve (emptied, or down to a single leaf
 // which reverts to a standalone session).
