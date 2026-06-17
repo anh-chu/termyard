@@ -8,6 +8,9 @@
 #
 # Override the install directory:
 #   BIN_DIR=~/.local/bin curl -sSL .../install.sh | sh
+#
+# Auto-install tmux (required at runtime) via the system package manager:
+#   INSTALL_TMUX=1 curl -sSL .../install.sh | sh
 
 set -eu
 
@@ -107,4 +110,45 @@ case ":${PATH}:" in
   *) info "Note: ${DEST} is not on your PATH. Add it, e.g.:"
      info "  export PATH=\"${DEST}:\$PATH\"" ;;
 esac
+
+# --- tmux dependency ---
+# termyard needs tmux at runtime. Detect it; offer to install with INSTALL_TMUX=1.
+if ! command -v tmux >/dev/null 2>&1; then
+  if [ "$OS" = "darwin" ]; then
+    tmux_cmd="brew install tmux"
+  elif command -v apt-get >/dev/null 2>&1; then
+    tmux_cmd="sudo apt-get install -y tmux"
+  elif command -v dnf >/dev/null 2>&1; then
+    tmux_cmd="sudo dnf install -y tmux"
+  elif command -v yum >/dev/null 2>&1; then
+    tmux_cmd="sudo yum install -y tmux"
+  elif command -v pacman >/dev/null 2>&1; then
+    tmux_cmd="sudo pacman -S --noconfirm tmux"
+  elif command -v zypper >/dev/null 2>&1; then
+    tmux_cmd="sudo zypper install -y tmux"
+  elif command -v apk >/dev/null 2>&1; then
+    tmux_cmd="sudo apk add tmux"
+  else
+    tmux_cmd=""
+  fi
+
+  if [ "${INSTALL_TMUX:-}" = "1" ] && [ -n "$tmux_cmd" ]; then
+    info "Installing tmux: ${tmux_cmd}"
+    if sh -c "$tmux_cmd"; then
+      info "tmux installed."
+    else
+      info "tmux install failed, install it manually: ${tmux_cmd}"
+    fi
+  else
+    info ""
+    info "Note: tmux is required to run ${BIN} but was not found."
+    if [ -n "$tmux_cmd" ]; then
+      info "  Install it:  ${tmux_cmd}"
+      info "  Or re-run this installer with INSTALL_TMUX=1 to install it automatically."
+    else
+      info "  Install tmux with your package manager."
+    fi
+  fi
+fi
+
 info "Run '${BIN} server' to start."
