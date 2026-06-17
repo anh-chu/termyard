@@ -96,6 +96,8 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		reb := recovery.NewRebuilder(client, stateMgr, attrsStore)
 		health = recovery.NewHealthPoller(client, 3*time.Second, func() {
 			logrus.Warn("tmux server gone, rebuilding from manifest")
+			stateMgr.SetRecovering(true)
+			defer stateMgr.SetRecovering(false)
 			if err := reb.Rebuild(ctx); err != nil {
 				logrus.WithError(err).Error("rebuild failed")
 			}

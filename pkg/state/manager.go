@@ -191,6 +191,17 @@ func (m *Manager) broadcast(evt StateEvent) {
 	}
 }
 
+// SetRecovering broadcasts whether tmux recovery (full-server rebuild) is in
+// progress. Frontends suspend pruning of missing sessions while recovering so a
+// not-yet-rebuilt session is not mistaken for a deliberate kill.
+func (m *Manager) SetRecovering(recovering bool) {
+	if recovering {
+		m.broadcast(StateEvent{Type: "recovery-started"})
+	} else {
+		m.broadcast(StateEvent{Type: "recovery-finished"})
+	}
+}
+
 // Notice carries a human-readable backend message to the frontend so silent
 // background failures (AI naming, tmux rename, etc.) are visible in the UI
 // instead of only in server logs.
