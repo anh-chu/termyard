@@ -102,8 +102,20 @@ func matchNodeScript(args []string, name string) bool {
 
 // DetectAgentInProcessTree walks the process tree rooted at pid and returns
 // the first recognized agent tool found. Returns ("", false) if no agent
-// is detected. Only inspects direct children of the given PID.
+// is detected. Checks the pid itself (the agent may run as the pane's own
+// process, e.g. after exec or when launched as the session command) plus its
+// direct children and grandchildren.
 func DetectAgentInProcessTree(pid int) (Tool, bool) {
+	// Check the root pid itself first — covers panes where the agent is the
+	// foreground process (pane_pid == agent), not a shell child.
+	if args := readCmdline(pid); len(args) > 0 {
+		for _, pat := range agentPatterns {
+			if pat.match(args) {
+				return pat.tool, true
+			}
+		}
+	}
+
 	children := getChildPIDs(pid)
 	for _, cpid := range children {
 		args := readCmdline(cpid)

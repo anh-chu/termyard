@@ -815,10 +815,16 @@ export function Sidebar({
       return session.windows?.[0]?.panes?.[0]?.current_command ?? ''
     })()
     const cmdIsShell = SHELL_COMMANDS.has(activeCmd)
-    // Agent is considered present while its process is foregrounded in the pane.
+    // The process-tree detector emits an auto_detected active event when it sees
+    // an agent process in the pane. Some agents (e.g. claude) run as a child while
+    // the pane's foreground command still resolves to the shell, so current_command
+    // alone reports "shell" even though the agent is live. Trust the detector here.
+    const detectedAgent = events.find(e => e.status === 'active' && e.auto_detected)
+    // Agent is considered present while its process is foregrounded in the pane,
+    // or while the detector still sees it in the process tree.
     // Once it exits to a shell, the per-session metadata (icon/prompt/message)
     // is stale and must not linger, so we suppress it in the row below.
-    const agentPresent = !cmdIsShell
+    const agentPresent = !cmdIsShell || !!detectedAgent
     // Bottom row, always non-empty: live activity → last agent message → terminal
     // capture, falling back to a waiting hint (agent) or the live command (shell).
     const activityIsLive = !!(activityLabel || lastAgentMessage || promptPreview)
