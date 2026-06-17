@@ -794,8 +794,6 @@ export function Sidebar({
     // Live activity label from the active tool event (e.g. "reading files", "running commands")
     const activeEvent = events.find(e => e.status === 'active' && !e.auto_detected)
     const activityLabel = activeEvent?.message
-    // Bottom row: live activity → last agent message → terminal capture fallback
-    const activityDisplay = activityLabel || lastAgentMessage || promptPreview
     const projectName = pathLeaf(session.project_path)
     const agentType = session.agent_type || events[0]?.tool
     const allPanes = !collapsed
@@ -821,6 +819,11 @@ export function Sidebar({
     // Once it exits to a shell, the per-session metadata (icon/prompt/message)
     // is stale and must not linger, so we suppress it in the row below.
     const agentPresent = !cmdIsShell
+    // Bottom row, always non-empty: live activity → last agent message → terminal
+    // capture, falling back to a waiting hint (agent) or the live command (shell).
+    const activityIsLive = !!(activityLabel || lastAgentMessage || promptPreview)
+    const activityDisplay = activityLabel || lastAgentMessage || promptPreview
+      || (agentPresent ? 'Waiting for prompt' : (activeCmd ? `❯ ${activeCmd}` : 'idle'))
     const statusBadge = statusOf(session)
 
     const handleTouchStart = (e: React.TouchEvent) => {
@@ -1061,18 +1064,16 @@ export function Sidebar({
             </div>
           )}
 
-          {!collapsed && ((agentPresent && activityDisplay) || session.is_worktree) && (
+          {!collapsed && (
             <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
               {session.is_worktree && (
                 <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-primary/70" title="git worktree">
                   ⎇
                 </span>
               )}
-              {agentPresent && activityDisplay && (
-                <span className="min-w-0 truncate text-[10px] text-mute/70" title={activityDisplay}>
-                  {activityDisplay}
-                </span>
-              )}
+              <span className={cn('min-w-0 truncate text-[10px]', activityIsLive ? 'text-mute/70' : 'text-mute/40')} title={activityDisplay}>
+                {activityDisplay}
+              </span>
             </div>
           )}
 
