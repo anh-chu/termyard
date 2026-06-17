@@ -1031,10 +1031,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       <Toasts toasts={toasts} onDismiss={dismissToast} />
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {portForwardsOpen && (
-        <PortForwardModal
-          hostId={selectedSession ? parseSessionKey(selectedSession).host || undefined : undefined}
-          onClose={() => setPortForwardsOpen(false)}
-        />
+        <PortForwardModal onClose={() => setPortForwardsOpen(false)} />
       )}
       {schedulesOpen && (
         <ScheduleModal onClose={() => setSchedulesOpen(false)} />
