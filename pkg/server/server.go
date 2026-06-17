@@ -367,11 +367,20 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 
 	// Pump keystrokes/control frames from browser to peer; output flows the
 	// other way via MsgPTYOutput dispatched in handleSessionMessage.
-	opts.PTYRelay.PumpBrowserToPeer(streamID, browserWS, peerConn)
+	finalConn := opts.PTYRelay.PumpBrowserToPeer(peer.PumpSpec{
+		StreamID: streamID,
+		HostID:   hostID,
+		Session:  sessionName,
+		Cols:     cols,
+		Rows:     rows,
+		Mgr:      opts.PeerMgr,
+	}, browserWS, peerConn)
 
 	// Tell the peer to close the PTY.
-	closeMsg, _ := peer.NewMessage(peer.MsgPTYClose, peer.PTYClosePayload{StreamID: streamID})
-	peerConn.Enqueue(closeMsg)
+	if finalConn != nil {
+		closeMsg, _ := peer.NewMessage(peer.MsgPTYClose, peer.PTYClosePayload{StreamID: streamID})
+		finalConn.Enqueue(closeMsg)
+	}
 }
 
 // absPathRe matches HTML attribute values that begin with a single /

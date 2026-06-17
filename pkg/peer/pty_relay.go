@@ -27,6 +27,16 @@ type streamBinding struct {
 	writeMu   sync.Mutex // serialize writes to browserWS
 }
 
+// PumpSpec groups the data needed to re-open a remote PTY on a fresh peer link.
+type PumpSpec struct {
+	StreamID string
+	HostID   string
+	Session  string
+	Cols     uint16
+	Rows     uint16
+	Mgr      *Manager
+}
+
 // NewPTYRelay creates a new PTY relay.
 func NewPTYRelay() *PTYRelay {
 	return &PTYRelay{streams: make(map[string]*streamBinding)}
@@ -90,38 +100,109 @@ func (r *PTYRelay) DeliverOutput(streamID string, data []byte) bool {
 
 // PumpBrowserToPeer reads from a browser WS and forwards keystrokes/control
 // messages to the peer as MsgPTYInput / MsgPTYResize / MsgPTYClose over the
-// shared control channel. Blocks until the browser side closes.
-func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn, pc *PeerConnection) {
-	log := logrus.WithField("stream", streamID)
+// shared control channel. If the peer link drops briefly, it waits for a fresh
+// peer connection and re-opens the same stream instead of closing the browser.
+func (r *PTYRelay) PumpBrowserToPeer(spec PumpSpec, browserWS *websocket.Conn, pc *PeerConnection) *PeerConnection {
+	log := logrus.WithField("stream", spec.StreamID)
 
-	// If the underlying peer link dies (redial, role flip, transient drop), pc
-	// is closed and Enqueue would silently drop every keystroke while output
-	// keeps flowing over the new link — the terminal looks alive but eats no
-	// input. Close the browser WS so the client's onclose fires and it
-	// reconnects, picking up the fresh peer connection. Without this the user
-	// has to manually switch sessions and back to recover.
+	var (
+		stateMu sync.Mutex
+		cur     = pc
+	)
 	done := make(chan struct{})
 	defer close(done)
+
+	waitForReattach := func(watched *PeerConnection) bool {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-done:
+				return false
+			case <-timer.C:
+				stateMu.Lock()
+				cur = nil
+				stateMu.Unlock()
+				_ = browserWS.Close()
+				return false
+			case <-ticker.C:
+				cand := spec.Mgr.GetPeerConnection(spec.HostID)
+				if cand == nil || cand == watched {
+					continue
+				}
+				select {
+				case <-cand.Done():
+					continue
+				default:
+				}
+
+				stateMu.Lock()
+				select {
+				case <-done:
+					stateMu.Unlock()
+					return false
+				default:
+				}
+				msg, _ := NewMessage(MsgPTYOpen, PTYOpenPayload{
+					StreamID: spec.StreamID,
+					Session:  spec.Session,
+					Cols:     spec.Cols,
+					Rows:     spec.Rows,
+				})
+				if !cand.Enqueue(msg) {
+					stateMu.Unlock()
+					continue
+				}
+				cur = cand
+				stateMu.Unlock()
+				return true
+			}
+		}
+	}
+
 	go func() {
-		select {
-		case <-pc.Done():
-			log.Debug("peer connection closed; dropping browser WS to force reconnect")
-			_ = browserWS.Close()
-		case <-done:
+		for {
+			stateMu.Lock()
+			watched := cur
+			stateMu.Unlock()
+			if watched == nil {
+				return
+			}
+			select {
+			case <-watched.Done():
+				if !waitForReattach(watched) {
+					return
+				}
+			case <-done:
+				return
+			}
 		}
 	}()
 
 	for {
 		msgType, data, err := browserWS.ReadMessage()
 		if err != nil {
-			return
+			stateMu.Lock()
+			c := cur
+			stateMu.Unlock()
+			return c
+		}
+		stateMu.Lock()
+		c := cur
+		stateMu.Unlock()
+		if c == nil {
+			return nil
 		}
 		switch msgType {
 		case websocket.BinaryMessage:
 			// Keystrokes go out as a binary frame on the hi-priority lane: no
 			// base64, no JSON, never queued behind bulky control-plane traffic.
-			frame := EncodePTYFrame(FramePTYInput, streamID, data)
-			if !pc.EnqueueBinaryHi(frame) {
+			frame := EncodePTYFrame(FramePTYInput, spec.StreamID, data)
+			if !c.EnqueueBinaryHi(frame) {
 				log.Debug("pty-input queue full, dropping")
 			}
 		case websocket.TextMessage:
@@ -130,14 +211,17 @@ func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn,
 			// link — so answer locally instead of round-tripping to the peer.
 			if bytes.Contains(data, []byte(`"ping"`)) {
 				r.mu.RLock()
-				s := r.streams[streamID]
+				s := r.streams[spec.StreamID]
 				r.mu.RUnlock()
 				if s != nil {
 					s.writeMu.Lock()
 					err := s.browserWS.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
 					s.writeMu.Unlock()
 					if err != nil {
-						return
+						stateMu.Lock()
+						c := cur
+						stateMu.Unlock()
+						return c
 					}
 				}
 				continue
@@ -149,7 +233,7 @@ func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn,
 			// MsgPTYResize. To keep the wire small, just send the raw text
 			// as MsgPTYInput with a separate Control flag.
 			payload := PTYControlPayload{
-				StreamID: streamID,
+				StreamID: spec.StreamID,
 				Control:  string(data),
 			}
 			msg, err := NewMessage(MsgPTYControl, payload)
@@ -157,7 +241,7 @@ func (r *PTYRelay) PumpBrowserToPeer(streamID string, browserWS *websocket.Conn,
 				continue
 			}
 			// Resize/control is interactive — hi lane.
-			if !pc.EnqueueHi(msg) {
+			if !c.EnqueueHi(msg) {
 				log.Debug("pty-control queue full, dropping")
 			}
 		}
