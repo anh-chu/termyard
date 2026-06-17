@@ -46,6 +46,16 @@ export function TiledView({
   const [dragType, setDragType] = useState<'pane' | 'new-session' | 'sidebar' | null>(null)
   const [dropTarget, setDropTarget] = useState<{ key: string; zone: 'left'|'right'|'top'|'bottom'|'center' } | null>(null)
   const [confirmKillKey, setConfirmKillKey] = useState<string | null>(null)
+  // Grace period before a pending kill confirmation auto-cancels, so the prompt
+  // does not vanish the instant the cursor drifts off the header.
+  const confirmKillTimerRef = useRef<number | null>(null)
+  const cancelKillConfirmTimer = useCallback(() => {
+    if (confirmKillTimerRef.current !== null) {
+      window.clearTimeout(confirmKillTimerRef.current)
+      confirmKillTimerRef.current = null
+    }
+  }, [])
+  useEffect(() => () => cancelKillConfirmTimer(), [cancelKillConfirmTimer])
 
   const totalLeaves = tree ? getLeaves(tree).length : 0
 
@@ -283,7 +293,12 @@ export function TiledView({
           <div
               className="flex items-center justify-between px-2.5 py-1 bg-surface border-b border-hairline shrink-0 cursor-grab active:cursor-grabbing"
               draggable={totalLeaves > 1}
-              onMouseLeave={() => { if (confirmKillKey === sessionKey) setConfirmKillKey(null) }}
+              onMouseEnter={cancelKillConfirmTimer}
+              onMouseLeave={() => {
+                if (confirmKillKey !== sessionKey) return
+                cancelKillConfirmTimer()
+                confirmKillTimerRef.current = window.setTimeout(() => setConfirmKillKey(null), 2500)
+              }}
               onDragStart={(e) => {
                 if ((e.target as HTMLElement).closest('button')) { e.preventDefault(); return }
                 e.dataTransfer.setData('application/x-termyard-pane', sessionKey)
@@ -403,6 +418,7 @@ export function TiledView({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation()
+                  cancelKillConfirmTimer()
                   if (confirmKillKey === sessionKey) {
                     setConfirmKillKey(null)
                     onKill?.(sessionKey)
@@ -419,7 +435,7 @@ export function TiledView({
                 aria-label="Kill session"
                 title={confirmKillKey === sessionKey ? 'Click again to confirm' : 'Kill session'}
               >
-                {confirmKillKey === sessionKey ? 'kill?' : (
+                {confirmKillKey === sessionKey ? <>Kill? <span className="text-[10px]">✕</span></> : (
                   <svg
                     width="12"
                     height="12"
