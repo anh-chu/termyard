@@ -1041,7 +1041,7 @@ export function Sidebar({
                   ⎇
                 </span>
               )}
-              {projectName && projectName !== sessionLabel(session) && (
+              {projectName && (
                 <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-mute" title={session.project_path}>
                   {projectName}
                 </span>
