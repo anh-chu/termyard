@@ -1054,7 +1054,7 @@ export function Sidebar({
           </div>
 
           {!collapsed && agentPresent && userPrompt && (
-            <div className="mt-0.5 flex items-baseline gap-1.5 min-w-0" title={userPrompt}>
+            <div className="mt-1 flex items-baseline gap-1.5 min-w-0" title={userPrompt}>
               <span className="shrink-0 text-primary/50 text-[11px] leading-tight select-none">›</span>
               <span className="min-w-0 truncate text-[11px] text-ink/75 leading-tight">{userPrompt}</span>
             </div>
