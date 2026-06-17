@@ -998,7 +998,7 @@ export function Sidebar({
             />
           )}
           <div className="flex items-center gap-2 w-full">
-            {!collapsed && <AgentMark agentType={agentPresent ? agentType : undefined} className="h-4 w-4 shrink-0" />}
+            {!collapsed && <AgentMark agentType={agentPresent ? agentType : undefined} className="h-3.5 w-3.5 shrink-0" />}
             {!collapsed && stripeColor && !inHostGroup && (
               <span
                 className="w-2 h-2 rounded-full shrink-0 pointer-events-none"
@@ -1063,7 +1063,7 @@ export function Sidebar({
           {!collapsed && (
             <div className="mt-1 flex items-center gap-1.5 min-w-0">
               {session.is_worktree && (
-                <span className="shrink-0 rounded-xs border border-hairline px-1 py-px text-[9px] bg-surface-card/50 text-primary/70" title="git worktree">
+                <span className="shrink-0 rounded-xs border border-hairline px-1 py-0.5 text-[9px] leading-none bg-surface-card/50 text-primary/70" title="git worktree">
                   ⎇
                 </span>
               )}
@@ -1074,7 +1074,7 @@ export function Sidebar({
                 const cfg = statusBadgeConfig[statusBadge]
                 return (
                   <span
-                    className={cn('shrink-0 ml-auto text-[9px] font-medium px-1.5 py-px rounded-xs tabular-nums', cfg.pulse && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
+                    className={cn('shrink-0 ml-auto text-[9px] leading-none font-medium px-1.5 py-0.5 rounded-xs tabular-nums', cfg.pulse && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
                     style={{ color: cfg.color, background: cfg.bg }}
                   >
                     {cfg.label}
