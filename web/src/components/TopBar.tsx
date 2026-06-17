@@ -10,6 +10,9 @@ interface TopBarProps {
   settingsActive?: boolean
   selfUpdateAvailable?: boolean
   updateVersion?: string
+  onApplyUpdate?: () => Promise<void>
+  updateApplying?: boolean
+  onDismissUpdate?: () => void
   onOverview: () => void
   onSettings: () => void
   onNewSession?: () => void
@@ -123,6 +126,9 @@ export function TopBar({
   onSplitPane,
   glance,
   updateVersion,
+  onApplyUpdate,
+  updateApplying,
+  onDismissUpdate,
 }: TopBarProps) {
   const actionable = useMemo(() => events.filter(e => e.status === 'waiting' || e.status === 'error' || e.status === 'stuck'), [events])
   const [showAll, setShowAll] = useState(false)
@@ -207,18 +213,37 @@ export function TopBar({
 
       <div ref={alertRef} className="relative flex-1 min-w-0">
         {!primary && selfUpdateAvailable && (
-          <button
-            type="button"
-            onClick={onSettings}
-            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-sm border border-warning/30 bg-warning/8 text-left min-h-8"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-warning animate-[pulse_1.5s_ease-in-out_infinite] shrink-0" />
-            <span className="text-[11px] font-bold shrink-0 text-warning">UPDATE</span>
-            <span className="text-[11px] text-ink truncate">
-              {updateVersion ? `${updateVersion} available` : 'A new version is available'}
-            </span>
-            <span className="text-[11px] text-mute/70 truncate">— click to install</span>
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              disabled={updateApplying}
+              onClick={() => { if (!updateApplying) void onApplyUpdate?.().catch(() => {}) }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 pr-8 rounded-sm border border-warning/30 bg-warning/8 text-left min-h-8"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-warning animate-[pulse_1.5s_ease-in-out_infinite] shrink-0" />
+              <span className="text-[11px] font-bold shrink-0 text-warning">UPDATE</span>
+              {updateApplying ? (
+                <span className="text-[11px] text-ink truncate">Installing, reconnecting…</span>
+              ) : (
+                <>
+                  <span className="text-[11px] text-ink truncate">
+                    {updateVersion ? `${updateVersion} available` : 'A new version is available'}
+                  </span>
+                  <span className="text-[11px] text-mute/70 truncate">— click to install</span>
+                </>
+              )}
+            </button>
+            {!updateApplying && (
+              <button
+                type="button"
+                aria-label="Dismiss update"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-warning/30 bg-surface px-2 py-0.5 text-[10px] font-bold text-warning hover:text-ink"
+                onClick={(e) => { e.stopPropagation(); onDismissUpdate?.() }}
+              >
+                ×
+              </button>
+            )}
+          </div>
         )}
         {primary && (
           <div className="relative">

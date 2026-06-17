@@ -14,8 +14,14 @@ export function useSelfUpdate(wsStatus: UpdateStatus | null) {
   const [checking, setChecking] = useState(false)
   const [restartMode, setRestartMode] = useState<'auto' | 'manual' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null)
   const applyingRef = useRef(applying)
   const restartModeRef = useRef(restartMode)
+  const statusRef = useRef(status)
+
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
 
   useEffect(() => {
     applyingRef.current = applying
@@ -102,5 +108,11 @@ export function useSelfUpdate(wsStatus: UpdateStatus | null) {
     }
   }, [])
 
-  return { status, applying, checking, restartMode, error, apply, checkNow }
+  const dismiss = useCallback(() => {
+    if (statusRef.current) setDismissedVersion(statusRef.current.latest_version)
+  }, [])
+
+  const updateVisible = !!status?.update_available && !status.pending_restart && status.latest_version !== dismissedVersion
+
+  return { status, applying, checking, restartMode, error, apply, checkNow, dismiss, updateVisible }
 }

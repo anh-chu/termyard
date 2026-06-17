@@ -1079,8 +1079,11 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         <TopBar
           currentView={currentView}
           settingsActive={settingsOpen}
-          selfUpdateAvailable={selfUpdate.status?.update_available ?? false}
+          selfUpdateAvailable={selfUpdate.updateVisible}
           updateVersion={selfUpdate.status?.latest_version}
+          onApplyUpdate={selfUpdate.apply}
+          updateApplying={selfUpdate.applying}
+          onDismissUpdate={selfUpdate.dismiss}
           onOverview={() => navigateTo(null)}
           onSettings={openSettings}
           onHelp={() => setHelpOpen(true)}
