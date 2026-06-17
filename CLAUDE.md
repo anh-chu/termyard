@@ -136,3 +136,13 @@ When an agent's status/metadata is wrong, capture what `notify` actually does ra
 
 1. `LOG_LEVEL=trace` on the server (systemd: drop-in `Environment=LOG_LEVEL=trace`, `daemon-reload`, restart) and watch `journalctl --user -u termyard -f` for `received request` / `recording tool event`.
 2. If no events arrive, the failure is in the agent extension or `notify` itself — log the `spawnSync` result (`status`, `stderr`) from inside the extension. A non-zero exit with an "Incorrect Usage" stderr means a bad/removed flag (see the `--task` note above).
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
