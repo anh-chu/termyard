@@ -49,6 +49,7 @@ interface SidebarProps {
   onRenameGroup?: (groupId: string, name: string) => void
   onPairSessions?: (keyA: string, keyB: string) => void
   onRemoveFromSplit?: (key: string) => void
+  onSessionKilled?: (key: string) => void
   sessionAttrs: SessionAttrSets
   setSessionAttr: (key: string, next: { background?: boolean; hidden?: boolean }) => void
 }
@@ -232,6 +233,7 @@ export function Sidebar({
   onRenameGroup,
   onPairSessions,
   onRemoveFromSplit,
+  onSessionKilled,
   sessionAttrs,
   setSessionAttr,
 }: SidebarProps) {
@@ -484,6 +486,7 @@ export function Sidebar({
     setContextMenu(null)
     setConfirmKillKey(null)
     setConfirmWorktreeKillKey(null)
+    onSessionKilled?.(host ? `${host}/${name}` : name)
     try {
       await fetch('/api/session/kill', {
         method: 'POST',
@@ -499,6 +502,7 @@ export function Sidebar({
     setContextMenu(null)
     setConfirmKillKey(null)
     setConfirmWorktreeKillKey(null)
+    onSessionKilled?.(host ? `${host}/${name}` : name)
     try {
       await fetch('/api/session/kill', {
         method: 'POST',

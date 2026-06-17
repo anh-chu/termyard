@@ -363,6 +363,24 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     })
   }, [])
 
+  // Authoritative removal for a deliberately killed session: drop its leaf from
+  // the active tree, any background group, and singleView immediately. The prune
+  // grace window only guards involuntary disappearance (recovery), so a user
+  // kill must not wait it out.
+  const removeSessionFromLayout = useCallback((sessKey: string) => {
+    closePane(sessKey)
+    setSingleView(prev => prev === sessKey ? null : prev)
+    setSavedGroups(prev =>
+      prev.map(group => {
+        if (!findLeaf(group.tree, sessKey)) return group
+        const keep = new Set(getLeaves(group.tree).filter(k => k !== sessKey))
+        const pruned = pruneGroupTree(group.tree, group.activeKey, keep)
+        return pruned ? { ...group, tree: pruned.tree, activeKey: pruned.activeKey } : null
+      }).filter(Boolean) as LayoutGroup[]
+    )
+    missingSinceRef.current.delete(sessKey)
+  }, [closePane])
+
   const popOutPane = useCallback((sessKey: string) => {
     setSingleView(null)
     setPaneTree(popOut(sessKey))
@@ -378,7 +396,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const killPane = useCallback(async (sessKey: string) => {
     const session = sessionsRef.current.find(s => sessionKey(s) === sessKey)
     if (!session) return
-    closePane(sessKey)
+    removeSessionFromLayout(sessKey)
     try {
       await fetch('/api/session/kill', {
         method: 'POST',
@@ -388,7 +406,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     } catch (err) {
       console.error('Failed to kill session:', err)
     }
-  }, [closePane])
+  }, [removeSessionFromLayout])
 
   // Navigate back to overview when the tree becomes empty (but not if singleView is active)
   useEffect(() => {
@@ -1141,6 +1159,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             onRenameGroup={renameGroup}
             onPairSessions={handlePairSessions}
             onRemoveFromSplit={closePane}
+            onSessionKilled={removeSessionFromLayout}
             sessionAttrs={sessionAttrs}
             setSessionAttr={setSessionAttr}
           />
