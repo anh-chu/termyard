@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -262,22 +261,18 @@ func extractTermyardBinary(archivePath, outPath string) error {
 	return fmt.Errorf("termyard binary not found in archive")
 }
 
-// suggestRestart inspects the OS for a known service manager and prints a
-// hint after a successful update. Best-effort, never fatal.
-func suggestRestart(log *logrus.Entry) {
-	switch runtime.GOOS {
-	case "linux":
-		if out, err := exec.Command("systemctl", "--user", "is-active", "termyard.service").Output(); err == nil && strings.TrimSpace(string(out)) == "active" {
-			log.Info("restart with: systemctl --user restart termyard")
-			return
-		}
-	case "darwin":
-		if out, err := exec.Command("launchctl", "list", "com.termyard.server").Output(); err == nil && len(out) > 0 {
-			log.Info("restart with: launchctl kickstart -k gui/$(id -u)/com.termyard.server")
-			return
-		}
+// restartAfterUpdate restarts the managed service so the new binary takes
+// effect, or prints manual advice when no service manager owns termyard.
+func restartAfterUpdate(log *logrus.Entry) {
+	if !ServiceManaged() {
+		log.Info("if termyard is currently running, restart it for the update to take effect")
+		return
 	}
-	log.Info("if termyard is currently running, restart it for the update to take effect")
+	if err := RestartManaged(); err != nil {
+		log.WithError(err).Warn("auto-restart failed; restart the service manually")
+		return
+	}
+	log.Info("restarting service to apply update")
 }
 
 // applyRelease performs non-dry install.
@@ -405,7 +400,7 @@ func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun,
 		"dir":    binDir,
 	}).Info("update installed")
 
-	suggestRestart(log)
+	restartAfterUpdate(log)
 	return nil
 }
 
