@@ -556,8 +556,29 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, port int, path strin
 func Run(ctx context.Context, opts *Options) error {
 	logger := logrus.WithField("component", "server")
 
-	secureCookies := false
+	hub := setupHub(opts)
+	wireSessionAttrsSync(opts, hub)
 
+	r := chi.NewRouter()
+	r.Use(chimiddleware.Recoverer)
+	r.Use(chimiddleware.StripSlashes)
+	r.Use(chimiddleware.RequestID)
+	registerAPIRoutes(r, opts, hub)
+
+	// WebSocket routes (protected by auth if enabled)
+	go hub.Run()
+	go runUpdateChecker(opts)
+
+	registerWSRoutes(r, opts, hub)
+	registerProxyRoutes(r, opts)
+	if err := registerFrontendRoutes(r); err != nil {
+		return err
+	}
+
+	return serveAndWait(ctx, opts, logger, r)
+}
+
+func setupHub(opts *Options) *ws.Hub {
 	// Build the events hub up front so routes can broadcast layout changes.
 	hub := ws.NewHub(opts.StateMgr, opts.Tracker)
 	opts.Hub = hub
@@ -570,7 +591,10 @@ func Run(ctx context.Context, opts *Options) error {
 	if opts.ActivityTracker != nil || peerActivity != nil {
 		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
 	}
+	return hub
+}
 
+func wireSessionAttrsSync(opts *Options, hub *ws.Hub) {
 	// Wire cross-machine session-attribute sync. The peer subsystem applies
 	// inbound MsgSessionAttrs{Snapshot,Delta} to our server-authoritative store
 	// (per-key LWW) and bounces session-attrs-updated through the browser hub.
@@ -608,13 +632,11 @@ func Run(ctx context.Context, opts *Options) error {
 			opts.PeerHandler.SetBrowserHub(hub)
 		}
 	}
+}
 
-	r := chi.NewRouter()
-	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.StripSlashes)
-	r.Use(chimiddleware.RequestID)
+func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
+	secureCookies := false
 
-	// API routes
 	r.Route("/api", func(r chi.Router) {
 		// Public auth endpoints (no middleware)
 		r.Get("/auth/status", auth.StatusHandler(opts.AuthEnabled, opts.PasswordStore))
@@ -1581,11 +1603,9 @@ func Run(ctx context.Context, opts *Options) error {
 			handleHostPortForwardDelete(w, r, opts)
 		})
 	})
+}
 
-	// WebSocket routes (protected by auth if enabled)
-	go hub.Run()
-	go runUpdateChecker(opts)
-
+func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 	ptyHandler := ws.NewPTYTerminalHandler(opts.Client.TmuxPath(), opts.ActivityTracker)
 
 	if opts.AuthEnabled {
@@ -1616,7 +1636,9 @@ func Run(ctx context.Context, opts *Options) error {
 	if opts.PeerHandler != nil {
 		r.Get("/ws/peer", opts.PeerHandler.HandlePeer)
 	}
+}
 
+func registerProxyRoutes(r chi.Router, opts *Options) {
 	// Port-forward proxy — exposes localhost-bound services through termyard's URL.
 	// Requires auth (same rule as other protected routes) so remote users can't
 	// reach internal services without a valid session.
@@ -1633,7 +1655,9 @@ func Run(ctx context.Context, opts *Options) error {
 			r.Get("/proxy/{port}/*", proxyHandler)
 		}
 	}
+}
 
+func registerFrontendRoutes(r chi.Router) error {
 	// Serve embedded frontend
 	sub, err := fs.Sub(frontendFS, "dist")
 	if err != nil {
@@ -1649,9 +1673,12 @@ func Run(ctx context.Context, opts *Options) error {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+	return nil
+}
 
+func serveAndWait(ctx context.Context, opts *Options, logger *logrus.Entry, handler http.Handler) error {
 	srv := &http.Server{
-		Handler:           r,
+		Handler:           handler,
 		ErrorLog:          log.New(logger.WriterLevel(logrus.WarnLevel), "", 0),
 		IdleTimeout:       120 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
