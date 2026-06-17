@@ -6,6 +6,7 @@ import { Session, sessionKey, sessionScheduleID } from '../hooks/useSessions'
 import { AgentMark } from './AgentMark'
 import { cn } from '../lib/utils'
 import { describeCron } from '../lib/cron'
+import { formatRelativeTime, formatRunCount } from '../lib/time'
 
 interface Props {
   onClose: () => void
@@ -26,26 +27,6 @@ const cronPresets = [
   { id: 'weekly', label: 'Weekly', spec: '0 0 * * 0' },
   { id: 'custom', label: 'Custom', spec: '' },
 ] as const
-
-function formatRelativeTime(iso?: string): string {
-  if (!iso) return '—'
-  const ts = new Date(iso).getTime()
-  if (!Number.isFinite(ts)) return '—'
-  const diff = ts - Date.now()
-  const future = diff > 0
-  const abs = Math.abs(diff)
-  const mins = Math.round(abs / 60000)
-  if (mins < 1) return future ? 'now' : 'just now'
-  if (mins < 60) return future ? `in ${mins}m` : `${mins}m ago`
-  const hours = Math.round(mins / 60)
-  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`
-  const days = Math.round(hours / 24)
-  return future ? `in ${days}d` : `${days}d ago`
-}
-
-function formatRunCount(count: number): string {
-  return `${count} run${count === 1 ? '' : 's'}`
-}
 
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
   return (

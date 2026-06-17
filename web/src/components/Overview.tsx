@@ -6,6 +6,7 @@ import { ActivitySnapshot } from '../hooks/useActivity'
 import { usePreferences } from '../hooks/usePreferences'
 import { toolColors, statusConfig, signalTreatment } from '../theme'
 import { stateRank, sessionSignal, isSessionActive } from '../lib/sessionState'
+import { formatSessionUptime, formatSystemUptime } from '../lib/time'
 
 interface OverviewProps {
   sessions: Session[]
@@ -68,24 +69,6 @@ function Sparkline({ data, height = 20 }: { data: number[]; height?: number }) {
       })}
     </svg>
   )
-}
-
-function formatUptime(created: string, format: string = 'relative'): string {
-  if (format === 'absolute') return new Date(created).toLocaleTimeString()
-  const diff = Date.now() - new Date(created).getTime()
-  const hours = Math.floor(diff / 3600000)
-  if (hours < 1) return `${Math.floor(diff / 60000)}m`
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
-}
-
-function formatSystemUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const mins = Math.floor((seconds % 3600) / 60)
-  if (days > 0) return `${days}d ${hours}h`
-  if (hours > 0) return `${hours}h ${mins}m`
-  return `${mins}m`
 }
 
 function ProcessBar({ processes, totalPanes }: { processes: { name: string; count: number }[]; totalPanes: number }) {
@@ -239,7 +222,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
                         <span className={`font-display text-[15px] font-bold truncate ${signal.state === 'idle' ? 'text-mute' : 'text-ink'}`}>{session.display_name || session.name}</span>
                         {session.attached && <span className="text-[9px] font-bold tracking-wider text-success px-1.5 py-[1.5px] rounded-sm bg-success/10 border border-success/20">attached</span>}
                       </div>
-                      <div className="text-[10px] text-mute/60">{formatUptime(session.created, prefs.timestamp_format)}</div>
+                      <div className="text-[10px] text-mute/60">{formatSessionUptime(session.created, prefs.timestamp_format)}</div>
                     </div>
                     {signal.state === 'needs_you' && loudEvent && (
                       <button

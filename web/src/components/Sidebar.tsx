@@ -8,6 +8,7 @@ import { usePreferences } from '../hooks/usePreferences'
 import { useSchedules } from '../hooks/useSchedules'
 import { cn } from '../lib/utils'
 import { describeCron } from '../lib/cron'
+import { formatRelativeTime, formatUptime } from '../lib/time'
 import { hostColor } from '../lib/hostColor'
 import { AgentMark } from './AgentMark'
 
@@ -167,35 +168,6 @@ function sortNewestFirst<T extends { created?: string; last_activity?: string }>
     const bTime = new Date(b.created || b.last_activity || 0).getTime()
     return bTime - aTime
   })
-}
-
-function formatRelativeTime(iso?: string): string {
-  if (!iso) return '—'
-  const ts = new Date(iso).getTime()
-  if (!Number.isFinite(ts)) return '—'
-  const diff = ts - Date.now()
-  const future = diff > 0
-  const abs = Math.abs(diff)
-  const mins = Math.round(abs / 60000)
-  if (mins < 1) return future ? 'now' : 'just now'
-  if (mins < 60) return future ? `in ${mins}m` : `${mins}m ago`
-  const hours = Math.round(mins / 60)
-  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`
-  const days = Math.round(hours / 24)
-  return future ? `in ${days}d` : `${days}d ago`
-}
-
-function formatUptime(created?: string): string {
-  if (!created) return ''
-  const ms = Date.now() - new Date(created).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return ''
-  const minutes = Math.floor(ms / 60000)
-  if (minutes < 1) return 'now'
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  return `${days}d`
 }
 
 function orderSessions(sessions: Session[], order: string[]): Session[] {
