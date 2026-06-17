@@ -183,7 +183,7 @@ func setupClaudeDir(configDir, termyardBin string, resilient bool) error {
 		"SessionStart": []map[string]interface{}{
 			{
 				"matcher": "",
-				"hooks":   makeHook(notifyCmd + " -t claude -s active -m 'Session started' --stdin"),
+				"hooks":   makeHook(notifyCmd + " -t claude --stdin"),
 			},
 		},
 		"UserPromptSubmit": []map[string]interface{}{

@@ -90,9 +90,8 @@ const SHELL_COMMANDS = new Set(['zsh', 'bash', 'fish', 'sh', 'dash', 'ksh', 'tcs
 // Agents that report their own working/idle lifecycle via hooks. For these,
 // process-tree presence is not a working signal — a freshly opened agent
 // sitting at its prompt is idle, not working. Their real "working" state comes
-// from hook events (isSessionInActiveTurn). Non-hook agents (e.g. codex) still
-// fall back to presence detection.
-const NATIVE_HOOK_TOOLS = new Set(['pi', 'claude', 'opencode'])
+// from hook events (isSessionInActiveTurn).
+const NATIVE_HOOK_TOOLS = new Set(['pi', 'claude', 'opencode', 'codex'])
 
 const statusBadgeConfig = {
   working: { label: 'working', color: 'var(--accent-green)',  bg: 'rgba(89,212,153,0.12)',  pulse: true  },

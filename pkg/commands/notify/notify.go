@@ -143,8 +143,11 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 
 	switch evt.HookEventName {
 	case "SessionStart":
-		status = "active"
-		message = "Session started"
+		// Session just launched, no work in flight. Emit completed so we don't
+		// open a working turn; the process-tree detector marks the agent present
+		// (idle). Empty message avoids clobbering the sidebar prompt preview.
+		status = "completed"
+		message = ""
 	case "PreToolUse", "preToolUse":
 		status = "active"
 		if activity := toolNameToActivity(evt.ToolName); activity != "" {

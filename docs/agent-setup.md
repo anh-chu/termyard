@@ -60,7 +60,7 @@ termyard adds hooks to `~/.claude/settings.json` that fire on tool use, notifica
         "hooks": [
           {
             "type": "command",
-            "command": "termyard notify -t claude -s active -m 'Session started' || true"
+            "command": "termyard notify -t claude --stdin || true"
           }
         ]
       }
