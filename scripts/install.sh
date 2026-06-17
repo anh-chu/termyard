@@ -83,10 +83,9 @@ tar -xzf "${tmp}/${ASSET}" -C "$tmp"
 chmod +x "${tmp}/${BIN}"
 
 # --- choose install dir ---
+# Default to a user-scoped dir; opt into a system path with BIN_DIR=/usr/local/bin.
 if [ -n "${BIN_DIR:-}" ]; then
   DEST="$BIN_DIR"
-elif [ -w "/usr/local/bin" ] || { [ ! -e "/usr/local/bin/${BIN}" ] && mkdir -p /usr/local/bin 2>/dev/null && [ -w "/usr/local/bin" ]; }; then
-  DEST="/usr/local/bin"
 else
   DEST="${HOME}/.local/bin"
 fi
