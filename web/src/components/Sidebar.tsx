@@ -1051,17 +1051,6 @@ export function Sidebar({
                 {formatUptime(session.created)}
               </span>
             )}
-            {!collapsed && (() => {
-              const cfg = statusBadgeConfig[statusBadge]
-              return (
-                <span
-                  className={cn('shrink-0 text-[9px] font-medium px-1.5 py-px rounded-xs tabular-nums', cfg.pulse && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
-                  style={{ color: cfg.color, background: cfg.bg }}
-                >
-                  {cfg.label}
-                </span>
-              )
-            })()}
           </div>
 
           {!collapsed && agentPresent && userPrompt && (
@@ -1080,6 +1069,17 @@ export function Sidebar({
               <span className={cn('min-w-0 truncate text-[10px]', activityIsLive ? 'text-mute/70' : 'text-mute/40')} title={activityDisplay}>
                 {activityDisplay}
               </span>
+              {(() => {
+                const cfg = statusBadgeConfig[statusBadge]
+                return (
+                  <span
+                    className={cn('shrink-0 ml-auto text-[9px] font-medium px-1.5 py-px rounded-xs tabular-nums', cfg.pulse && 'animate-[pulse_1.5s_ease-in-out_infinite]')}
+                    style={{ color: cfg.color, background: cfg.bg }}
+                  >
+                    {cfg.label}
+                  </span>
+                )
+              })()}
             </div>
           )}
 
