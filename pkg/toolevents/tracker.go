@@ -227,7 +227,7 @@ func (t *Tracker) Record(evt *Event) {
 	if evt.AgentSessionID != "" {
 		meta.AgentSessionID = evt.AgentSessionID
 	}
-	if evt.Message != "" {
+	if evt.Message != "" && !evt.AutoDetected {
 		meta.Message = evt.Message
 	}
 	if evt.UserPrompt != "" && meta.UserPrompt == "" {
