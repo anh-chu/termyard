@@ -280,16 +280,78 @@ func suggestRestart(log *logrus.Entry) {
 	log.Info("if termyard is currently running, restart it for the update to take effect")
 }
 
-// run performs the update flow. dryRun=true means: check + report only.
+// applyRelease performs non-dry install.
+func applyRelease(ctx context.Context, rel *release, archiveURL, checksumURL, archiveName string) (newVersion, binPath, backupPath, binDir string, err error) {
+	binPath, err = resolveBinaryPath()
+	if err != nil {
+		return "", "", "", "", err
+	}
+	binDir = filepath.Dir(binPath)
+
+	// Download checksums first, then archive.
+	tmpDir, err := os.MkdirTemp("", "termyard-update-*")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	checksumsPath, _, err := downloadToTemp(ctx, checksumURL, tmpDir, "checksums")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	checksumsBody, err := os.ReadFile(checksumsPath)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	wantSum, err := expectedChecksum(string(checksumsBody), archiveName)
+	if err != nil {
+		return "", "", "", "", err
+	}
+
+	archivePath, gotSum, err := downloadToTemp(ctx, archiveURL, tmpDir, "archive")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	if !strings.EqualFold(gotSum, wantSum) {
+		return "", "", "", "", fmt.Errorf("checksum mismatch: want %s got %s", wantSum, gotSum)
+	}
+
+	// Extract directly into a sibling of the target so the final rename is
+	// atomic (same filesystem).
+	newPath := binPath + ".new"
+	if err := extractTermyardBinary(archivePath, newPath); err != nil {
+		return "", "", "", "", err
+	}
+
+	// Preserve perms of the existing binary if it exists.
+	if info, err := os.Stat(binPath); err == nil {
+		_ = os.Chmod(newPath, info.Mode().Perm())
+	}
+
+	// Backup the old binary, then swap. We keep the backup in the same dir so
+	// the user can roll back manually if they hit issues.
+	backupPath = binPath + ".bak"
+	_ = os.Remove(backupPath)
+	if err := os.Rename(binPath, backupPath); err != nil {
+		// Old binary couldn't be moved (e.g. running with locked text segment
+		// on macOS). On most unixes the running file can be renamed away. If
+		// we hit this, surface the error so the user can rerun with sudo.
+		os.Remove(newPath)
+		return "", "", "", "", fmt.Errorf("move old binary aside: %w (you may need sudo, or your filesystem is read-only)", err)
+	}
+	if err := os.Rename(newPath, binPath); err != nil {
+		// Try to restore the backup before bailing.
+		_ = os.Rename(backupPath, binPath)
+		return "", "", "", "", fmt.Errorf("install new binary: %w", err)
+	}
+
+	return rel.TagName, binPath, backupPath, binDir, nil
+}
+
 func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun, force bool) error {
 	log := logrus.WithField("component", "update")
 
-	current := common.VERSION
-	if current == "" || current == "0.1.1-beta.2" {
-		// `0.1.1-beta.2` is the default in pkg/common when ldflags didn't run
-		// (e.g. `go run .`). Treat as "unknown".
-		current = ""
-	}
+	current := normalizeVersion(common.VERSION)
 
 	log.WithFields(logrus.Fields{
 		"current": current,
@@ -330,75 +392,14 @@ func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun,
 		fmt.Printf("would download: %s (%d bytes)\n", archiveName, archiveSize)
 		return nil
 	}
-
-	binPath, err := resolveBinaryPath()
+	newVersion, binPath, backupPath, binDir, err := applyRelease(ctx, rel, archiveURL, checksumURL, archiveName)
 	if err != nil {
 		return err
-	}
-	binDir := filepath.Dir(binPath)
-	log.WithField("path", binPath).Info("target binary")
-
-	// Download checksums first, then archive.
-	tmpDir, err := os.MkdirTemp("", "termyard-update-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmpDir)
-
-	checksumsPath, _, err := downloadToTemp(ctx, checksumURL, tmpDir, "checksums")
-	if err != nil {
-		return err
-	}
-	checksumsBody, err := os.ReadFile(checksumsPath)
-	if err != nil {
-		return err
-	}
-	wantSum, err := expectedChecksum(string(checksumsBody), archiveName)
-	if err != nil {
-		return err
-	}
-
-	archivePath, gotSum, err := downloadToTemp(ctx, archiveURL, tmpDir, "archive")
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(gotSum, wantSum) {
-		return fmt.Errorf("checksum mismatch: want %s got %s", wantSum, gotSum)
-	}
-	log.Info("checksum verified")
-
-	// Extract directly into a sibling of the target so the final rename is
-	// atomic (same filesystem).
-	newPath := binPath + ".new"
-	if err := extractTermyardBinary(archivePath, newPath); err != nil {
-		return err
-	}
-
-	// Preserve perms of the existing binary if it exists.
-	if info, err := os.Stat(binPath); err == nil {
-		_ = os.Chmod(newPath, info.Mode().Perm())
-	}
-
-	// Backup the old binary, then swap. We keep the backup in the same dir so
-	// the user can roll back manually if they hit issues.
-	backupPath := binPath + ".bak"
-	_ = os.Remove(backupPath)
-	if err := os.Rename(binPath, backupPath); err != nil {
-		// Old binary couldn't be moved (e.g. running with locked text segment
-		// on macOS). On most unixes the running file can be renamed away. If
-		// we hit this, surface the error so the user can rerun with sudo.
-		os.Remove(newPath)
-		return fmt.Errorf("move old binary aside: %w (you may need sudo, or your filesystem is read-only)", err)
-	}
-	if err := os.Rename(newPath, binPath); err != nil {
-		// Try to restore the backup before bailing.
-		_ = os.Rename(backupPath, binPath)
-		return fmt.Errorf("install new binary: %w", err)
 	}
 
 	log.WithFields(logrus.Fields{
 		"from":   current,
-		"to":     rel.TagName,
+		"to":     newVersion,
 		"binary": binPath,
 		"backup": backupPath,
 		"dir":    binDir,
@@ -408,8 +409,6 @@ func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun,
 	return nil
 }
 
-// matches reports whether the running binary version is the same as the
-// release tag. Handles "v" prefix differences and the ldflags-injected forms.
 func matches(currentVersion, tag string) bool {
 	a := strings.TrimPrefix(currentVersion, "v")
 	b := strings.TrimPrefix(tag, "v")

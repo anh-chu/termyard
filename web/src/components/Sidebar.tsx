@@ -30,6 +30,7 @@ interface SidebarProps {
   sessions: Session[]
   selectedSession: string | null
   collapsed: boolean
+  selfUpdateAvailable?: boolean
   collapseMode: 'small' | 'hidden'
   width?: number
   onWidthChange?: (width: number) => void
@@ -213,6 +214,7 @@ export function Sidebar({
   sessions,
   selectedSession,
   collapsed,
+  selfUpdateAvailable,
   collapseMode,
   width = 288,
   onWidthChange,
@@ -1844,6 +1846,9 @@ export function Sidebar({
           {glance && glance.waiting > 0 && <><span>·</span><span className="text-warning font-bold">{glance.waiting} waiting</span></>}
           <span>·</span>
           <span>{agentCount} agent{agentCount === 1 ? '' : 's'}</span>
+          {selfUpdateAvailable && (
+            <span className="ml-auto rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-bold text-warning">update</span>
+          )}
         </div>
       )}
 

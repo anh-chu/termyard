@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { usePreferences, type Preferences } from '../hooks/usePreferences'
+import type { UpdateStatus } from '../hooks/useSelfUpdate'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import { themePresets, applyTheme } from '../theme'
 import { cn } from '../lib/utils'
@@ -394,7 +395,7 @@ function PeersSection() {
   )
 }
 
-export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogout, bucket, version, updateAvailable }: {
+export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogout, bucket, version, updateAvailable, binaryUpdate, onApplyUpdate, updateApplying, updateRestartMode, updateError }: {
   pushState: string
   onPushSubscribe: () => void
   onPushUnsubscribe: () => void
@@ -402,6 +403,11 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
   bucket?: 'look' | 'yard' | 'alerts' | 'network'
   version?: string | null
   updateAvailable?: boolean
+  binaryUpdate?: UpdateStatus | null
+  onApplyUpdate?: () => Promise<void>
+  updateApplying?: boolean
+  updateRestartMode?: 'auto' | 'manual' | null
+  updateError?: string | null
 }) {
   const { prefs, updatePrefs } = usePreferences()
   const [saving, setSaving] = useState(false)
@@ -869,6 +875,31 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                   </button>
                 ) : (
                   <span className="font-mono text-mute">{version}</span>
+                )}
+              </Row>
+              <Row
+                label="App Update"
+                description={updateError || (updateRestartMode === 'manual' || binaryUpdate?.pending_restart ? 'Installed — restart termyard manually' : binaryUpdate?.update_available ? `Channel ${binaryUpdate.channel}` : 'Checking for app updates')}
+              >
+                {updateApplying ? (
+                  <span className="inline-flex items-center gap-2 rounded-sm border border-warning/40 bg-warning/10 px-3 py-1.5 text-[13px] font-bold text-warning">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
+                    Updating, reconnecting…
+                  </span>
+                ) : updateRestartMode === 'manual' || binaryUpdate?.pending_restart ? (
+                  <span className="rounded-sm border border-warning/40 bg-warning/10 px-3 py-1.5 text-[13px] font-bold text-warning">
+                    Updated — restart manually
+                  </span>
+                ) : binaryUpdate?.update_available ? (
+                  <button
+                    onClick={() => { void onApplyUpdate?.().catch(() => {}) }}
+                    className="rounded-sm border border-warning/40 bg-warning/10 px-3 py-1.5 text-[13px] font-bold text-warning hover:text-ink transition-colors"
+                    title="Update app"
+                  >
+                    Update to {binaryUpdate.latest_version}
+                  </button>
+                ) : (
+                  <span className="font-mono text-mute">{binaryUpdate?.current_version || version}</span>
                 )}
               </Row>
             </Section>

@@ -699,6 +699,12 @@ func Run(ctx context.Context, opts *Options) error {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(agentcheck.CheckAgents())
 			})
+			r.Get("/update", func(w http.ResponseWriter, r *http.Request) {
+				handleUpdateStatus(w, r)
+			})
+			r.Post("/update/apply", func(w http.ResponseWriter, r *http.Request) {
+				handleUpdateApply(w, r, opts)
+			})
 
 			r.Get("/sessions", func(w http.ResponseWriter, r *http.Request) {
 				var sessions []*tmux.Session
@@ -1529,55 +1535,6 @@ func Run(ctx context.Context, opts *Options) error {
 				json.NewEncoder(w).Encode(updated)
 			})
 
-			// Port forward registry
-			r.Get("/portforwards", func(w http.ResponseWriter, r *http.Request) {
-				if opts.PortForwardStore == nil {
-					http.Error(w, "port forwarding not available", http.StatusServiceUnavailable)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(opts.PortForwardStore.List())
-			})
-			r.Post("/portforwards", func(w http.ResponseWriter, r *http.Request) {
-				if opts.PortForwardStore == nil {
-					http.Error(w, "port forwarding not available", http.StatusServiceUnavailable)
-					return
-				}
-				var req struct {
-					Port         int              `json:"port"`
-					Label        string           `json:"label"`
-					Mode         portforward.Mode `json:"mode"`
-					ExternalPort int              `json:"external_port"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Port < 1 || req.Port > 65535 {
-					http.Error(w, "port (1-65535) required", http.StatusBadRequest)
-					return
-				}
-				if req.Mode == "" {
-					req.Mode = portforward.ModeProxy
-				}
-				if err := opts.PortForwardStore.Add(req.Port, req.Label, req.Mode, req.ExternalPort); err != nil {
-					http.Error(w, err.Error(), http.StatusBadGateway)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(opts.PortForwardStore.List())
-			})
-			r.Delete("/portforward/{port}", func(w http.ResponseWriter, r *http.Request) {
-				if opts.PortForwardStore == nil {
-					http.Error(w, "port forwarding not available", http.StatusServiceUnavailable)
-					return
-				}
-				port, err := strconv.Atoi(chi.URLParam(r, "port"))
-				if err != nil {
-					http.Error(w, "invalid port", http.StatusBadRequest)
-					return
-				}
-				opts.PortForwardStore.Remove(port)
-				w.WriteHeader(http.StatusNoContent)
-			})
-
 			// Peers management endpoints (auth-protected)
 			r.Get("/peers", func(w http.ResponseWriter, r *http.Request) {
 				handleGetPeers(w, r, opts)
@@ -1595,10 +1552,36 @@ func Run(ctx context.Context, opts *Options) error {
 				handleDeletePeer(w, r, opts)
 			})
 		})
+
+		// Port forward registry (host-aware; hub relay accepted on local target routes only).
+		r.Group(func(r chi.Router) {
+			if opts.AuthEnabled {
+				r.Use(portForwardRelayMiddleware(opts))
+			}
+			r.Get("/portforwards", func(w http.ResponseWriter, r *http.Request) {
+				servePortForwardsGet(w, r, opts)
+			})
+			r.Post("/portforwards", func(w http.ResponseWriter, r *http.Request) {
+				servePortForwardsPost(w, r, opts)
+			})
+			r.Delete("/portforward/{port}", func(w http.ResponseWriter, r *http.Request) {
+				servePortForwardsDelete(w, r, opts)
+			})
+		})
+		r.Get("/hosts/{fp}/portforwards", func(w http.ResponseWriter, r *http.Request) {
+			handleHostPortForwards(w, r, opts, http.MethodGet)
+		})
+		r.Post("/hosts/{fp}/portforwards", func(w http.ResponseWriter, r *http.Request) {
+			handleHostPortForwards(w, r, opts, http.MethodPost)
+		})
+		r.Delete("/hosts/{fp}/portforward/{port}", func(w http.ResponseWriter, r *http.Request) {
+			handleHostPortForwardDelete(w, r, opts)
+		})
 	})
 
 	// WebSocket routes (protected by auth if enabled)
 	go hub.Run()
+	go runUpdateChecker(opts)
 
 	ptyHandler := ws.NewPTYTerminalHandler(opts.Client.TmuxPath(), opts.ActivityTracker)
 

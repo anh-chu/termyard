@@ -26,6 +26,7 @@ import { usePreferencesProvider, usePreferences, PreferencesContext } from './ho
 import { useAuth } from './hooks/useAuth'
 import { useSessionAttrs } from './hooks/useSessionAttrs'
 import { Toasts, Toast } from './components/Toasts'
+import { useSelfUpdate, type UpdateStatus } from './hooks/useSelfUpdate'
 import { applyTheme } from './theme'
 import { sessionSignal } from './lib/sessionState'
 
@@ -150,8 +151,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const hasMultipleHosts = hosts.length > 1
   const localHostId = hosts.find(h => h.local)?.id
   const [serverVersion, setServerVersion] = useState<string | null>(null)
+  const [binaryUpdate, setBinaryUpdate] = useState<UpdateStatus | null>(null)
   const loadedVersionRef = useRef<string | null>(null)
   const updateAvailable = loadedVersionRef.current !== null && serverVersion !== null && serverVersion !== loadedVersionRef.current
+  const selfUpdate = useSelfUpdate(binaryUpdate)
   const [newSessionModalOpen, setNewSessionModalOpen] = useState(false)
   const terminalContainerRef = useRef<HTMLDivElement>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -650,6 +653,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       refresh()
       refreshHosts()
     }
+    if (evt.type === 'update-status') {
+      setBinaryUpdate(evt)
+      return
+    }
     if (evt.type === 'session-attrs-updated') {
       refreshSessionAttrs()
     }
@@ -1024,7 +1031,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       <Toasts toasts={toasts} onDismiss={dismissToast} />
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {portForwardsOpen && (
-        <PortForwardModal onClose={() => setPortForwardsOpen(false)} />
+        <PortForwardModal
+          hostId={selectedSession ? parseSessionKey(selectedSession).host || undefined : undefined}
+          onClose={() => setPortForwardsOpen(false)}
+        />
       )}
       {schedulesOpen && (
         <ScheduleModal onClose={() => setSchedulesOpen(false)} />
@@ -1069,6 +1079,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         <TopBar
           currentView={currentView}
           settingsActive={settingsOpen}
+          selfUpdateAvailable={selfUpdate.status?.update_available ?? false}
           onOverview={() => navigateTo(null)}
           onSettings={openSettings}
           onHelp={() => setHelpOpen(true)}
@@ -1097,6 +1108,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             sessions={sessions}
             selectedSession={selectedSession}
             collapsed={sidebarCollapsed}
+            selfUpdateAvailable={selfUpdate.status?.update_available ?? false}
             collapseMode={(prefs.sidebar.collapse_mode || 'small') as 'small' | 'hidden'}
             width={sidebarWidth}
             onWidthChange={handleSidebarWidth}
@@ -1273,6 +1285,11 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             onLogout={onLogout}
             version={serverVersion}
             updateAvailable={updateAvailable}
+            binaryUpdate={selfUpdate.status}
+            onApplyUpdate={selfUpdate.apply}
+            updateApplying={selfUpdate.applying}
+            updateRestartMode={selfUpdate.restartMode}
+            updateError={selfUpdate.error}
           />
         </div>
       </div>

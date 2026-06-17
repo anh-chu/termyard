@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Settings } from './Settings'
+import type { UpdateStatus } from '../hooks/useSelfUpdate'
 
 type Bucket = 'look' | 'yard' | 'alerts' | 'network'
 
@@ -12,6 +13,11 @@ interface SettingsDrawerProps {
   onLogout?: () => void
   version?: string | null
   updateAvailable?: boolean
+  binaryUpdate?: UpdateStatus | null
+  onApplyUpdate?: () => Promise<void>
+  updateApplying?: boolean
+  updateRestartMode?: 'auto' | 'manual' | null
+  updateError?: string | null
 }
 
 const buckets: { id: Bucket; label: string }[] = [
@@ -21,7 +27,7 @@ const buckets: { id: Bucket; label: string }[] = [
   { id: 'network', label: 'System' },
 ]
 
-export function SettingsDrawer({ open, onClose, pushState, onPushSubscribe, onPushUnsubscribe, onLogout, version, updateAvailable }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, pushState, onPushSubscribe, onPushUnsubscribe, onLogout, version, updateAvailable, binaryUpdate, onApplyUpdate, updateApplying, updateRestartMode, updateError }: SettingsDrawerProps) {
   const [bucket, setBucket] = useState<Bucket>('look')
 
   useEffect(() => {
@@ -71,6 +77,11 @@ export function SettingsDrawer({ open, onClose, pushState, onPushSubscribe, onPu
             onLogout={onLogout}
             version={version}
             updateAvailable={updateAvailable}
+            binaryUpdate={binaryUpdate}
+            onApplyUpdate={onApplyUpdate}
+            updateApplying={updateApplying}
+            updateRestartMode={updateRestartMode}
+            updateError={updateError}
           />
         </div>
       </div>
