@@ -12,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/anh-chu/termyard/pkg/identity"
+	ws "github.com/anh-chu/termyard/pkg/ws"
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -142,6 +143,25 @@ func (h *Handler) HandlePeerStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.streamReg.Resolve(ps, conn)
+}
+
+// serveHostStream is the host end of a per-terminal data connection: it waits
+// for /ws/peer-stream to resolve a conn for this pending stream, then runs the
+// local PTY bridge against it. Single close path: this owns conn.Close.
+// ponytail: Phase 3 wires serveHostStream to MsgOpenTerminal + host-dials-back direction.
+func (h *Handler) serveHostStream(ps *PendingStream) {
+	if ps == nil {
+		return
+	}
+	var conn *websocket.Conn
+	select {
+	case conn = <-ps.resolved:
+	case <-time.After(pendingStreamTTL):
+		return
+	}
+	defer conn.Close()
+	log := logrus.WithFields(logrus.Fields{"stream": ps.StreamID, "session": ps.Session})
+	_ = ws.BridgePTY(conn, h.deps.TmuxClient.TmuxPath(), ps.Session, ps.Cols, ps.Rows, h.deps.ActTracker, log)
 }
 
 // authenticatePeer runs the ed25519 challenge-response and returns the

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
@@ -36,6 +37,91 @@ func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker) *
 	}
 }
 
+// BridgePTY spawns a tmux PTY for session and pumps it over an already-open
+// conn: PTY->conn (binary) in a goroutine, conn->PTY (control+binary) in the
+// caller's goroutine, answering browser heartbeat pings locally. It does NOT
+// upgrade and does NOT close conn — the caller owns conn's single Close.
+func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16, act *activity.Tracker, log *logrus.Entry) error {
+	// Spawn tmux attach in a PTY.
+	ptySess, err := tmux.NewPTYSession(tmuxPath, session, cols, rows)
+	if err != nil {
+		return err
+	}
+	defer ptySess.Close()
+
+	// writeMu serializes WS writes between the PTY reader goroutine and the
+	// heartbeat pong reply path below.
+	var writeMu sync.Mutex
+
+	// Read goroutine: PTY → WebSocket (binary messages)
+	done := make(chan struct{})
+	// ponytail: PTY exit or write error nudges conn.ReadMessage out so either side closing unwinds both loops.
+	go func() {
+		defer close(done)
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := ptySess.Read(buf)
+			if err != nil {
+				_ = conn.SetReadDeadline(time.Now())
+				return
+			}
+			// Track activity
+			if act != nil {
+				act.Record(session, n)
+			}
+			writeMu.Lock()
+			err = conn.WriteMessage(websocket.BinaryMessage, buf[:n])
+			writeMu.Unlock()
+			if err != nil {
+				_ = conn.SetReadDeadline(time.Now())
+				return
+			}
+		}
+	}()
+
+	// Write goroutine: WebSocket → PTY
+	// Text messages = JSON control, Binary messages = terminal I/O
+outer:
+	for {
+		msgType, message, err := conn.ReadMessage()
+		if err != nil {
+			if !websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.WithError(err).Debug("session ws read error")
+			}
+			break
+		}
+
+		switch msgType {
+		case websocket.TextMessage:
+			// Heartbeat from the browser liveness watchdog. Reply so the client
+			// can detect a half-open socket and reconnect.
+			if isPing(message) {
+				writeMu.Lock()
+				err := conn.WriteMessage(websocket.TextMessage, pongFrame)
+				writeMu.Unlock()
+				if err != nil {
+					break outer
+				}
+				continue
+			}
+			if err := tmux.HandlePTYControlMessage(ptySess, message); err != nil {
+				log.WithError(err).Debug("control message failed")
+			}
+
+		case websocket.BinaryMessage:
+			if _, err := ptySess.Write(message); err != nil {
+				log.WithError(err).Debug("PTY write failed")
+				break outer
+			}
+		}
+	}
+
+	ptySess.Close()
+	<-done
+	log.Info("session ws client disconnected")
+	return nil
+}
+
 // HandleSession handles a WebSocket connection for an entire tmux session via PTY.
 // Query params: name=<session>, cols=<cols>, rows=<rows>
 func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Request) {
@@ -64,78 +150,8 @@ func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Reques
 	log := logrus.WithField("session", sessionName)
 	log.Info("session ws client connected")
 
-	// Spawn tmux attach in a PTY
-	ptySess, err := tmux.NewPTYSession(h.tmuxPath, sessionName, uint16(cols), uint16(rows))
-	if err != nil {
+	if err := BridgePTY(conn, h.tmuxPath, sessionName, uint16(cols), uint16(rows), h.activityTracker, log); err != nil {
 		log.WithError(err).Error("failed to start PTY session")
 		conn.WriteMessage(websocket.TextMessage, []byte("\r\n[termyard: failed to attach to session]\r\n"))
-		return
 	}
-	defer ptySess.Close()
-
-	// writeMu serializes WS writes between the PTY reader goroutine and the
-	// heartbeat pong reply path below.
-	var writeMu sync.Mutex
-
-	// Read goroutine: PTY → WebSocket (binary messages)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := ptySess.Read(buf)
-			if err != nil {
-				return
-			}
-			// Track activity
-			if h.activityTracker != nil {
-				h.activityTracker.Record(sessionName, n)
-			}
-			writeMu.Lock()
-			err = conn.WriteMessage(websocket.BinaryMessage, buf[:n])
-			writeMu.Unlock()
-			if err != nil {
-				return
-			}
-		}
-	}()
-
-	// Write goroutine: WebSocket → PTY
-	// Text messages = JSON control, Binary messages = terminal I/O
-	for {
-		msgType, message, err := conn.ReadMessage()
-		if err != nil {
-			if !websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.WithError(err).Debug("session ws read error")
-			}
-			break
-		}
-
-		switch msgType {
-		case websocket.TextMessage:
-			// Heartbeat from the browser liveness watchdog. Reply so the client
-			// can detect a half-open socket and reconnect.
-			if isPing(message) {
-				writeMu.Lock()
-				err := conn.WriteMessage(websocket.TextMessage, pongFrame)
-				writeMu.Unlock()
-				if err != nil {
-					break
-				}
-				continue
-			}
-			if err := tmux.HandlePTYControlMessage(ptySess, message); err != nil {
-				log.WithError(err).Debug("control message failed")
-			}
-
-		case websocket.BinaryMessage:
-			if _, err := ptySess.Write(message); err != nil {
-				log.WithError(err).Debug("PTY write failed")
-				break
-			}
-		}
-	}
-
-	<-done
-	log.Info("session ws client disconnected")
 }
