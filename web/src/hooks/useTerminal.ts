@@ -5,7 +5,6 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ClipboardAddon, type IClipboardProvider, type ClipboardSelectionType } from '@xterm/addon-clipboard'
 import { usePreferences } from './usePreferences'
 import { getXtermTheme } from '../theme'
-import { feLog, feMsg } from '../lib/relayTrace'
 // xterm CSS is imported in main.tsx (before index.css) so our overrides win.
 
 // Monotonically increasing ID to track which connection is "current"
@@ -449,7 +448,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
     const wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
-    feLog('fe-connect', { session: sessionName, host: hostId, detail: `connId=${connId} cols=${cols} rows=${rows} hidden=${document.hidden} url=${wsUrl}` })
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -470,7 +468,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
       if (watchdogTimer.current) clearTimeout(watchdogTimer.current)
       watchdogTimer.current = window.setTimeout(() => {
         if (activeConnId.current !== connId) return
-        feLog('fe-watchdog-close', { session: sessionName, host: hostId, bytes: totalBytes, detail: `connId=${connId} no-traffic ${WATCHDOG_MS}ms msgs=${msgCount}` })
         // Stale socket — drop it so onclose schedules a reconnect.
         try { ws.close() } catch { /* ignored */ }
       }, WATCHDOG_MS)
@@ -479,12 +476,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
     ws.onopen = () => {
       // Stale connection — a newer connect() was called
       if (activeConnId.current !== connId) {
-        feLog('fe-ws-open-stale', { session: sessionName, host: hostId, detail: `connId=${connId} active=${activeConnId.current}` })
         ws.close()
         return
       }
       setTermConnected(true)
-      feLog('fe-ws-open', { session: sessionName, host: hostId, detail: `connId=${connId} rs=${ws.readyState} +${(performance.now() - tConnect).toFixed(0)}ms` })
       armWatchdog()
       if (heartbeatTimer.current) clearInterval(heartbeatTimer.current)
       heartbeatTimer.current = window.setInterval(() => {
@@ -502,17 +497,14 @@ export function useTerminal(sessionName: string, hostId?: string) {
         totalBytes += evt.data.byteLength
         const head = new Uint8Array(evt.data.slice(0, 48))
         const sample = Array.from(head).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0')).join('')
-        feMsg({ session: sessionName, host: hostId, bytes: evt.data.byteLength, seq: msgCount, detail: `total=${totalBytes} sample=${sample}` })
         if (!sawFirstByte) {
           sawFirstByte = true
-          feLog('fe-first-byte', { session: sessionName, host: hostId, bytes: evt.data.byteLength, detail: `connId=${connId} +${(performance.now() - tConnect).toFixed(0)}ms sample=${sample}` })
         }
         const before = term.buffer.active.length
         term.write(new Uint8Array(evt.data))
         const now = Date.now()
         if (now - lastSummary > 500) {
           lastSummary = now
-          feLog('fe-msg-summary', { session: sessionName, host: hostId, bytes: totalBytes, detail: `connId=${connId} msgs=${msgCount} cols=${term.cols} rows=${term.rows} buflen=${before}` })
         }
       } else {
         // Text frames are control messages (pong). Don't echo to the terminal.
@@ -521,7 +513,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
             const ctrl = JSON.parse(evt.data)
             if (ctrl && ctrl.type === 'pong') return
           } catch { /* not JSON — fall through and write raw */ }
-          feLog('fe-text-msg', { session: sessionName, host: hostId, detail: `connId=${connId} data=${evt.data.slice(0, 80)}` })
         }
         term.write(evt.data as string)
       }
@@ -531,10 +522,8 @@ export function useTerminal(sessionName: string, hostId?: string) {
       const detail = `connId=${connId} code=${evt.code} reason=${evt.reason || ''} clean=${evt.wasClean} msgs=${msgCount} hidden=${document.hidden} +${(performance.now() - tConnect).toFixed(0)}ms ${sawFirstByte ? 'painted' : 'never-painted'}`
       // Only handle if this is still the active connection
       if (activeConnId.current !== connId) {
-        feLog('fe-ws-close-stale', { session: sessionName, host: hostId, bytes: totalBytes, detail: `${detail} active=${activeConnId.current}` })
         return
       }
-      feLog('fe-ws-close', { session: sessionName, host: hostId, bytes: totalBytes, detail })
       if (heartbeatTimer.current) {
         clearInterval(heartbeatTimer.current)
         heartbeatTimer.current = undefined
@@ -569,7 +558,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
     }
 
     ws.onerror = (err) => {
-      feLog('fe-ws-error', { session: sessionName, host: hostId, detail: `connId=${connId} rs=${ws.readyState}` })
       console.error(`Terminal WS error: session ${sessionName}`, err)
     }
 
@@ -588,7 +576,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
 
     // Send resize events as JSON text messages
     term.onResize(({ cols, rows }) => {
-      feLog('fe-resize', { session: sessionName, host: hostId, detail: `connId=${connId} cols=${cols} rows=${rows} rs=${ws.readyState}` })
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
@@ -598,7 +585,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const disconnect = useCallback(() => {
     // Invalidate any active connection
     activeConnId.current = ++nextConnId
-    feLog('fe-disconnect', { session: sessionName, host: hostId, detail: `newActive=${activeConnId.current}` })
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current)
       reconnectTimer.current = undefined

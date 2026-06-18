@@ -26,7 +26,6 @@ import { usePreferencesProvider, usePreferences, PreferencesContext } from './ho
 import { useAuth } from './hooks/useAuth'
 import { useSessionAttrs } from './hooks/useSessionAttrs'
 import { Toasts, Toast } from './components/Toasts'
-import { RelayTracePanel } from './components/RelayTracePanel'
 import { useSelfUpdate, type UpdateStatus } from './hooks/useSelfUpdate'
 import { applyTheme } from './theme'
 import { sessionSignal } from './lib/sessionState'
@@ -1029,7 +1028,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   return (
     <div className="flex flex-col h-full w-full bg-background text-foreground relative">
-      <RelayTracePanel />
       <Toasts toasts={toasts} onDismiss={dismissToast} />
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {portForwardsOpen && (

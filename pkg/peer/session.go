@@ -445,7 +445,6 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 	}
 	if dial {
 		addr := deps.Manager.GetPeerAddress(pc.HostID)
-		Trace("host", p.StreamID, p.Session, "stream-dial", 0, addr)
 		c, err := DialPeerStream(context.Background(), addr, deps.Identity, p.Token)
 		if err != nil {
 			log.WithError(err).Debug("host data-conn dial failed")
@@ -458,16 +457,13 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 		}
 		ps := NewPendingStream(p.StreamID, p.Session, p.Cols, p.Rows, deps.Manager.LocalID(), p.ViewerHostID, pc.HostID)
 		deps.StreamReg.Register(p.Token, ps)
-		Trace("host", p.StreamID, p.Session, "stream-wait", 0, pc.HostID)
 		c, ok := ps.WaitResolved(streamSetupTimeout)
 		if !ok {
-			Trace("host", p.StreamID, p.Session, "stream-timeout", 0, pc.HostID)
 			return
 		}
 		conn = c
 	}
 	defer conn.Close()
-	Trace("host", p.StreamID, p.Session, "bridge-start", 0, "")
 	_ = ws.BridgePTY(conn, deps.TmuxClient.TmuxPath(), p.Session, p.Cols, p.Rows, deps.ActTracker, log)
 }
 

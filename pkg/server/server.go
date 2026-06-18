@@ -330,10 +330,8 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		}
 	}
 
-	peer.Trace("viewer", "", sessionName, "open-begin", 0, fmt.Sprintf("host=%s cols=%d rows=%d remote=%s", hostID, cols, rows, r.RemoteAddr))
 	peerConn := opts.PeerMgr.GetPeerConnection(hostID)
 	if peerConn == nil {
-		peer.Trace("viewer", "", sessionName, "open-502", 0, "no live peer conn for host="+hostID)
 		http.Error(w, "peer not connected", http.StatusBadGateway)
 		return
 	}
@@ -347,10 +345,8 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		return
 	}
 	defer browserWS.Close()
+	_ = serveViewerPerStream(browserWS, peerConn, opts, hostID, sessionName, cols, rows)
 
-	if !serveViewerPerStream(browserWS, peerConn, opts, hostID, sessionName, cols, rows) {
-		peer.Trace("viewer", "", sessionName, "per-stream-failed", 0, hostID)
-	}
 }
 
 func serveViewerPerStream(browserWS *websocket.Conn, peerConn *peer.PeerConnection, opts *Options, hostID, session string, cols, rows uint16) bool {
@@ -373,7 +369,6 @@ func serveViewerPerStream(browserWS *websocket.Conn, peerConn *peer.PeerConnecti
 	var conn *websocket.Conn
 	if dial {
 		addr := opts.PeerMgr.GetPeerAddress(hostID)
-		peer.Trace("viewer", streamID, session, "stream-dial", 0, addr)
 		c, err := peer.DialPeerStream(context.Background(), addr, opts.Identity, token)
 		if err != nil {
 			log.WithError(err).Debug("viewer data-conn dial failed")
@@ -384,25 +379,20 @@ func serveViewerPerStream(browserWS *websocket.Conn, peerConn *peer.PeerConnecti
 			conn.Close()
 			return false
 		}
-		peer.Trace("viewer", streamID, session, "open-terminal-sent", 0, hostID)
 	} else {
 		ps := peer.NewPendingStream(streamID, session, cols, rows, hostID, opts.PeerMgr.LocalID(), hostID)
 		opts.StreamReg.Register(token, ps)
 		if !peerConn.EnqueueHi(openMsg) {
 			return false
 		}
-		peer.Trace("viewer", streamID, session, "open-terminal-sent", 0, hostID)
 		c, ok := ps.WaitResolved(peer.StreamSetupTimeout())
 		if !ok {
-			peer.Trace("viewer", streamID, session, "stream-timeout", 0, hostID)
 			return false
 		}
 		conn = c
 	}
 	defer conn.Close()
-	peer.Trace("viewer", streamID, session, "splice-start", 0, hostID)
 	ws.SpliceConns(browserWS, conn, log)
-	peer.Trace("viewer", streamID, session, "splice-end", 0, hostID)
 	return true
 }
 
@@ -626,9 +616,6 @@ func setupHub(opts *Options) *ws.Hub {
 	if opts.ActivityTracker != nil || peerActivity != nil {
 		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
 	}
-	if opts.PeerMgr != nil {
-		peer.SetTraceHost(opts.PeerMgr.LocalName())
-	}
 	return hub
 }
 
@@ -698,35 +685,6 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				"version": common.VERSION,
 				"commit":  common.COMMIT,
 			})
-		})
-		// Relay trace — public debug endpoint. GET dumps the in-memory ring
-		// buffer of remote-PTY lifecycle events (oldest first) as JSON so both
-		// the frontend debug panel and a curl from either host can read the
-		// full timeline without grepping journald. POST lets the browser push
-		// its own ws lifecycle events into the same buffer. DELETE clears it.
-		r.Get("/debug/relay-trace", func(w http.ResponseWriter, r *http.Request) {
-			hostName := ""
-			if opts.PeerMgr != nil {
-				hostName = opts.PeerMgr.LocalName()
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
-				"host":   hostName,
-				"events": peer.TraceSnapshot(r.URL.Query().Get("session")),
-			})
-		})
-		r.Post("/debug/relay-trace", func(w http.ResponseWriter, r *http.Request) {
-			var e peer.TraceEvent
-			if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&e); err != nil {
-				http.Error(w, "bad request", http.StatusBadRequest)
-				return
-			}
-			peer.TraceAppendExternal(e)
-			w.WriteHeader(http.StatusNoContent)
-		})
-		r.Delete("/debug/relay-trace", func(w http.ResponseWriter, r *http.Request) {
-			peer.TraceClear()
-			w.WriteHeader(http.StatusNoContent)
 		})
 		// Tool event ingest — no auth required (used by local CLI via unix socket)
 		r.Post("/tool-event", func(w http.ResponseWriter, r *http.Request) {
