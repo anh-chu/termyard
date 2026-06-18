@@ -1696,6 +1696,7 @@ func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 	// Peer WebSocket routes (no browser auth — peers use their own challenge-response)
 	if opts.PeerHandler != nil {
 		r.Get("/ws/peer", opts.PeerHandler.HandlePeer)
+		r.Get("/ws/peer-stream", opts.PeerHandler.HandlePeerStream)
 	}
 }
 

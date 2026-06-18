@@ -431,7 +431,6 @@ func (m *Manager) TryRegisterPeer(id, name, publicKey, address string, conn *Pee
 	return true
 }
 
-// UnregisterPeer marks a peer as disconnected
 func (m *Manager) UnregisterPeer(id string) {
 	m.mu.Lock()
 	h, ok := m.hosts[id]
@@ -545,7 +544,7 @@ func (m *Manager) GetPeerConnection(id string) *PeerConnection {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if h, ok := m.hosts[id]; ok {
+	if h, ok := m.hosts[id]; ok && h.Conn != nil {
 		return h.Conn
 	}
 	return nil
@@ -556,6 +555,7 @@ func (m *Manager) GetPeerConnection(id string) *PeerConnection {
 func (m *Manager) ConnectedPeers() []*PeerConnection {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	out := make([]*PeerConnection, 0, len(m.hosts))
 	for id, h := range m.hosts {
 		if id == m.localID {

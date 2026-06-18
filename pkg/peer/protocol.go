@@ -70,6 +70,16 @@ const (
 	MsgSessionAttrsDelta = "session-attrs-delta"
 )
 
+// Message types reserved for future per-terminal stream setup.
+const (
+	// MsgOpenTerminal asks a peer to prepare a dedicated PTY data connection,
+	// correlated by one-time token. Sent over the control link.
+	MsgOpenTerminal = "open-terminal"
+	// MsgStreamToken is the first frame on /ws/peer-stream after auth; it
+	// presents the correlation token. It does NOT authorize.
+	MsgStreamToken = "stream-token"
+)
+
 // Message is the envelope for all control WebSocket messages
 type Message struct {
 	Type    string          `json:"type"`
@@ -146,6 +156,21 @@ type PTYOpenPayload struct {
 	Session  string `json:"session"`
 	Cols     uint16 `json:"cols"`
 	Rows     uint16 `json:"rows"`
+}
+
+// OpenTerminalPayload asks a peer to prepare a dedicated PTY data connection.
+type OpenTerminalPayload struct {
+	StreamID     string `json:"stream_id"`
+	Session      string `json:"session"`
+	Cols         uint16 `json:"cols"`
+	Rows         uint16 `json:"rows"`
+	Token        string `json:"token"`
+	ViewerHostID string `json:"viewer_host_id"`
+}
+
+// StreamTokenPayload carries the correlation token on /ws/peer-stream.
+type StreamTokenPayload struct {
+	Token string `json:"token"`
 }
 
 // PTYClosePayload requests a peer to close a PTY session

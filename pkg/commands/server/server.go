@@ -229,6 +229,8 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	reconciler.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 
 	ptyRelay := peer.NewPTYRelay()
+
+	streamReg := peer.NewStreamRegistry()
 	ptyManager := peer.NewPTYManager(client.TmuxPath(), actTracker)
 
 	deps := peer.SessionDeps{
@@ -243,7 +245,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PTYRelay:    ptyRelay,
 	}
 
-	peerHandler := peer.NewHandler(deps)
+	peerHandler := peer.NewHandler(deps, streamReg)
 
 	supervisor := peer.NewLinkSupervisor(deps)
 	supervisor.Start(ctx)
