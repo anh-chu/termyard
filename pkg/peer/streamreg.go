@@ -14,8 +14,6 @@ import (
 
 const streamSetupTimeout = 20 * time.Second
 
-// ponytail: capability negotiation stays out of Phase 1; Phase 3 adds it when the path branches.
-
 type PendingStream struct {
 	StreamID     string
 	Session      string

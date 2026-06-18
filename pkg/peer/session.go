@@ -438,7 +438,7 @@ func forwardPeerStateChanges(ctx context.Context, pc *PeerConnection, deps Sessi
 // handleOpenTerminal is the host end of a per-terminal data connection.
 func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
 	log = log.WithFields(logrus.Fields{"stream": p.StreamID, "session": p.Session})
-	dial, _ := PlanStream(true, pc.Role == RoleDialer)
+	dial := pc.Role == RoleDialer
 	var conn *websocket.Conn
 	if deps.Manager == nil || deps.TmuxClient == nil || deps.Identity == nil {
 		return

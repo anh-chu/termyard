@@ -365,7 +365,7 @@ func serveViewerPerStream(browserWS *websocket.Conn, peerConn *peer.PeerConnecti
 		ViewerHostID: opts.PeerMgr.LocalID(),
 	})
 
-	dial, _ := peer.PlanStream(false, peerConn.Role == peer.RoleDialer)
+	dial := peerConn.Role == peer.RoleDialer
 	var conn *websocket.Conn
 	if dial {
 		addr := opts.PeerMgr.GetPeerAddress(hostID)
