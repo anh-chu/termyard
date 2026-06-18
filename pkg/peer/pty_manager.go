@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -46,11 +47,15 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 		"session": req.Session,
 	})
 
+	Trace("listener", req.StreamID, req.Session, "pty-open-received", 0, "")
+
 	ptySess, err := tmux.NewPTYSession(pm.tmuxPath, req.Session, req.Cols, req.Rows)
 	if err != nil {
 		log.WithError(err).Error("failed to spawn PTY")
+		Trace("listener", req.StreamID, req.Session, "pty-spawn-error", 0, err.Error())
 		return
 	}
+	Trace("listener", req.StreamID, req.Session, "pty-spawned", 0, "")
 
 	active := &ActivePTY{
 		StreamID: req.StreamID,
@@ -67,7 +72,11 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 	// Reader: PTY -> control WS as MsgPTYOutput.
 	go func() {
 		buf := make([]byte, 32*1024)
+		first := true
+		var totalRead int
+		var reads int
 		defer func() {
+			Trace("listener", req.StreamID, req.Session, "pty-reader-exit", totalRead, fmt.Sprintf("reads=%d", reads))
 			pm.cleanup(req.StreamID)
 		}()
 		for {
@@ -78,7 +87,17 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 			}
 			n, err := ptySess.Read(buf)
 			if err != nil {
+				Trace("listener", req.StreamID, req.Session, "pty-read-error", totalRead, err.Error())
 				return
+			}
+			totalRead += n
+			reads++
+			if first {
+				// First bytes the PTY produced = first paint generated. Compare
+				// against the viewer's deliver-first to isolate read vs deliver
+				// latency.
+				Trace("listener", req.StreamID, req.Session, "first-read", n, "")
+				first = false
 			}
 			if pm.activity != nil {
 				pm.activity.Record(req.Session, n)
@@ -86,6 +105,7 @@ func (pm *PTYManager) Open(req PTYOpenPayload, pc *PeerConnection) {
 			// Binary frame on the hi-priority lane: no base64, no JSON.
 			frame := EncodePTYFrame(FramePTYOutput, req.StreamID, buf[:n])
 			if !pc.EnqueueBinaryHi(frame) {
+				Trace("listener", req.StreamID, req.Session, "enqueue-fail", n, "hi-lane full / pc closed")
 				return
 			}
 		}

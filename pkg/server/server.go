@@ -331,8 +331,10 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	}
 
 	// Get the peer connection
+	peer.Trace("viewer", "", sessionName, "open-begin", 0, fmt.Sprintf("host=%s cols=%d rows=%d remote=%s", hostID, cols, rows, r.RemoteAddr))
 	peerConn := opts.PeerMgr.GetPeerConnection(hostID)
 	if peerConn == nil {
+		peer.Trace("viewer", "", sessionName, "open-502", 0, "no live peer conn for host="+hostID)
 		http.Error(w, "peer not connected", http.StatusBadGateway)
 		return
 	}
@@ -348,16 +350,10 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	}
 	defer browserWS.Close()
 
-	// Generate stream ID and register the browser binding so MsgPTYOutput
-	// from the peer can be routed back to this WebSocket.
 	streamID := peer.GenerateStreamID()
-	opts.PTYRelay.Register(streamID, hostID, browserWS)
+	opts.PTYRelay.Register(streamID, hostID, sessionName, browserWS)
 	defer opts.PTYRelay.Remove(streamID)
 
-	// Tell the peer to open a PTY. This gates the whole stream, so it rides
-	// the hi lane: on a busy mutual-view link the lo lane can be starved by
-	// continuous PTY output, which would otherwise leave the open request
-	// stuck and the terminal blank.
 	msg, _ := peer.NewMessage(peer.MsgPTYOpen, peer.PTYOpenPayload{
 		StreamID: streamID,
 		Session:  sessionName,
@@ -365,14 +361,13 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		Rows:     rows,
 	})
 	if !peerConn.EnqueueHi(msg) {
+		peer.Trace("viewer", streamID, sessionName, "pty-open-drop", 0, "hi-lane full / pc closed")
 		return
 	}
-
-	// Pump keystrokes/control frames from browser to peer; output flows the
-	// other way via MsgPTYOutput dispatched in handleSessionMessage.
+	peer.Trace("viewer", streamID, sessionName, "pty-open-sent", 0, hostID)
 	opts.PTYRelay.PumpBrowserToPeer(streamID, browserWS, peerConn)
 
-	// Tell the peer to close the PTY.
+	peer.Trace("viewer", streamID, sessionName, "pty-close-sent", 0, hostID)
 	closeMsg, _ := peer.NewMessage(peer.MsgPTYClose, peer.PTYClosePayload{StreamID: streamID})
 	peerConn.EnqueueHi(closeMsg)
 }
@@ -566,6 +561,9 @@ func Run(ctx context.Context, opts *Options) error {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.StripSlashes)
 	r.Use(chimiddleware.RequestID)
+	// Diagnostic: live goroutine/heap profiles at /debug/pprof. Read-only, no
+	// behavior change; used to pin where a wedged peer link's goroutines park.
+	r.Mount("/debug", chimiddleware.Profiler())
 	registerAPIRoutes(r, opts, hub)
 
 	// WebSocket routes (protected by auth if enabled)
@@ -593,6 +591,9 @@ func setupHub(opts *Options) *ws.Hub {
 	}
 	if opts.ActivityTracker != nil || peerActivity != nil {
 		hub.SetActivityTracker(opts.ActivityTracker, peerActivity, localHostID, false)
+	}
+	if opts.PeerMgr != nil {
+		peer.SetTraceHost(opts.PeerMgr.LocalName())
 	}
 	return hub
 }
@@ -664,7 +665,35 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				"commit":  common.COMMIT,
 			})
 		})
-
+		// Relay trace — public debug endpoint. GET dumps the in-memory ring
+		// buffer of remote-PTY lifecycle events (oldest first) as JSON so both
+		// the frontend debug panel and a curl from either host can read the
+		// full timeline without grepping journald. POST lets the browser push
+		// its own ws lifecycle events into the same buffer. DELETE clears it.
+		r.Get("/debug/relay-trace", func(w http.ResponseWriter, r *http.Request) {
+			hostName := ""
+			if opts.PeerMgr != nil {
+				hostName = opts.PeerMgr.LocalName()
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"host":   hostName,
+				"events": peer.TraceSnapshot(r.URL.Query().Get("session")),
+			})
+		})
+		r.Post("/debug/relay-trace", func(w http.ResponseWriter, r *http.Request) {
+			var e peer.TraceEvent
+			if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&e); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			peer.TraceAppendExternal(e)
+			w.WriteHeader(http.StatusNoContent)
+		})
+		r.Delete("/debug/relay-trace", func(w http.ResponseWriter, r *http.Request) {
+			peer.TraceClear()
+			w.WriteHeader(http.StatusNoContent)
+		})
 		// Tool event ingest — no auth required (used by local CLI via unix socket)
 		r.Post("/tool-event", func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
