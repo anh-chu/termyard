@@ -4,13 +4,13 @@ package common
 var NAME = "termyard"
 
 // SUMMARY of the Version
-var SUMMARY = "v1.2.1" // x-release-please-version
+var SUMMARY = "v2.0.0" // x-release-please-version
 
 // BRANCH of the Version
 var BRANCH = "dev"
 
 // VERSION of Release
-var VERSION = "1.4.1" // x-release-please-version
+var VERSION = "2.0.0" // x-release-please-version
 
 var COMMIT = "dirty"
 
