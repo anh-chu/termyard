@@ -71,7 +71,6 @@ type Options struct {
 	PeerStore        *identity.PeerStore
 	PeerMgr          *peer.Manager
 	PeerHandler      *peer.Handler
-	PTYRelay         *peer.PTYRelay
 	StreamReg        *peer.StreamRegistry
 	LinkSupervisor   *peer.LinkSupervisor
 	Detector         *toolevents.Detector
@@ -349,32 +348,9 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	}
 	defer browserWS.Close()
 
-	if peerConn.HasCap(peer.CapPerStream) && opts.StreamReg != nil {
-		if serveViewerPerStream(browserWS, peerConn, opts, hostID, sessionName, cols, rows) {
-			return
-		}
-		peer.Trace("viewer", "", sessionName, "per-stream-fallback", 0, hostID)
+	if !serveViewerPerStream(browserWS, peerConn, opts, hostID, sessionName, cols, rows) {
+		peer.Trace("viewer", "", sessionName, "per-stream-failed", 0, hostID)
 	}
-
-	streamID := peer.GenerateStreamID()
-	opts.PTYRelay.Register(streamID, hostID, sessionName, browserWS)
-	defer opts.PTYRelay.Remove(streamID)
-
-	msg, _ := peer.NewMessage(peer.MsgPTYOpen, peer.PTYOpenPayload{
-		StreamID: streamID,
-		Session:  sessionName,
-		Cols:     cols,
-		Rows:     rows,
-	})
-	if !peerConn.EnqueueHi(msg) {
-		peer.Trace("viewer", streamID, sessionName, "pty-open-drop", 0, "hi-lane full / pc closed")
-		return
-	}
-	peer.Trace("viewer", streamID, sessionName, "pty-open-sent", 0, hostID)
-	opts.PTYRelay.PumpBrowserToPeer(streamID, browserWS, peerConn)
-	peer.Trace("viewer", streamID, sessionName, "pty-close-sent", 0, hostID)
-	closeMsg, _ := peer.NewMessage(peer.MsgPTYClose, peer.PTYClosePayload{StreamID: streamID})
-	peerConn.EnqueueHi(closeMsg)
 }
 
 func serveViewerPerStream(browserWS *websocket.Conn, peerConn *peer.PeerConnection, opts *Options, hostID, session string, cols, rows uint16) bool {

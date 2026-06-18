@@ -228,10 +228,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	silenceMonitor.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 	reconciler.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 
-	ptyRelay := peer.NewPTYRelay()
-
 	streamReg := peer.NewStreamRegistry()
-	ptyManager := peer.NewPTYManager(client.TmuxPath(), actTracker)
 
 	deps := peer.SessionDeps{
 		Manager:     peerMgr,
@@ -241,8 +238,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		ToolTracker: tracker,
 		PeerStore:   peerStore,
 		TmuxClient:  client,
-		PTYManager:  ptyManager,
-		PTYRelay:    ptyRelay,
 		StreamReg:   streamReg,
 	}
 
@@ -269,7 +264,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PeerStore:        peerStore,
 		PeerMgr:          peerMgr,
 		PeerHandler:      peerHandler,
-		PTYRelay:         ptyRelay,
 		StreamReg:        streamReg,
 		LinkSupervisor:   supervisor,
 		Detector:         detector,

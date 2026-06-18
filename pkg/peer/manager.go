@@ -41,8 +41,7 @@ type HostState struct {
 // happens in the producer goroutine (off the single writer) so the writer only
 // does the syscall.
 type wireFrame struct {
-	binary bool
-	data   []byte
+	data []byte
 }
 
 // Queue depths. The hi lane carries interactive PTY traffic (keystrokes,
@@ -91,16 +90,6 @@ func (pc *PeerConnection) Done() <-chan struct{} {
 	return pc.done
 }
 
-// HasCap reports whether peer advertised capability c in its hello.
-func (pc *PeerConnection) HasCap(c string) bool {
-	for _, x := range pc.Caps {
-		if x == c {
-			return true
-		}
-	}
-	return false
-}
-
 // HiLane / LoLane expose the lanes to the writer goroutine for priority drain.
 func (pc *PeerConnection) HiLane() <-chan wireFrame { return pc.hi }
 func (pc *PeerConnection) LoLane() <-chan wireFrame { return pc.lo }
@@ -126,7 +115,7 @@ func (pc *PeerConnection) Enqueue(msg *Message) bool {
 	if err != nil {
 		return false
 	}
-	return pc.enqueue(pc.lo, wireFrame{binary: false, data: data})
+	return pc.enqueue(pc.lo, wireFrame{data: data})
 }
 
 // EnqueueHi best-effort queues a small interactive JSON message (e.g. PTY
@@ -136,13 +125,7 @@ func (pc *PeerConnection) EnqueueHi(msg *Message) bool {
 	if err != nil {
 		return false
 	}
-	return pc.enqueue(pc.hi, wireFrame{binary: false, data: data})
-}
-
-// EnqueueBinaryHi best-effort queues a pre-encoded binary frame (PTY data) on
-// the high-priority lane. data must be owned by the caller (not reused).
-func (pc *PeerConnection) EnqueueBinaryHi(data []byte) bool {
-	return pc.enqueue(pc.hi, wireFrame{binary: true, data: data})
+	return pc.enqueue(pc.hi, wireFrame{data: data})
 }
 
 // Close marks the connection closed. Idempotent. The lanes are never closed

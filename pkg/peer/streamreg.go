@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"sync"
 	"time"
@@ -95,6 +96,13 @@ func NewToken() string {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(buf)
+}
+
+// GenerateStreamID creates a random stream ID.
+func GenerateStreamID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func streamDeadline(ctx context.Context, fallback time.Duration) time.Time {

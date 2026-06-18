@@ -39,12 +39,6 @@ const (
 	MsgPeerConnected = "peer-connected"
 	// MsgPeerDisconnected notifies that a peer left
 	MsgPeerDisconnected = "peer-disconnected"
-	// MsgPTYOpen requests the peer to spawn a PTY
-	MsgPTYOpen = "pty-open"
-	// MsgPTYClose requests the peer to close a PTY
-	MsgPTYClose = "pty-close"
-	// MsgPTYResize requests the peer to resize a PTY
-	MsgPTYResize = "pty-resize"
 	// MsgSessionAction forwards an API action to the peer
 	MsgSessionAction = "session-action"
 	// MsgRequestState asks the peer for a full state refresh
@@ -52,15 +46,6 @@ const (
 	// MsgForget notifies the receiver that the sender is forgetting them.
 	// Receiver should remove sender from its peer store and close the link.
 	MsgForget = "forget"
-	// MsgPTYOutput carries PTY output bytes from the listener (where the
-	// session lives) back to the dialer (where the browser is). Multiplexed
-	// over the control WS so we never need a back-dial.
-	MsgPTYOutput = "pty-output"
-	// MsgPTYInput carries keystroke/input bytes from the dialer (browser) to
-	// the listener (PTY).
-	MsgPTYInput = "pty-input"
-	// MsgPTYControl carries a JSON control frame (e.g. resize) for a PTY.
-	MsgPTYControl = "pty-control"
 	// MsgSessionAttrsSnapshot carries the full shared session-attribute map
 	// (background/hidden per session key) to a freshly-connected peer for
 	// per-key last-write-wins reconciliation.
@@ -162,14 +147,6 @@ type PeerNotifyPayload struct {
 	Name string `json:"name"`
 }
 
-// PTYOpenPayload requests a peer to spawn a PTY session
-type PTYOpenPayload struct {
-	StreamID string `json:"stream_id"`
-	Session  string `json:"session"`
-	Cols     uint16 `json:"cols"`
-	Rows     uint16 `json:"rows"`
-}
-
 // OpenTerminalPayload asks a peer to prepare a dedicated PTY data connection.
 type OpenTerminalPayload struct {
 	StreamID     string `json:"stream_id"`
@@ -183,32 +160,6 @@ type OpenTerminalPayload struct {
 // StreamTokenPayload carries the correlation token on /ws/peer-stream.
 type StreamTokenPayload struct {
 	Token string `json:"token"`
-}
-
-// PTYClosePayload requests a peer to close a PTY session
-type PTYClosePayload struct {
-	StreamID string `json:"stream_id"`
-}
-
-// PTYResizePayload requests a peer to resize a PTY session
-type PTYResizePayload struct {
-	StreamID string `json:"stream_id"`
-	Cols     uint16 `json:"cols"`
-	Rows     uint16 `json:"rows"`
-}
-
-// PTYDataPayload carries opaque bytes for one PTY stream over the control WS.
-// Used both directions: MsgPTYOutput (listener→dialer) and MsgPTYInput
-// (dialer→listener). Data is base64-encoded so it fits in the JSON envelope.
-type PTYDataPayload struct {
-	StreamID string `json:"stream_id"`
-	Data     string `json:"data"`
-}
-
-// PTYControlPayload carries a JSON control frame (e.g. resize) for a PTY.
-type PTYControlPayload struct {
-	StreamID string `json:"stream_id"`
-	Control  string `json:"control"`
 }
 
 // SessionAttr is the shared attribute set for one global session key. Mirrors
@@ -236,40 +187,6 @@ type SessionAttrsDeltaPayload struct {
 type SessionActionPayload struct {
 	Action string          `json:"action"` // new, rename, select-window
 	Params json.RawMessage `json:"params"`
-}
-
-// Binary frame types. PTY data bypasses the JSON envelope entirely: it is
-// sent as a WebSocket BinaryMessage with a tiny header so the hot path does
-// no base64 inflation and no JSON marshal/unmarshal per keystroke or chunk.
-//
-// Wire layout: [1B type][1B streamIDLen][streamID bytes][raw payload...]
-const (
-	FramePTYOutput byte = 1 // listener -> dialer (PTY stdout)
-	FramePTYInput  byte = 2 // dialer  -> listener (keystrokes)
-)
-
-// EncodePTYFrame builds a binary PTY frame. The returned slice is owned by the
-// caller (data is copied), so reusing the source buffer afterwards is safe.
-func EncodePTYFrame(frameType byte, streamID string, data []byte) []byte {
-	sid := []byte(streamID)
-	buf := make([]byte, 2+len(sid)+len(data))
-	buf[0] = frameType
-	buf[1] = byte(len(sid))
-	copy(buf[2:], sid)
-	copy(buf[2+len(sid):], data)
-	return buf
-}
-
-// DecodePTYFrame parses a binary PTY frame. data aliases buf; copy if retained.
-func DecodePTYFrame(buf []byte) (frameType byte, streamID string, data []byte, ok bool) {
-	if len(buf) < 2 {
-		return 0, "", nil, false
-	}
-	sl := int(buf[1])
-	if len(buf) < 2+sl {
-		return 0, "", nil, false
-	}
-	return buf[0], string(buf[2 : 2+sl]), buf[2+sl:], true
 }
 
 // NewMessage creates a Message with a typed payload

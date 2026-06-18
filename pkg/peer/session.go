@@ -2,7 +2,6 @@ package peer
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -66,8 +65,6 @@ type SessionDeps struct {
 	ToolTracker *toolevents.Tracker
 	PeerStore   *identity.PeerStore
 	TmuxClient  *tmux.Client
-	PTYManager  *PTYManager
-	PTYRelay    *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
 	StreamReg   *StreamRegistry
 	AttrsSink   SessionAttrsSink
 	BrowserHub  BrowserBroadcaster
@@ -86,11 +83,7 @@ func (w *connWriter) writeFrame(f wireFrame) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	_ = w.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	msgType := websocket.TextMessage
-	if f.binary {
-		msgType = websocket.BinaryMessage
-	}
-	err := w.conn.WriteMessage(msgType, f.data)
+	err := w.conn.WriteMessage(websocket.TextMessage, f.data)
 	_ = w.conn.SetWriteDeadline(time.Time{})
 	return err
 }
@@ -223,17 +216,12 @@ func runSession(
 	go forwardPeerStateChanges(sessionCtx, pc, deps, peerID)
 
 	for {
-		msgType, raw, err := conn.ReadMessage()
+		_, raw, err := conn.ReadMessage()
 		if err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				log.WithError(err).Debug("session read error")
 			}
 			return err
-		}
-		// Binary frames are PTY data — dispatch directly, skipping JSON entirely.
-		if msgType == websocket.BinaryMessage {
-			handleBinaryFrame(raw, deps)
-			continue
 		}
 		var msg Message
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -447,25 +435,6 @@ func forwardPeerStateChanges(ctx context.Context, pc *PeerConnection, deps Sessi
 	}
 }
 
-// handleBinaryFrame routes a binary PTY frame straight to the PTY layer with
-// no JSON parse and no base64 decode.
-func handleBinaryFrame(raw []byte, deps SessionDeps) {
-	frameType, streamID, data, ok := DecodePTYFrame(raw)
-	if !ok {
-		return
-	}
-	switch frameType {
-	case FramePTYOutput:
-		if deps.PTYRelay != nil {
-			deps.PTYRelay.DeliverOutput(streamID, data)
-		}
-	case FramePTYInput:
-		if deps.PTYManager != nil {
-			deps.PTYManager.Write(streamID, data)
-		}
-	}
-}
-
 // handleOpenTerminal is the host end of a per-terminal data connection.
 func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
 	log = log.WithFields(logrus.Fields{"stream": p.StreamID, "session": p.Session})
@@ -601,65 +570,6 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 		}
 		deps.Manager.UnregisterPeer(p.ID)
 
-	case MsgPTYOpen:
-		var p PTYOpenPayload
-		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			return
-		}
-		if deps.PTYManager != nil {
-			go deps.PTYManager.Open(p, pc)
-		}
-
-	case MsgPTYInput:
-		var p PTYDataPayload
-		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			return
-		}
-		if deps.PTYManager != nil {
-			data, derr := base64.StdEncoding.DecodeString(p.Data)
-			if derr == nil {
-				deps.PTYManager.Write(p.StreamID, data)
-			}
-		}
-
-	case MsgPTYControl:
-		var p PTYControlPayload
-		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			return
-		}
-		if deps.PTYManager != nil {
-			deps.PTYManager.HandleControl(p.StreamID, []byte(p.Control))
-		}
-
-	case MsgPTYOutput:
-		var p PTYDataPayload
-		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			return
-		}
-		if deps.PTYRelay != nil {
-			data, derr := base64.StdEncoding.DecodeString(p.Data)
-			if derr == nil {
-				deps.PTYRelay.DeliverOutput(p.StreamID, data)
-			}
-		}
-
-	case MsgPTYClose:
-		var p PTYClosePayload
-		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			return
-		}
-		if deps.PTYManager != nil {
-			deps.PTYManager.Close(p.StreamID)
-		}
-
-	case MsgPTYResize:
-		var p PTYResizePayload
-		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			return
-		}
-		if deps.PTYManager != nil {
-			deps.PTYManager.Resize(p.StreamID, p.Cols, p.Rows)
-		}
 	case MsgOpenTerminal:
 		var p OpenTerminalPayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {

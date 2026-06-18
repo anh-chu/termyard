@@ -32,19 +32,12 @@ type traceRing struct {
 var (
 	relayTrace = &traceRing{max: 4000}
 	traceHost  string
-	// dedup keeps hot per-frame events (deliver, no-binding) to one trace per
-	// stream so a firehose can't flood the buffer. Cleared on Register/Remove.
-	traceDedup = struct {
-		sync.Mutex
-		seen map[string]bool
-	}{seen: map[string]bool{}}
 )
 
 // SetTraceHost records this process's host name for trace attribution.
 func SetTraceHost(name string) { traceHost = name }
 
-// Trace records one lifecycle event. O(1) append under a short lock; safe on
-// hot paths via the once-per-stream gates in the callers.
+// Trace records one lifecycle event. O(1) append under a short lock.
 func Trace(side, stream, session, event string, nbytes int, detail string) {
 	now := time.Now()
 	e := TraceEvent{
@@ -65,30 +58,6 @@ func Trace(side, stream, session, event string, nbytes int, detail string) {
 	}
 	relayTrace.buf = append(relayTrace.buf, e)
 	relayTrace.mu.Unlock()
-}
-
-// traceOnce records an event at most once per (stream,event) until the gate is
-// reset. Used for per-frame hot paths (first deliver, first no-binding drop).
-func traceOnce(side, stream, session, event string, nbytes int, detail string) {
-	key := stream + "|" + event
-	traceDedup.Lock()
-	if traceDedup.seen[key] {
-		traceDedup.Unlock()
-		return
-	}
-	traceDedup.seen[key] = true
-	traceDedup.Unlock()
-	Trace(side, stream, session, event, nbytes, detail)
-}
-
-// traceResetStream clears the once-gates for a stream so a re-registered
-// stream id traces its first deliver/drop afresh.
-func traceResetStream(stream string) {
-	traceDedup.Lock()
-	for _, ev := range []string{"deliver-first", "deliver-no-binding"} {
-		delete(traceDedup.seen, stream+"|"+ev)
-	}
-	traceDedup.Unlock()
 }
 
 // TraceSnapshot returns a copy of buffered events, optionally filtered to a
@@ -130,7 +99,4 @@ func TraceClear() {
 	relayTrace.mu.Lock()
 	relayTrace.buf = relayTrace.buf[:0]
 	relayTrace.mu.Unlock()
-	traceDedup.Lock()
-	traceDedup.seen = map[string]bool{}
-	traceDedup.Unlock()
 }
