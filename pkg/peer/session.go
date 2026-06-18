@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	ws "github.com/anh-chu/termyard/pkg/ws"
+
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
@@ -66,6 +68,7 @@ type SessionDeps struct {
 	TmuxClient  *tmux.Client
 	PTYManager  *PTYManager
 	PTYRelay    *PTYRelay // dialer-side relay; receives MsgPTYOutput and routes to browser
+	StreamReg   *StreamRegistry
 	AttrsSink   SessionAttrsSink
 	BrowserHub  BrowserBroadcaster
 }
@@ -106,6 +109,7 @@ func runSession(
 	conn *websocket.Conn,
 	peerInfo identity.Peer,
 	address string,
+	caps []string,
 	deps SessionDeps,
 ) error {
 	peerID := peerInfo.Fingerprint()
@@ -114,6 +118,8 @@ func runSession(
 	cw := &connWriter{conn: conn}
 
 	pc := NewPeerConnection(peerID, 64)
+	pc.Role = role
+	pc.Caps = append([]string(nil), caps...)
 	if !deps.Manager.TryRegisterPeer(peerID, peerInfo.Name, peerInfo.PublicKey, address, pc) {
 		return fmt.Errorf("peer already connected")
 	}
@@ -215,8 +221,6 @@ func runSession(
 	go forwardStateEvents(sessionCtx, pc, deps)
 	go forwardToolEvents(sessionCtx, pc, deps, peerID)
 	go forwardPeerStateChanges(sessionCtx, pc, deps, peerID)
-
-	_ = role
 
 	for {
 		msgType, raw, err := conn.ReadMessage()
@@ -462,6 +466,42 @@ func handleBinaryFrame(raw []byte, deps SessionDeps) {
 	}
 }
 
+// handleOpenTerminal is the host end of a per-terminal data connection.
+func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
+	log = log.WithFields(logrus.Fields{"stream": p.StreamID, "session": p.Session})
+	dial, _ := PlanStream(true, pc.Role == RoleDialer)
+	var conn *websocket.Conn
+	if deps.Manager == nil || deps.TmuxClient == nil || deps.Identity == nil {
+		return
+	}
+	if dial {
+		addr := deps.Manager.GetPeerAddress(pc.HostID)
+		Trace("host", p.StreamID, p.Session, "stream-dial", 0, addr)
+		c, err := DialPeerStream(context.Background(), addr, deps.Identity, p.Token)
+		if err != nil {
+			log.WithError(err).Debug("host data-conn dial failed")
+			return
+		}
+		conn = c
+	} else {
+		if deps.StreamReg == nil || deps.Manager == nil || deps.TmuxClient == nil {
+			return
+		}
+		ps := NewPendingStream(p.StreamID, p.Session, p.Cols, p.Rows, deps.Manager.LocalID(), p.ViewerHostID, pc.HostID)
+		deps.StreamReg.Register(p.Token, ps)
+		Trace("host", p.StreamID, p.Session, "stream-wait", 0, pc.HostID)
+		c, ok := ps.WaitResolved(streamSetupTimeout)
+		if !ok {
+			Trace("host", p.StreamID, p.Session, "stream-timeout", 0, pc.HostID)
+			return
+		}
+		conn = c
+	}
+	defer conn.Close()
+	Trace("host", p.StreamID, p.Session, "bridge-start", 0, "")
+	_ = ws.BridgePTY(conn, deps.TmuxClient.TmuxPath(), p.Session, p.Cols, p.Rows, deps.ActTracker, log)
+}
+
 // handleSessionMessage dispatches messages received from the remote peer.
 func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
 	switch msg.Type {
@@ -620,6 +660,13 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 		if deps.PTYManager != nil {
 			deps.PTYManager.Resize(p.StreamID, p.Cols, p.Rows)
 		}
+	case MsgOpenTerminal:
+		var p OpenTerminalPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid open-terminal")
+			return
+		}
+		go handleOpenTerminal(p, pc, deps, log)
 
 	case MsgSessionAction:
 		var p SessionActionPayload

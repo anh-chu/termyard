@@ -130,3 +130,129 @@ func mustBridgeDone(t *testing.T, done <-chan error) {
 		t.Fatal("timed out waiting for bridge shutdown")
 	}
 }
+
+func mustSpliceDone(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for splice shutdown")
+	}
+}
+
+func TestSpliceConns(t *testing.T) {
+	t.Run("binary and text", func(t *testing.T) {
+		browserClient, browserServer := mustWSConnPair(t)
+		dataClient, dataServer := mustWSConnPair(t)
+		done := make(chan struct{})
+		logger := logrus.New()
+		logger.SetOutput(io.Discard)
+		go func() {
+			SpliceConns(browserServer, dataServer, logrus.NewEntry(logger))
+			close(done)
+		}()
+
+		if err := dataClient.WriteMessage(websocket.BinaryMessage, []byte("from-data")); err != nil {
+			t.Fatal(err)
+		}
+		mt, got := mustReadWSMessage(t, browserClient)
+		if mt != websocket.BinaryMessage || !bytes.Equal(got, []byte("from-data")) {
+			t.Fatalf("browser got %d %q", mt, got)
+		}
+
+		if err := browserClient.WriteMessage(websocket.TextMessage, []byte("from-browser")); err != nil {
+			t.Fatal(err)
+		}
+		mt, got = mustReadWSMessage(t, dataClient)
+		if mt != websocket.TextMessage || !bytes.Equal(got, []byte("from-browser")) {
+			t.Fatalf("data got %d %q", mt, got)
+		}
+
+		_ = browserClient.Close()
+		mustSpliceDone(t, done)
+		_ = dataClient.Close()
+	})
+
+	t.Run("data close unwinds browser loop", func(t *testing.T) {
+		browserClient, browserServer := mustWSConnPair(t)
+		dataClient, dataServer := mustWSConnPair(t)
+		done := make(chan struct{})
+		logger := logrus.New()
+		logger.SetOutput(io.Discard)
+		go func() {
+			SpliceConns(browserServer, dataServer, logrus.NewEntry(logger))
+			close(done)
+		}()
+
+		_ = dataClient.Close()
+		mustSpliceDone(t, done)
+		_ = browserClient.Close()
+	})
+
+	t.Run("ping answered locally", func(t *testing.T) {
+		browserClient, browserServer := mustWSConnPair(t)
+		dataClient, dataServer := mustWSConnPair(t)
+		done := make(chan struct{})
+		logger := logrus.New()
+		logger.SetOutput(io.Discard)
+		go func() {
+			SpliceConns(browserServer, dataServer, logrus.NewEntry(logger))
+			close(done)
+		}()
+
+		if err := browserClient.WriteMessage(websocket.TextMessage, []byte(`{"type":"ping"}`)); err != nil {
+			t.Fatal(err)
+		}
+		mt, got := mustReadWSMessage(t, browserClient)
+		if mt != websocket.TextMessage || !bytes.Equal(got, pongFrame) {
+			t.Fatalf("browser got %d %q, want pong", mt, got)
+		}
+		if err := dataClient.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := dataClient.ReadMessage(); err == nil {
+			t.Fatal("ping forwarded to data conn")
+		}
+
+		_ = browserClient.Close()
+		mustSpliceDone(t, done)
+		_ = dataClient.Close()
+	})
+}
+
+func mustWSConnPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
+	t.Helper()
+	ch := make(chan *websocket.Conn, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		ch <- conn
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client, _, err := websocket.DefaultDialer.Dial(strings.Replace(srv.URL, "http://", "ws://", 1)+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := <-ch
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+	return client, server
+}
+
+func mustReadWSMessage(t *testing.T, conn *websocket.Conn) (int, []byte) {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	mt, got, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mt, got
+}

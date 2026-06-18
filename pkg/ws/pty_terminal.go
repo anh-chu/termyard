@@ -122,6 +122,70 @@ outer:
 	return nil
 }
 
+// SpliceConns pumps bytes between an upgraded browser WS and a peer data conn.
+// Teardown nudges both read deadlines and callers own Close.
+func SpliceConns(browser, data *websocket.Conn, log *logrus.Entry) {
+	var browserMu sync.Mutex
+	var once sync.Once
+	done := make(chan struct{})
+	closeBoth := func() {
+		once.Do(func() {
+			_ = browser.SetReadDeadline(time.Now())
+			_ = data.SetReadDeadline(time.Now())
+		})
+	}
+
+	go func() {
+		defer close(done)
+		for {
+			mt, msg, err := data.ReadMessage()
+			if err != nil {
+				closeBoth()
+				return
+			}
+			browserMu.Lock()
+			_ = browser.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			werr := browser.WriteMessage(mt, msg)
+			_ = browser.SetWriteDeadline(time.Time{})
+			browserMu.Unlock()
+			if werr != nil {
+				closeBoth()
+				return
+			}
+		}
+	}()
+
+	for {
+		mt, msg, err := browser.ReadMessage()
+		if err != nil {
+			closeBoth()
+			break
+		}
+		if mt == websocket.TextMessage && isPing(msg) {
+			browserMu.Lock()
+			_ = browser.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			werr := browser.WriteMessage(websocket.TextMessage, pongFrame)
+			_ = browser.SetWriteDeadline(time.Time{})
+			browserMu.Unlock()
+			if werr != nil {
+				closeBoth()
+				break
+			}
+			continue
+		}
+		_ = data.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		werr := data.WriteMessage(mt, msg)
+		_ = data.SetWriteDeadline(time.Time{})
+		if werr != nil {
+			closeBoth()
+			break
+		}
+	}
+	closeBoth()
+	<-done
+	log.Info("peer-stream splice ended")
+}
+
 // HandleSession handles a WebSocket connection for an entire tmux session via PTY.
 // Query params: name=<session>, cols=<cols>, rows=<rows>
 func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Request) {

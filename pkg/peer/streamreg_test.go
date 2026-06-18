@@ -48,10 +48,10 @@ func TestStreamRegistryAndPeerStream(t *testing.T) {
 
 	t.Run("happy path", func(t *testing.T) {
 		token := NewToken()
-		ps := &PendingStream{StreamID: "S1", ExpectedPeer: dialerID.Fingerprint(), resolved: make(chan *websocket.Conn, 1)}
+		ps := NewPendingStream("S1", "", 0, 0, "", "", dialerID.Fingerprint())
 		reg.Register(token, ps)
 
-		clientConn, err := dialPeerStream(context.Background(), addr, dialerID, token)
+		clientConn, err := DialPeerStream(context.Background(), addr, dialerID, token)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,12 +78,12 @@ func TestStreamRegistryAndPeerStream(t *testing.T) {
 	t.Run("token selects matching stream and is one-time", func(t *testing.T) {
 		token1 := NewToken()
 		token2 := NewToken()
-		ps1 := &PendingStream{StreamID: "S2", ExpectedPeer: dialerID.Fingerprint(), resolved: make(chan *websocket.Conn, 1)}
-		ps2 := &PendingStream{StreamID: "S3", ExpectedPeer: dialerID.Fingerprint(), resolved: make(chan *websocket.Conn, 1)}
+		ps1 := NewPendingStream("S2", "", 0, 0, "", "", dialerID.Fingerprint())
+		ps2 := NewPendingStream("S3", "", 0, 0, "", "", dialerID.Fingerprint())
 		reg.Register(token1, ps1)
 		reg.Register(token2, ps2)
 
-		clientConn, err := dialPeerStream(context.Background(), addr, dialerID, token1)
+		clientConn, err := DialPeerStream(context.Background(), addr, dialerID, token1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func TestStreamRegistryAndPeerStream(t *testing.T) {
 		}
 
 		clientConn.Close()
-		replayConn, err := dialPeerStream(context.Background(), addr, dialerID, token1)
+		replayConn, err := DialPeerStream(context.Background(), addr, dialerID, token1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,9 +121,9 @@ func TestStreamRegistryAndPeerStream(t *testing.T) {
 
 	t.Run("data before registration", func(t *testing.T) {
 		token := NewToken()
-		ps := &PendingStream{StreamID: "S4", ExpectedPeer: dialerID.Fingerprint(), resolved: make(chan *websocket.Conn, 1)}
+		ps := NewPendingStream("S4", "", 0, 0, "", "", dialerID.Fingerprint())
 
-		clientConn, err := dialPeerStream(context.Background(), addr, dialerID, token)
+		clientConn, err := DialPeerStream(context.Background(), addr, dialerID, token)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestStreamRegistryAndPeerStream(t *testing.T) {
 
 	t.Run("data after expiry", func(t *testing.T) {
 		token := NewToken()
-		ps := &PendingStream{StreamID: "S5", ExpectedPeer: dialerID.Fingerprint(), resolved: make(chan *websocket.Conn, 1)}
+		ps := NewPendingStream("S5", "", 0, 0, "", "", dialerID.Fingerprint())
 		reg.Register(token, ps)
 
 		reg.mu.Lock()
@@ -162,7 +162,7 @@ func TestStreamRegistryAndPeerStream(t *testing.T) {
 		}
 		reg.expire(token, entry)
 
-		clientConn, err := dialPeerStream(context.Background(), addr, dialerID, token)
+		clientConn, err := DialPeerStream(context.Background(), addr, dialerID, token)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,10 +180,10 @@ func TestStreamRegistryAndPeerStream(t *testing.T) {
 
 	t.Run("wrong peer", func(t *testing.T) {
 		token := NewToken()
-		ps := &PendingStream{StreamID: "S6", ExpectedPeer: otherID.Fingerprint(), resolved: make(chan *websocket.Conn, 1)}
+		ps := NewPendingStream("S6", "", 0, 0, "", "", otherID.Fingerprint())
 		reg.Register(token, ps)
 
-		clientConn, err := dialPeerStream(context.Background(), addr, dialerID, token)
+		clientConn, err := DialPeerStream(context.Background(), addr, dialerID, token)
 		if err != nil {
 			t.Fatal(err)
 		}

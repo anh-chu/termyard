@@ -12,7 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/anh-chu/termyard/pkg/identity"
-	ws "github.com/anh-chu/termyard/pkg/ws"
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -58,7 +57,7 @@ func (h *Handler) HandlePeer(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), streamSetupTimeout)
 	defer cancel()
 
-	peer, ok := h.authenticatePeer(ctx, conn, log)
+	peer, caps, ok := h.authenticatePeer(ctx, conn, log)
 	if !ok {
 		return
 	}
@@ -72,7 +71,7 @@ func (h *Handler) HandlePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authOK, _ := NewMessage(MsgAuthOK, nil)
+	authOK, _ := NewMessage(MsgAuthOK, AuthOKPayload{Capabilities: localCapabilities})
 	if err := conn.WriteJSON(authOK); err != nil {
 		conn.Close()
 		return
@@ -86,7 +85,7 @@ func (h *Handler) HandlePeer(w http.ResponseWriter, r *http.Request) {
 	// We pass peer.Address (the dialer's listening host:port stored from
 	// bootstrap), NOT r.RemoteAddr — the latter is the dialer's ephemeral
 	// source port, which is useless for PTY back-dial.
-	_ = runSession(r.Context(), RoleListener, conn, *peer, peer.Address, h.deps)
+	_ = runSession(r.Context(), RoleListener, conn, *peer, peer.Address, caps, h.deps)
 }
 
 // HandlePeerStream handles /ws/peer-stream for dedicated PTY data connections.
@@ -101,12 +100,12 @@ func (h *Handler) HandlePeerStream(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), streamSetupTimeout)
 	defer cancel()
 
-	peer, ok := h.authenticatePeer(ctx, conn, log)
+	peer, _, ok := h.authenticatePeer(ctx, conn, log)
 	if !ok {
 		return
 	}
 
-	authOK, _ := NewMessage(MsgAuthOK, nil)
+	authOK, _ := NewMessage(MsgAuthOK, AuthOKPayload{Capabilities: localCapabilities})
 	if err := conn.WriteJSON(authOK); err != nil {
 		conn.Close()
 		return
@@ -145,41 +144,22 @@ func (h *Handler) HandlePeerStream(w http.ResponseWriter, r *http.Request) {
 	h.streamReg.Resolve(ps, conn)
 }
 
-// serveHostStream is the host end of a per-terminal data connection: it waits
-// for /ws/peer-stream to resolve a conn for this pending stream, then runs the
-// local PTY bridge against it. Single close path: this owns conn.Close.
-// ponytail: Phase 3 wires serveHostStream to MsgOpenTerminal + host-dials-back direction.
-func (h *Handler) serveHostStream(ps *PendingStream) {
-	if ps == nil {
-		return
-	}
-	var conn *websocket.Conn
-	select {
-	case conn = <-ps.resolved:
-	case <-time.After(pendingStreamTTL):
-		return
-	}
-	defer conn.Close()
-	log := logrus.WithFields(logrus.Fields{"stream": ps.StreamID, "session": ps.Session})
-	_ = ws.BridgePTY(conn, h.deps.TmuxClient.TmuxPath(), ps.Session, ps.Cols, ps.Rows, h.deps.ActTracker, log)
-}
-
 // authenticatePeer runs the ed25519 challenge-response and returns the
 // verified peer. It does NOT send MsgAuthOK, does NOT touch the Manager,
 // and does NOT check for duplicate connections — callers decide.
-func (h *Handler) authenticatePeer(ctx context.Context, conn *websocket.Conn, log *logrus.Entry) (*identity.Peer, bool) {
+func (h *Handler) authenticatePeer(ctx context.Context, conn *websocket.Conn, log *logrus.Entry) (*identity.Peer, []string, bool) {
 	challengeBytes := make([]byte, 32)
 	if _, err := rand.Read(challengeBytes); err != nil {
 		log.WithError(err).Error("failed to generate challenge")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 	challengeB64 := base64.StdEncoding.EncodeToString(challengeBytes)
 	challengeMsg, _ := NewMessage(MsgChallenge, ChallengePayload{Challenge: challengeB64})
 	if err := conn.WriteJSON(challengeMsg); err != nil {
 		log.WithError(err).Debug("failed to send challenge")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 
 	conn.SetReadDeadline(streamDeadline(ctx, streamSetupTimeout))
@@ -187,43 +167,43 @@ func (h *Handler) authenticatePeer(ctx context.Context, conn *websocket.Conn, lo
 	if err := conn.ReadJSON(&authMsg); err != nil {
 		log.WithError(err).Debug("failed to read auth")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 	conn.SetReadDeadline(time.Time{})
 
 	if authMsg.Type != MsgAuth {
 		sendAuthFail(conn, "expected auth message")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 
 	var authPayload AuthPayload
 	if err := json.Unmarshal(authMsg.Payload, &authPayload); err != nil {
 		sendAuthFail(conn, "invalid auth payload")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 
 	peer := h.deps.PeerStore.GetByPublicKey(authPayload.PublicKey)
 	if peer == nil {
 		sendAuthFail(conn, "unknown peer")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 
 	sig, err := base64.StdEncoding.DecodeString(authPayload.Signature)
 	if err != nil {
 		sendAuthFail(conn, "invalid signature encoding")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 	if !identity.Verify(authPayload.PublicKey, challengeBytes, sig) {
 		sendAuthFail(conn, "invalid signature")
 		conn.Close()
-		return nil, false
+		return nil, nil, false
 	}
 
-	return peer, true
+	return peer, authPayload.Capabilities, true
 }
 
 func sendAuthFail(conn *websocket.Conn, reason string) {

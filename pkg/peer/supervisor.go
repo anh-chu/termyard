@@ -359,8 +359,9 @@ func (s *LinkSupervisor) dialOnce(ctx context.Context, link *peerLink) error {
 		return fmt.Errorf("sign: %w", err)
 	}
 	authMsg, _ := NewMessage(MsgAuth, AuthPayload{
-		PublicKey: s.deps.Identity.PublicKey,
-		Signature: base64.StdEncoding.EncodeToString(sig),
+		PublicKey:    s.deps.Identity.PublicKey,
+		Signature:    base64.StdEncoding.EncodeToString(sig),
+		Capabilities: localCapabilities,
 	})
 	if err := conn.WriteJSON(authMsg); err != nil {
 		conn.Close()
@@ -381,9 +382,16 @@ func (s *LinkSupervisor) dialOnce(ctx context.Context, link *peerLink) error {
 		conn.Close()
 		return fmt.Errorf("%s", reason.Reason)
 	}
+	var peerCaps []string
 	if result.Type != MsgAuthOK {
 		conn.Close()
 		return fmt.Errorf("unexpected auth response: %s", result.Type)
+	}
+	if len(result.Payload) > 0 {
+		var okPayload AuthOKPayload
+		if err := json.Unmarshal(result.Payload, &okPayload); err == nil {
+			peerCaps = okPayload.Capabilities
+		}
 	}
 
 	// Auth ok.
@@ -392,7 +400,7 @@ func (s *LinkSupervisor) dialOnce(ctx context.Context, link *peerLink) error {
 
 	logrus.WithFields(logrus.Fields{"peer": link.peer.Name, "addr": addr}).Info("dialer connected")
 
-	err = runSession(ctx, RoleDialer, conn, link.peer, addr, s.deps)
+	err = runSession(ctx, RoleDialer, conn, link.peer, addr, peerCaps, s.deps)
 	conn.Close()
 	return err
 }

@@ -60,6 +60,8 @@ const (
 // (head-of-line blocking was the dominant source of typing jitter).
 type PeerConnection struct {
 	HostID string
+	Role   Role
+	Caps   []string
 
 	mu     sync.Mutex
 	hi     chan wireFrame
@@ -87,6 +89,16 @@ func NewPeerConnection(hostID string, bufSize int) *PeerConnection {
 // dies and tear down dependent state instead of silently dropping messages.
 func (pc *PeerConnection) Done() <-chan struct{} {
 	return pc.done
+}
+
+// HasCap reports whether peer advertised capability c in its hello.
+func (pc *PeerConnection) HasCap(c string) bool {
+	for _, x := range pc.Caps {
+		if x == c {
+			return true
+		}
+	}
+	return false
 }
 
 // HiLane / LoLane expose the lanes to the writer goroutine for priority drain.
@@ -539,6 +551,8 @@ func (m *Manager) HasLiveConnection(id string) bool {
 	return false
 }
 
+// GetPeerAddress returns a connected peer's stored listening address.
+
 // GetPeerConnection returns the connection for a specific peer
 func (m *Manager) GetPeerConnection(id string) *PeerConnection {
 	m.mu.RLock()
@@ -548,6 +562,16 @@ func (m *Manager) GetPeerConnection(id string) *PeerConnection {
 		return h.Conn
 	}
 	return nil
+}
+
+// GetPeerAddress returns a connected peer's stored listening address.
+func (m *Manager) GetPeerAddress(id string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if h, ok := m.hosts[id]; ok {
+		return h.Address
+	}
+	return ""
 }
 
 // ConnectedPeers returns every currently-connected remote peer connection.

@@ -80,6 +80,12 @@ const (
 	MsgStreamToken = "stream-token"
 )
 
+// CapPerStream advertises dedicated /ws/peer-stream PTY data connections.
+const CapPerStream = "per-stream"
+
+// localCapabilities is what this build advertises in the hello.
+var localCapabilities = []string{CapPerStream}
+
 // Message is the envelope for all control WebSocket messages
 type Message struct {
 	Type    string          `json:"type"`
@@ -88,13 +94,19 @@ type Message struct {
 
 // AuthPayload is sent by the peer in response to a challenge
 type AuthPayload struct {
-	PublicKey string `json:"public_key"`
-	Signature string `json:"signature"` // base64-encoded signature of the challenge
+	PublicKey    string   `json:"public_key"`
+	Signature    string   `json:"signature"` // base64-encoded signature of the challenge
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // ChallengePayload is sent by the hub to initiate auth
 type ChallengePayload struct {
 	Challenge string `json:"challenge"` // base64-encoded random bytes
+}
+
+// AuthOKPayload advertises the listener's capabilities on the hello.
+type AuthOKPayload struct {
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // StateUpdatePayload carries a full session snapshot from a peer

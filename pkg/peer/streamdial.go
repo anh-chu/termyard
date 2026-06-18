@@ -13,7 +13,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/identity"
 )
 
-func dialPeerStream(ctx context.Context, addr string, id *identity.Identity, token string) (*websocket.Conn, error) {
+func DialPeerStream(ctx context.Context, addr string, id *identity.Identity, token string) (*websocket.Conn, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("peer has no address")
 	}

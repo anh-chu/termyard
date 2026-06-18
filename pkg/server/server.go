@@ -72,6 +72,7 @@ type Options struct {
 	PeerMgr          *peer.Manager
 	PeerHandler      *peer.Handler
 	PTYRelay         *peer.PTYRelay
+	StreamReg        *peer.StreamRegistry
 	LinkSupervisor   *peer.LinkSupervisor
 	Detector         *toolevents.Detector
 	PortForwardStore *portforward.Store
@@ -330,7 +331,6 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		}
 	}
 
-	// Get the peer connection
 	peer.Trace("viewer", "", sessionName, "open-begin", 0, fmt.Sprintf("host=%s cols=%d rows=%d remote=%s", hostID, cols, rows, r.RemoteAddr))
 	peerConn := opts.PeerMgr.GetPeerConnection(hostID)
 	if peerConn == nil {
@@ -339,7 +339,6 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		return
 	}
 
-	// Upgrade browser to WebSocket
 	upgrader := websocket.Upgrader{
 		CheckOrigin:    ws.CheckSameOrigin,
 		ReadBufferSize: 1024, WriteBufferSize: 1024 * 32,
@@ -349,6 +348,13 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		return
 	}
 	defer browserWS.Close()
+
+	if peerConn.HasCap(peer.CapPerStream) && opts.StreamReg != nil {
+		if serveViewerPerStream(browserWS, peerConn, opts, hostID, sessionName, cols, rows) {
+			return
+		}
+		peer.Trace("viewer", "", sessionName, "per-stream-fallback", 0, hostID)
+	}
 
 	streamID := peer.GenerateStreamID()
 	opts.PTYRelay.Register(streamID, hostID, sessionName, browserWS)
@@ -366,10 +372,62 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 	}
 	peer.Trace("viewer", streamID, sessionName, "pty-open-sent", 0, hostID)
 	opts.PTYRelay.PumpBrowserToPeer(streamID, browserWS, peerConn)
-
 	peer.Trace("viewer", streamID, sessionName, "pty-close-sent", 0, hostID)
 	closeMsg, _ := peer.NewMessage(peer.MsgPTYClose, peer.PTYClosePayload{StreamID: streamID})
 	peerConn.EnqueueHi(closeMsg)
+}
+
+func serveViewerPerStream(browserWS *websocket.Conn, peerConn *peer.PeerConnection, opts *Options, hostID, session string, cols, rows uint16) bool {
+	if opts == nil || opts.PeerMgr == nil || opts.Identity == nil || opts.StreamReg == nil {
+		return false
+	}
+	streamID := peer.GenerateStreamID()
+	token := peer.NewToken()
+	log := logrus.WithFields(logrus.Fields{"stream": streamID, "session": session, "host": hostID})
+	openMsg, _ := peer.NewMessage(peer.MsgOpenTerminal, peer.OpenTerminalPayload{
+		StreamID:     streamID,
+		Session:      session,
+		Cols:         cols,
+		Rows:         rows,
+		Token:        token,
+		ViewerHostID: opts.PeerMgr.LocalID(),
+	})
+
+	dial, _ := peer.PlanStream(false, peerConn.Role == peer.RoleDialer)
+	var conn *websocket.Conn
+	if dial {
+		addr := opts.PeerMgr.GetPeerAddress(hostID)
+		peer.Trace("viewer", streamID, session, "stream-dial", 0, addr)
+		c, err := peer.DialPeerStream(context.Background(), addr, opts.Identity, token)
+		if err != nil {
+			log.WithError(err).Debug("viewer data-conn dial failed")
+			return false
+		}
+		conn = c
+		if !peerConn.EnqueueHi(openMsg) {
+			conn.Close()
+			return false
+		}
+		peer.Trace("viewer", streamID, session, "open-terminal-sent", 0, hostID)
+	} else {
+		ps := peer.NewPendingStream(streamID, session, cols, rows, hostID, opts.PeerMgr.LocalID(), hostID)
+		opts.StreamReg.Register(token, ps)
+		if !peerConn.EnqueueHi(openMsg) {
+			return false
+		}
+		peer.Trace("viewer", streamID, session, "open-terminal-sent", 0, hostID)
+		c, ok := ps.WaitResolved(peer.StreamSetupTimeout())
+		if !ok {
+			peer.Trace("viewer", streamID, session, "stream-timeout", 0, hostID)
+			return false
+		}
+		conn = c
+	}
+	defer conn.Close()
+	peer.Trace("viewer", streamID, session, "splice-start", 0, hostID)
+	ws.SpliceConns(browserWS, conn, log)
+	peer.Trace("viewer", streamID, session, "splice-end", 0, hostID)
+	return true
 }
 
 // absPathRe matches HTML attribute values that begin with a single /

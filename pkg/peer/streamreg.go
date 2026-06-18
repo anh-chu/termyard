@@ -11,10 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const (
-	streamSetupTimeout = 20 * time.Second
-	pendingStreamTTL   = 30 * time.Second
-)
+const streamSetupTimeout = 20 * time.Second
 
 // ponytail: capability negotiation stays out of Phase 1; Phase 3 adds it when the path branches.
 
@@ -27,6 +24,41 @@ type PendingStream struct {
 	ExpectedPeer string
 	resolved     chan *websocket.Conn
 }
+
+func NewPendingStream(streamID, session string, cols, rows uint16, hostID, viewerHostID, expectedPeer string) *PendingStream {
+	return &PendingStream{
+		StreamID:     streamID,
+		Session:      session,
+		Cols:         cols,
+		Rows:         rows,
+		HostID:       hostID,
+		ViewerHostID: viewerHostID,
+		ExpectedPeer: expectedPeer,
+		resolved:     make(chan *websocket.Conn, 1),
+	}
+}
+
+func (ps *PendingStream) WaitResolved(d time.Duration) (*websocket.Conn, bool) {
+	if ps == nil {
+		return nil, false
+	}
+	if d < 0 {
+		d = 0
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case conn, ok := <-ps.resolved:
+		if !ok || conn == nil {
+			return nil, false
+		}
+		return conn, true
+	case <-timer.C:
+		return nil, false
+	}
+}
+
+func StreamSetupTimeout() time.Duration { return streamSetupTimeout }
 
 type pendingEntry struct {
 	ps *PendingStream
@@ -122,7 +154,7 @@ func (s *StreamRegistry) Register(token string, ps *PendingStream) {
 	s.pending[token] = entry
 	s.mu.Unlock()
 
-	time.AfterFunc(pendingStreamTTL, func() {
+	time.AfterFunc(streamSetupTimeout, func() {
 		s.expire(token, entry)
 	})
 }

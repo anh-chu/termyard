@@ -243,6 +243,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		TmuxClient:  client,
 		PTYManager:  ptyManager,
 		PTYRelay:    ptyRelay,
+		StreamReg:   streamReg,
 	}
 
 	peerHandler := peer.NewHandler(deps, streamReg)
@@ -269,6 +270,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PeerMgr:          peerMgr,
 		PeerHandler:      peerHandler,
 		PTYRelay:         ptyRelay,
+		StreamReg:        streamReg,
 		LinkSupervisor:   supervisor,
 		Detector:         detector,
 		PortForwardStore: portforward.NewStore(),
