@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
 import { cn } from '../lib/utils'
+import { popOut, pipUnavailableReason } from '../lib/pip'
 
 interface TerminalProps {
   sessionName: string
@@ -162,6 +163,28 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
   const [capturedText, setCapturedText] = useState<string | null>(null)
   const [clipboardMenuOpen, setClipboardMenuOpen] = useState(false)
   const captureTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const popHomeRef = useRef<HTMLDivElement>(null)
+  const popNodeRef = useRef<HTMLDivElement>(null)
+  const [poppedOut, setPoppedOut] = useState(false)
+  const restorePipRef = useRef<(() => void) | null>(null)
+
+  const handlePopOut = useCallback(async () => {
+    if (restorePipRef.current) { restorePipRef.current(); return }
+    const reason = pipUnavailableReason()
+    if (reason) {
+      window.dispatchEvent(new CustomEvent('termyard:toast', {
+        detail: { severity: 'warn', source: 'pop-out', message: reason },
+      }))
+      return
+    }
+    const node = popNodeRef.current, home = popHomeRef.current
+    if (!node || !home) return
+    try {
+      const restore = await popOut(node, home)
+      setPoppedOut(true)
+      restorePipRef.current = () => { restore(); restorePipRef.current = null; setPoppedOut(false); fit() }
+    } catch { /* user denied */ }
+  }, [fit])
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px), (pointer: coarse)')
@@ -448,13 +471,25 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
   return (
     <div className="flex-1 overflow-hidden relative group bg-canvas">
       <div className="h-full w-full flex flex-col p-[3px]">
+        <div ref={popHomeRef} className="min-h-0 flex-1 relative">
         <div
-          className="min-h-0 flex-1 relative"
+          ref={popNodeRef}
+          className="absolute inset-0"
         >
           <div
             ref={containerRef}
             className="absolute inset-0 overflow-hidden"
           />
+        {/* Pop-out (PiP) toggle */}
+          <button
+            onClick={handlePopOut}
+            title={poppedOut ? 'Return pane to tab' : 'Pop out to floating window'}
+            className="absolute top-2.5 right-11 z-20 p-1.5 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="8" height="6" rx="1" fill="currentColor" />
+            </svg>
+          </button>
         {/* Fullscreen toggle */}
           {onToggleFullscreen && (
             <button
@@ -481,6 +516,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
               </div>
             </div>
           )}
+        </div>
         </div>
         {showMobileKeyBar && (
           <div className="flex-none pt-1">

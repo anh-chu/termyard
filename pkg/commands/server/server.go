@@ -249,6 +249,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	opts := &server.Options{
 		Port:             int(c.Int("port")),
 		SocketPath:       c.String("socket"),
+		TLSCert:          c.String("tls-cert"),
+		TLSKey:           c.String("tls-key"),
+		TLSAuto:          c.Bool("tls"),
 		Client:           client,
 		StateMgr:         stateMgr,
 		Tracker:          tracker,
@@ -329,6 +332,21 @@ func init() {
 			Name:    "no-recovery",
 			Usage:   "Disable tmux crash recovery loops",
 			Sources: cli.EnvVars("TERMYARD_NO_RECOVERY"),
+		},
+		&cli.BoolFlag{
+			Name:    "tls",
+			Usage:   "Serve HTTPS with a self-signed cert (enables secure-context browser features over LAN)",
+			Sources: cli.EnvVars("TERMYARD_TLS"),
+		},
+		&cli.StringFlag{
+			Name:    "tls-cert",
+			Usage:   "Path to a TLS certificate file (PEM); pair with --tls-key for a real cert",
+			Sources: cli.EnvVars("TERMYARD_TLS_CERT"),
+		},
+		&cli.StringFlag{
+			Name:    "tls-key",
+			Usage:   "Path to a TLS private key file (PEM); pair with --tls-cert",
+			Sources: cli.EnvVars("TERMYARD_TLS_KEY"),
 		},
 	}
 

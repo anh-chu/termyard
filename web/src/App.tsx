@@ -560,6 +560,21 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const toastIdRef = useRef(0)
   const dismissToast = useCallback((id: number) => setToasts(t => t.filter(x => x.id !== id)), [])
 
+  // Client-side notices (e.g. unsupported pop-out) dispatched as window events
+  useEffect(() => {
+    const onToast = (e: Event) => {
+      const d = (e as CustomEvent).detail || {}
+      setToasts(t => [...t, {
+        id: ++toastIdRef.current,
+        severity: d.severity === 'error' || d.severity === 'warn' ? d.severity : 'info',
+        source: d.source || 'termyard',
+        message: d.message || '',
+      }].slice(-4))
+    }
+    window.addEventListener('termyard:toast', onToast)
+    return () => window.removeEventListener('termyard:toast', onToast)
+  }, [])
+
   const migrateSessionKey = useCallback((oldKey: string, newKey: string) => {
     if (!oldKey || !newKey || oldKey === newKey) return
 

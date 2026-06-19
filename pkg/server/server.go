@@ -55,6 +55,9 @@ import (
 type Options struct {
 	Port             int
 	SocketPath       string
+	TLSCert          string
+	TLSKey           string
+	TLSAuto          bool
 	Client           *tmux.Client
 	StateMgr         *state.Manager
 	Tracker          *toolevents.Tracker
@@ -1743,6 +1746,12 @@ func serveAndWait(ctx context.Context, opts *Options, logger *logrus.Entry, hand
 
 	serverErr := make(chan error, 2)
 
+	tlsCfg, err := tlsConfig(opts)
+	if err != nil {
+		return err
+	}
+	srv.TLSConfig = tlsCfg
+
 	// Start TCP listener for browser connections
 	tcpAddr := fmt.Sprintf(":%d", opts.Port)
 	tcpListener, err := net.Listen("tcp", tcpAddr)
@@ -1750,16 +1759,25 @@ func serveAndWait(ctx context.Context, opts *Options, logger *logrus.Entry, hand
 		return fmt.Errorf("tcp listen: %w", err)
 	}
 
+	scheme := "http"
 	go func() {
-		serveErr := srv.Serve(tcpListener)
+		var serveErr error
+		if tlsCfg != nil {
+			serveErr = srv.ServeTLS(tcpListener, "", "") // certs come from srv.TLSConfig
+		} else {
+			serveErr = srv.Serve(tcpListener)
+		}
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			logger.WithError(serveErr).Error("tcp listen error")
 			serverErr <- serveErr
 		}
 	}()
+	if tlsCfg != nil {
+		scheme = "https"
+	}
 
 	logger.WithField("port", opts.Port).Info("starting termyard server")
-	logger.Infof("open http://localhost:%d in your browser", opts.Port)
+	logger.Infof("open %s://localhost:%d in your browser", scheme, opts.Port)
 	if opts.AuthEnabled {
 		logger.Info("authentication is enabled")
 	}
