@@ -623,11 +623,27 @@ export function useTerminal(sessionName: string, hostId?: string) {
     termRef.current?.focus()
   }, [])
 
+  // Rebind xterm to the container's current window after the DOM node moves
+  // between documents (PiP pop-out / restore). xterm 5.5 caches the window in
+  // CoreBrowserService at open() time and drives the renderer's
+  // requestAnimationFrame from it; calling open() again updates that window
+  // when ownerDocument changed, so the renderer paints in the new window
+  // (Firefox stops painting without this; Chrome tolerates the stale binding).
+  const rebind = useCallback(() => {
+    const term = termRef.current
+    const container = containerRef.current
+    if (!term || !container) return
+    try { term.open(container) } catch { /* ignored */ }
+    fit()
+    try { term.refresh(0, term.rows - 1) } catch { /* ignored */ }
+  }, [fit])
+
   return {
     termRef,
     connect,
     disconnect,
     fit,
+    rebind,
     focus,
     termConnected,
     sendRawBytes,

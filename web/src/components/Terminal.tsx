@@ -148,6 +148,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
     connect,
     disconnect,
     fit,
+    rebind,
     focus,
     termConnected,
     sendRawBytes,
@@ -182,9 +183,10 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
     try {
       const restore = await popOut(node, home)
       setPoppedOut(true)
-      restorePipRef.current = () => { restore(); restorePipRef.current = null; setPoppedOut(false); fit() }
+      rebind()
+      restorePipRef.current = () => { restore(); restorePipRef.current = null; setPoppedOut(false); rebind() }
     } catch { /* user denied */ }
-  }, [fit])
+  }, [rebind])
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px), (pointer: coarse)')
