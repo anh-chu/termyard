@@ -799,12 +799,17 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 			agentType = sess.AgentType
 		}
 	}
+	prompt := meta.LastUserPrompt
+	if prompt == "" {
+		prompt = meta.UserPrompt
+	}
 	nc := namer.Context{
 		Workdir:    projectPath,
 		Current:    meta.DisplayName,
 		Agent:      agentType,
-		UserPrompt: meta.UserPrompt,
+		UserPrompt: prompt,
 		AgentMsg:   meta.LastAgentMessage,
+		Taken:      m.otherDisplayNames(sessionName),
 	}
 	m.mu.RUnlock()
 
