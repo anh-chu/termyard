@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.2.0](https://github.com/anh-chu/termyard/compare/v2.1.1...v2.2.0)
+
+### Features
+
+- **namer:** make AI session names distinct and current — feed sibling session names into the prompt so labels differ by wording instead of numeric suffixes, name by what differs when sessions share a project/branch/agent, use the latest user prompt for naming (the sidebar still shows the first), re-name on a fresh user prompt, and give reasoning models token headroom by taking the final output line
 ## [1.3.0](https://github.com/anh-chu/termyard/compare/v1.2.1...v1.3.0)
 
 ### Performance
