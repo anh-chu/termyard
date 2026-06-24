@@ -1,10 +1,16 @@
 # Changelog
 
+## [2.2.2](https://github.com/anh-chu/termyard/compare/v2.2.1...v2.2.2)
+
+### Bug Fixes
+
+- **namer:** make the AI-name button work for remote peer sessions. The name is now generated on the hub (using the remote session's prompt, agent message, project, and sibling names) and sent to the peer to apply, so it no longer silently no-ops when the peer process has no namer configured
 ## [2.2.1](https://github.com/anh-chu/termyard/compare/v2.2.0...v2.2.1)
 
 ### Bug Fixes
 
 - **namer:** wire distinct names + latest user prompt into the manual regenerate button, which still used the first prompt and ignored sibling names
+
 ## [2.2.0](https://github.com/anh-chu/termyard/compare/v2.1.1...v2.2.0)
 
 ### Features

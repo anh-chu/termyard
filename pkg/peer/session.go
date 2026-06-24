@@ -736,6 +736,7 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 	case "regenerate-name":
 		var params struct {
 			Session string `json:"session"`
+			Name    string `json:"name"`
 		}
 		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Session == "" {
 			return
@@ -744,7 +745,12 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 			log.Warn("no state manager available for regenerate-name action")
 			return
 		}
-		if _, err := deps.LocalMgr.RegenerateName(params.Session); err != nil {
+		// The hub generates the name with its own namer (this peer may have none
+		// configured) and sends it here to apply. Fall back to local naming when
+		// no name is supplied.
+		if params.Name != "" {
+			deps.LocalMgr.ApplyAIName(params.Session, params.Name)
+		} else if _, err := deps.LocalMgr.RegenerateName(params.Session); err != nil {
 			log.WithError(err).Warn("regenerate name via peer failed")
 			return
 		}

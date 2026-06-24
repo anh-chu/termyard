@@ -885,24 +885,69 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 					return
 				}
 
-				// Remote host — forward via peer connection. The new name propagates
-				// back through the peer's state update broadcast.
+				// Remote host — name it here (the peer process may have no namer
+				// configured) and forward the chosen name to the peer to apply. The
+				// applied name propagates back via the peer's state update.
 				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
 					peerConn := opts.PeerMgr.GetPeerConnection(req.Host)
 					if peerConn == nil {
 						http.Error(w, "peer not connected", http.StatusBadGateway)
 						return
 					}
-					params, _ := json.Marshal(map[string]string{"session": req.Session})
+					if opts.StateMgr == nil {
+						http.Error(w, "state manager unavailable", http.StatusInternalServerError)
+						return
+					}
+
+					// Find the target session and its siblings on that host.
+					nc := namer.Context{Kind: namer.KindShell}
+					found := false
+					for _, s := range opts.PeerMgr.GetAllSessions() {
+						if s.Host != req.Host {
+							continue
+						}
+						if s.Name == req.Session {
+							found = true
+							nc.Workdir = s.ProjectPath
+							nc.Current = s.DisplayName
+							nc.Agent = s.AgentType
+							nc.UserPrompt = s.UserPrompt
+							nc.AgentMsg = s.LastAgentMessage
+							if s.AgentType != "" {
+								nc.Kind = namer.KindAgent
+							}
+						} else {
+							label := s.DisplayName
+							if label == "" {
+								label = s.Name
+							}
+							nc.Taken = append(nc.Taken, label)
+						}
+					}
+					if !found {
+						http.Error(w, "session not found on host", http.StatusNotFound)
+						return
+					}
+
+					ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+					name, err := opts.StateMgr.GenerateName(ctx, nc)
+					cancel()
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusServiceUnavailable)
+						return
+					}
+
+					params, _ := json.Marshal(map[string]string{"session": req.Session, "name": name})
 					msg, _ := peer.NewMessage(peer.MsgSessionAction, peer.SessionActionPayload{
 						Action: "regenerate-name",
 						Params: params,
 					})
-					if peerConn.Enqueue(msg) {
-						w.WriteHeader(http.StatusNoContent)
-					} else {
+					if !peerConn.Enqueue(msg) {
 						http.Error(w, "peer send queue full", http.StatusBadGateway)
+						return
 					}
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]string{"name": name})
 					return
 				}
 

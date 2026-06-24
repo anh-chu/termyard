@@ -788,7 +788,6 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 	n := m.namer
 	meta := m.meta[sessionName]
 	sess := m.sessions[sessionName]
-	attached := sess != nil && sess.Attached
 	projectPath := meta.ProjectPath
 	agentType := meta.AgentType
 	if sess != nil {
@@ -838,25 +837,56 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 		return "", err
 	}
 
+	return m.ApplyAIName(sessionName, name), nil
+}
+
+// GenerateName runs the AI namer over an arbitrary context and returns a
+// sanitized name. Used by the hub to name remote-peer sessions locally (the
+// peer process may not have a namer configured). Returns ErrDisabled when AI
+// naming is off on this node.
+func (m *Manager) GenerateName(ctx context.Context, nc namer.Context) (string, error) {
+	m.mu.RLock()
+	n := m.namer
+	m.mu.RUnlock()
+	if n == nil || !n.Enabled() {
+		return "", namer.ErrDisabled
+	}
+	return n.Generate(ctx, nc)
+}
+
+// ApplyAIName stores an already-generated AI name for a session, bypassing the
+// one-shot guard and clearing any prior manual lock so the name applies. Agent
+// sessions also rename the underlying tmux session when detached; shell
+// sessions only update the DisplayName. Returns the applied name.
+func (m *Manager) ApplyAIName(sessionName, name string) string {
+	if name == "" {
+		return ""
+	}
+	m.mu.Lock()
+	meta := m.meta[sessionName]
+	agentType := meta.AgentType
+	sess := m.sessions[sessionName]
+	attached := sess != nil && sess.Attached
+	if sess != nil && sess.AgentType != "" {
+		agentType = sess.AgentType
+	}
 	// Reset guards + manual lock so the forced name applies even when the
 	// session was already named or user-set. Clearing TmuxRenamed lets the
-	// manual action rename the tmux session again when detached.
-	m.mu.Lock()
-	meta = m.meta[sessionName]
+	// action rename the tmux session again when detached.
 	meta.NameAssigned = false
 	meta.TmuxRenamed = false
 	meta.UserSetName = false
-	if sess := m.sessions[sessionName]; sess != nil {
+	m.meta[sessionName] = meta
+	if sess != nil {
 		sess.UserSetName = false
 	}
-	m.meta[sessionName] = meta
 	m.mu.Unlock()
 
-	if nc.Kind == namer.KindAgent {
+	if agentType != "" {
 		// applyGeneratedName re-checks the (now-cleared) guard, stores the name,
 		// and renames the tmux session when detached.
 		m.applyGeneratedName(sessionName, name, !attached)
-		return name, nil
+		return name
 	}
 
 	// Shell: store DisplayName only, never rename the tmux session.
@@ -871,7 +901,7 @@ func (m *Manager) RegenerateName(sessionName string) (string, error) {
 	m.mu.Unlock()
 	m.saveNames()
 	m.broadcast(StateEvent{Type: "sessions-changed"})
-	return name, nil
+	return name
 }
 
 // foregroundCommands returns the active pane's foreground command for a
