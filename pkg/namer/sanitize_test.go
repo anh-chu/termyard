@@ -50,3 +50,18 @@ func TestExtractContent(t *testing.T) {
 		t.Fatalf("sse: got %q err %v", got, err)
 	}
 }
+
+func TestLastLine(t *testing.T) {
+	cases := map[string]string{
+		"fix-auth":                       "fix-auth",
+		"reasoning...\n\nfinal: db-sync": "final: db-sync",
+		"  db-sync  ":                    "db-sync",
+		"line1\nline2\n":                 "line2",
+		"":                              "",
+	}
+	for in, want := range cases {
+		if got := lastLine(in); got != want {
+			t.Errorf("lastLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

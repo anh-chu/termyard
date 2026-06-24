@@ -37,11 +37,12 @@ type Context struct {
 	Workdir    string
 	Branch     string
 	Agent      string        // agent type, e.g. "claude" (agent kind only)
-	UserPrompt string        // first user message (agent kind only)
+	UserPrompt string        // latest user message (agent kind only)
 	AgentMsg   string        // latest agent message (agent kind only)
 	Commands   []string      // recent shell commands (shell kind only)
 	Members    []GroupMember // member sessions (group kind only)
 	Current    string        // existing display name for context; the system prompt decides keep vs rename
+	Taken      []string      // other sessions' names; the label must be distinct from these
 }
 
 // GroupMember carries the current per-session signal the group namer reasons
@@ -167,9 +168,13 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
-const systemPrompt = `You name terminal sessions. Reply with ONLY a short label, 2-4 words, kebab-case, lowercase, ASCII letters/digits/hyphens only. No quotes, no punctuation, no explanation. Examples: fix-auth-token, db-migration, docker-logs-debug, rebase-feature-branch.
+const systemPrompt = `You name terminal sessions. Think briefly if you need to, but your reply's FINAL LINE must be ONLY the label: 2-4 words, kebab-case, lowercase, ASCII letters/digits/hyphens only, no quotes or trailing punctuation. Example final lines: fix-auth-token, db-migration, docker-logs-debug, rebase-feature-branch.
 
-Prefer a name that captures the session's overall purpose, not a single transient command. If a current name is provided and it still describes the work, reply with that exact name unchanged. Only give a fresh name when the work has clearly moved to something different.`
+Capture this session's specific purpose, not a single transient command. When several sessions share a project, branch, or agent, do NOT name by that shared context — name by what makes THIS session's task different from the others.
+
+If existing session names are listed, your label MUST be distinct from every one of them: use different words, never just a numeric suffix.
+
+If a current name is provided and it still accurately and distinctively describes the work, reply with that exact name unchanged. Only rename when the work has clearly moved on.`
 
 // Generate synthesizes a sanitized session name from ctx. Returns ErrDisabled
 // if no endpoint is configured. On any network/parse error returns ("", err);
@@ -190,8 +195,8 @@ func (n *Namer) Generate(ctx context.Context, nc Context) (string, error) {
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: user},
 		},
-		Temperature: 0.3,
-		MaxTokens:   24,
+		Temperature: 0.6,
+		MaxTokens:   512, // headroom so reasoning models aren't cut off; we take the final line
 		Stream:      false,
 	}
 	buf, err := json.Marshal(reqBody)
@@ -228,7 +233,7 @@ func (n *Namer) Generate(ctx context.Context, nc Context) (string, error) {
 		return "", err
 	}
 
-	name := Sanitize(content)
+	name := Sanitize(lastLine(content))
 	if name == "" {
 		return "", fmt.Errorf("namer: model returned unusable name")
 	}
@@ -341,8 +346,28 @@ func buildUserPrompt(nc Context) string {
 		b.WriteString("\nName this group by what its sessions have in common. If they share a project path, agent, or task, make that commonality the name. Fall back to the broadest shared theme only when there is no obvious common attribute.")
 		return b.String()
 	}
+	if len(nc.Taken) > 0 {
+		b.WriteString("Other existing session names (your label must be distinct from all of these):\n")
+		for _, t := range nc.Taken {
+			if t = strings.TrimSpace(t); t != "" {
+				fmt.Fprintf(&b, "  - %s\n", truncate(t, 60))
+			}
+		}
+	}
 	b.WriteString("\nName this session.")
 	return b.String()
+}
+
+// lastLine returns the last non-empty line of s, so reasoning models may emit
+// thinking before the final label and we still pick the label.
+func lastLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return t
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func truncate(s string, max int) string {

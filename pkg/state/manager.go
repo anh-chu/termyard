@@ -23,7 +23,8 @@ type SessionMetadata struct {
 	AgentType        string
 	PromptPreview    string
 	AgentSessionID   string
-	UserPrompt       string    // first user message; set once
+	UserPrompt       string    // first user message; set once, for sidebar display
+	LastUserPrompt   string    // latest user message; always updated, for AI naming
 	LastAgentMessage string    // last agent response; always updated
 	DisplayName      string    // AI-generated friendly label, refreshed as work evolves
 	UserSetName      bool      // user manually set DisplayName; AI must not overwrite
@@ -395,20 +396,32 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 		meta.AgentSessionID = evt.AgentSessionID
 	}
 	firstPrompt := false
-	if evt.UserPrompt != "" && meta.UserPrompt == "" {
-		meta.UserPrompt = evt.UserPrompt
-		changed = true
-		if !meta.NameAssigned && !meta.UserSetName {
-			firstPrompt = true
+	nameRefresh := false
+	if evt.UserPrompt != "" {
+		if meta.UserPrompt == "" {
+			meta.UserPrompt = evt.UserPrompt // first message; sidebar display, set once
+			if !meta.NameAssigned && !meta.UserSetName {
+				firstPrompt = true
+			}
+		}
+		if meta.LastUserPrompt != evt.UserPrompt {
+			meta.LastUserPrompt = evt.UserPrompt // always track latest for AI naming
+			changed = true
+			// A new user prompt steers the work; re-name (debounced) unless the
+			// first-prompt pass below already handles it.
+			if !firstPrompt && !meta.UserSetName &&
+				time.Since(meta.LastNamedAt) > nameRefreshInterval {
+				nameRefresh = true
+				meta.LastNamedAt = time.Now()
+			}
 		}
 	}
-	nameRefresh := false
 	if evt.AgentMessage != "" && meta.LastAgentMessage != evt.AgentMessage {
 		meta.LastAgentMessage = evt.AgentMessage
 		changed = true
 		// Re-name on completed turns as the work evolves, debounced per session.
-		// firstPrompt already covers the very first naming pass.
-		if !firstPrompt && !meta.UserSetName && evt.Status == toolevents.StatusCompleted &&
+		// firstPrompt / a fresh user prompt already cover the other naming passes.
+		if !firstPrompt && !nameRefresh && !meta.UserSetName && evt.Status == toolevents.StatusCompleted &&
 			time.Since(meta.LastNamedAt) > nameRefreshInterval {
 			nameRefresh = true
 			meta.LastNamedAt = time.Now()
@@ -468,13 +481,18 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 	if sess != nil && sess.ProjectPath != "" {
 		projectPath = sess.ProjectPath
 	}
+	prompt := meta.LastUserPrompt
+	if prompt == "" {
+		prompt = meta.UserPrompt
+	}
 	nc := namer.Context{
 		Kind:       namer.KindAgent,
 		Workdir:    projectPath,
 		Agent:      meta.AgentType,
-		UserPrompt: meta.UserPrompt,
+		UserPrompt: prompt,
 		AgentMsg:   meta.LastAgentMessage,
 		Current:    meta.DisplayName,
+		Taken:      m.otherDisplayNames(sessionName),
 	}
 	blocked := meta.UserSetName
 	m.mu.RUnlock()
@@ -498,6 +516,40 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 	logrus.WithFields(logrus.Fields{"session": sessionName, "name": name}).Info("agent session named")
 
 	m.applyGeneratedName(sessionName, name, !attached)
+}
+
+// otherDisplayNames returns the labels of every session except exclude, so the
+// namer can pick something distinct. Prefers DisplayName, falls back to the
+// session/meta key. Caller must hold m.mu (read or write).
+func (m *Manager) otherDisplayNames(exclude string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(name string) {
+		if name = strings.TrimSpace(name); name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for name, meta := range m.meta {
+		if name == exclude {
+			continue
+		}
+		if meta.DisplayName != "" {
+			add(meta.DisplayName)
+		} else {
+			add(name)
+		}
+	}
+	for name := range m.sessions {
+		if name == exclude {
+			continue
+		}
+		if _, ok := m.meta[name]; !ok {
+			add(name)
+		}
+	}
+	return out
 }
 
 // GenerateGroupName synthesizes a single label for a layout group from its
@@ -650,13 +702,14 @@ func (m *Manager) TriggerShellNaming(sessionName string, commands []string) {
 		}
 	}
 	userSet := meta.UserSetName
+	taken := m.otherDisplayNames(sessionName)
 	m.mu.RUnlock()
 
 	if n == nil || !n.Enabled() || sess == nil || userSet || agentType != "" || len(commands) == 0 {
 		return
 	}
 
-	nc := namer.Context{Kind: namer.KindShell, Workdir: projectPath, Commands: commands, Current: meta.DisplayName}
+	nc := namer.Context{Kind: namer.KindShell, Workdir: projectPath, Commands: commands, Current: meta.DisplayName, Taken: taken}
 	if projectPath != "" {
 		if b, err := git.CurrentBranch(projectPath); err == nil {
 			nc.Branch = b
