@@ -38,6 +38,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	stateMgr := state.NewManager(client)
 	tracker := toolevents.NewTracker()
+	tracker.EnablePersistence()
 	actTracker := activity.NewTracker()
 
 	interval := time.Duration(c.Int("discovery-interval")) * time.Second

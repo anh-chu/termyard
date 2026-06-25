@@ -25,3 +25,8 @@ notes/
 # agent artifacts
 .handoffs/
 .pi/tasks/
+
+# agent/tooling scratch
+.pi/
+.proof/
+graphify-out/

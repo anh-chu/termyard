@@ -2,9 +2,13 @@ package toolevents
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/anh-chu/termyard/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -105,6 +109,11 @@ type Tracker struct {
 	subscribers []chan *Event
 
 	sessionMeta map[string]SessionMeta
+
+	// path is the on-disk file for retained state (waiting/error events +
+	// session metadata) so it survives a server restart. Empty = persistence
+	// disabled (the default; tests stay in-memory). Set via EnablePersistence.
+	path string
 }
 
 // NewTracker creates a new tool event tracker
@@ -123,6 +132,83 @@ func NewTracker() *Tracker {
 		activeTurns: make(map[PaneKey]*Event),
 		sessionMeta: make(map[string]SessionMeta),
 	}
+}
+
+// persistedState is the on-disk snapshot of retained tracker state. Events
+// are stored as a slice (PaneKey is a struct and can't be a JSON map key);
+// the key is reconstructed from each event's host/session/window/pane on load.
+type persistedState struct {
+	Events      []*Event               `json:"events"`
+	SessionMeta map[string]SessionMeta `json:"session_meta"`
+}
+
+// EnablePersistence loads any previously persisted retained state (waiting/
+// error events + session metadata) and, from now on, writes it back to disk
+// on every Record so it survives a server restart. Best-effort: a missing or
+// corrupt file is ignored, and persistence stays off if the dir can't be made.
+func (t *Tracker) EnablePersistence() {
+	dir, err := config.Dir()
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	t.mu.Lock()
+	t.path = filepath.Join(dir, "toolevents.json")
+	t.load()
+	t.mu.Unlock()
+}
+
+// load reads persisted state from disk. Caller must hold t.mu.
+func (t *Tracker) load() {
+	data, err := os.ReadFile(t.path)
+	if err != nil {
+		return
+	}
+	var st persistedState
+	if err := json.Unmarshal(data, &st); err != nil {
+		return
+	}
+	for _, evt := range st.Events {
+		if evt == nil {
+			continue
+		}
+		t.events[PaneKey{Host: evt.Host, Session: evt.Session, Window: evt.Window, Pane: evt.Pane}] = evt
+	}
+	for k, v := range st.SessionMeta {
+		t.sessionMeta[k] = v
+	}
+}
+
+// persist snapshots retained state under the read lock and writes it to disk.
+// No-op when persistence is disabled. ponytail: writes the whole snapshot on
+// every Record (mirrors auth's per-call save); add a dirty-flag if event rate
+// ever makes this I/O-bound.
+func (t *Tracker) persist() {
+	t.mu.RLock()
+	if t.path == "" {
+		t.mu.RUnlock()
+		return
+	}
+	st := persistedState{
+		Events:      make([]*Event, 0, len(t.events)),
+		SessionMeta: make(map[string]SessionMeta, len(t.sessionMeta)),
+	}
+	for _, evt := range t.events {
+		st.Events = append(st.Events, evt)
+	}
+	for k, v := range t.sessionMeta {
+		st.SessionMeta[k] = v
+	}
+	path := t.path
+	t.mu.RUnlock()
+
+	data, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o600)
 }
 
 // Record stores a new event and broadcasts it to subscribers
@@ -254,6 +340,8 @@ func (t *Tracker) Record(evt *Event) {
 		}
 	}
 	log.WithField("subscribers", sent).Trace("tool event broadcast complete")
+
+	t.persist()
 }
 
 // StaleTimeout is how long an event can sit without an update before being
