@@ -1773,6 +1773,14 @@ func registerFrontendRoutes(r chi.Router) error {
 		} else {
 			f.Close()
 		}
+		// Content-hashed assets are immutable; everything else (index.html, SPA
+		// fallback) must revalidate so a rebuilt binary's new asset hashes are
+		// picked up instead of a stale cached index.html 404ing the old ones.
+		if strings.HasPrefix(r.URL.Path, "/assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 	return nil
