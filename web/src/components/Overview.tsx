@@ -5,7 +5,7 @@ import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
 import { usePreferences } from '../hooks/usePreferences'
 import { toolColors, statusConfig, signalTreatment } from '../theme'
-import { stateRank, sessionSignal, isSessionActive } from '../lib/sessionState'
+import { stateRank, sessionSignal, isSessionActive, SessionState } from '../lib/sessionState'
 import { formatSessionUptime, formatSystemUptime } from '../lib/time'
 
 interface OverviewProps {
@@ -134,10 +134,113 @@ function HostStatsSection({ host, totalPanes }: { host: Host; totalPanes: number
   )
 }
 
+type CardItem = {
+  session: Session
+  key: string
+  signal: ReturnType<typeof sessionSignal>
+  event: ToolEvent | undefined
+  events: ToolEvent[]
+  activity: ActivitySnapshot | undefined
+}
+
+const COLUMN_ORDER: SessionState[] = ['needs_you', 'working', 'idle', 'offline']
+const COLUMN_META: Record<SessionState, { label: string; color: string }> = {
+  needs_you: { label: 'Needs you', color: 'var(--warning)' },
+  working: { label: 'Working', color: 'var(--success)' },
+  idle: { label: 'Idle', color: 'var(--mute)' },
+  offline: { label: 'Offline', color: 'var(--mute)' },
+}
+
+function SessionCard({
+  item,
+  hasMultipleHosts,
+  getSessionEvents,
+  onSessionSelect,
+  onJumpToSession,
+  onDismissAlert,
+  prefs,
+}: {
+  item: CardItem
+  hasMultipleHosts: boolean
+  getSessionEvents: (session: string) => ToolEvent[]
+  onSessionSelect: (session: Session) => void
+  onJumpToSession: (session: string, windowIndex?: number, pane?: string) => void
+  onDismissAlert: (evt: ToolEvent) => void
+  prefs: ReturnType<typeof usePreferences>['prefs']
+}) {
+  const { session, key, signal, event, events, activity } = item
+  const isWaiting = signal.state === 'needs_you'
+  const loudEvent = event || getSessionEvents(key).find(e => e.status === 'waiting' || e.status === 'stuck' || e.status === 'error')
+  // Same task text the sidebar shows: live activity label, else last agent msg / user prompt / capture
+  const taskLine = (events.find(e => e.status === 'active' && !e.auto_detected)?.message || session.last_agent_message?.trim() || session.user_prompt?.trim() || session.prompt_preview?.trim() || '')
+  return (
+    <button
+      key={key}
+      onClick={() => {
+        if (signal.state === 'needs_you' && loudEvent) onJumpToSession(loudEvent.host ? `${loudEvent.host}/${loudEvent.session}` : loudEvent.session, loudEvent.window, loudEvent.pane)
+        else onSessionSelect(session)
+      }}
+      className={`text-left border bg-surface rounded-sm p-4 min-h-36 flex flex-col gap-2 transition-all ${signal.state === 'offline' ? 'opacity-60' : ''}`}
+      style={{
+        borderColor: isWaiting ? 'var(--warning)' : 'var(--hairline)',
+        boxShadow: isWaiting ? '0 0 0 1px var(--warning), 0 0 12px color-mix(in oklch, var(--warning) 25%, transparent)' : undefined,
+      }}
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2">
+            <span className={`font-display text-[15px] font-bold truncate ${signal.state === 'idle' ? 'text-mute' : 'text-ink'}`}>{session.display_name || session.name}</span>
+            {session.attached && <span className="text-[9px] font-bold tracking-wider text-success px-1.5 py-[1.5px] rounded-sm bg-success/10 border border-success/20">attached</span>}
+          </div>
+          <div className="text-[10px] text-mute/60">
+            {hasMultipleHosts && <span className="text-mute/50">{session.host_name || 'Local'} · </span>}
+            {formatSessionUptime(session.created, prefs.timestamp_format)}
+          </div>
+        </div>
+        {signal.state === 'needs_you' && loudEvent && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDismissAlert(loudEvent) }}
+            className="text-mute/30 hover:text-ink transition-colors leading-none"
+            title="Dismiss alert"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 text-xs font-bold text-mute/70">
+        <span className="flex items-center gap-1.5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>{session.windows?.length || 0}</span>
+        {signal.agentCount > 0 && <span className="flex items-center gap-1.5" style={{ color: toolColors.claude }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>{signal.agentCount}</span>}
+        {signal.state === 'working' ? <span className="text-success">working</span> : signal.state === 'idle' ? <span className="text-mute/40">idle</span> : signal.state === 'offline' ? <span className="text-mute/40">offline</span> : signal.state === 'needs_you' ? <span className="text-warning font-bold">needs you</span> : null}
+      </div>
+
+      {signal.state === 'needs_you' && loudEvent ? (
+        <div className="text-[12px] text-ink leading-snug flex-1">
+          <span style={{ color: toolColors[loudEvent.tool] || 'var(--mute)' }} className="font-bold">{loudEvent.tool.toUpperCase()}</span>{' '}
+          <span style={{ color: signalTreatment[signal.state].text }} className="font-medium">{(statusConfig[loudEvent.status] || { label: loudEvent.status }).label}</span>{' '}
+          <span className="text-mute/70">{loudEvent.host_name ? `${loudEvent.host_name}: ` : ''}{loudEvent.message || 'Needs attention'}</span>
+        </div>
+      ) : (
+        <>
+          {taskLine && <div className="text-[12px] text-mute/80 leading-snug flex-1 line-clamp-3">{taskLine}</div>}
+          {signal.state === 'working' && prefs.sparklines_visible && activity?.sparkline && (
+            <div className="mt-auto pt-2 border-t border-hairline/40">
+              <Sparkline data={activity.sparkline} height={18} />
+            </div>
+          )}
+          {!taskLine && <div className="mt-auto text-[12px] text-mute/60">{isSessionActive(session) ? 'active' : 'calm'}</div>}
+        </>
+      )}
+    </button>
+  )
+}
+
 export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert }: OverviewProps) {
   const [stats, setStats] = useState<Stats | null>(null)
   const { prefs } = usePreferences()
   const hasMultipleHosts = hosts.length > 1
+  const [layout, setLayout] = useState<'grid' | 'board'>(() => (localStorage.getItem('overview_layout') === 'board' ? 'board' : 'grid'))
+  useEffect(() => { localStorage.setItem('overview_layout', layout) }, [layout])
 
   const foregroundSessions = useMemo(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && !backgroundSet.has(sessionKey(s))), [sessions, hiddenSet, backgroundSet])
   const hiddenCount = sessions.length - foregroundSessions.length
@@ -155,30 +258,59 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
     return () => clearInterval(interval)
   }, [prefs.overview_refresh_interval])
 
-  const grouped = useMemo(() => {
-    const groups = new Map<string, Array<{ session: Session; key: string; signal: ReturnType<typeof sessionSignal>; event: ToolEvent | undefined; events: ToolEvent[]; activity: ActivitySnapshot | undefined }>>()
-    for (const session of foregroundSessions) {
-      const key = sessionKey(session)
-      const events = getSessionEvents(key)
-      const activity = getSessionActivity(key)
-      const signal = sessionSignal(session, events, activity, isSessionInActiveTurn(key))
-      const groupLabel = hasMultipleHosts ? (session.host_name || 'Local') : 'Sessions'
-      if (!groups.has(groupLabel)) groups.set(groupLabel, [])
-      groups.get(groupLabel)!.push({ session, key, signal, event: events.find(e => e.status === 'waiting' || e.status === 'stuck' || e.status === 'error'), events, activity })
-    }
+  const items = useMemo<CardItem[]>(() => foregroundSessions.map(session => {
+    const key = sessionKey(session)
+    const events = getSessionEvents(key)
+    const activity = getSessionActivity(key)
+    const signal = sessionSignal(session, events, activity, isSessionInActiveTurn(key))
+    const event = events.find(e => e.status === 'waiting' || e.status === 'stuck' || e.status === 'error')
+    return { session, key, signal, event, events, activity }
+  }), [foregroundSessions, getSessionEvents, getSessionActivity, isSessionInActiveTurn])
 
+  const grouped = useMemo(() => {
+    const groups = new Map<string, CardItem[]>()
+    for (const item of items) {
+      const groupLabel = hasMultipleHosts ? (item.session.host_name || 'Local') : 'Sessions'
+      if (!groups.has(groupLabel)) groups.set(groupLabel, [])
+      groups.get(groupLabel)!.push(item)
+    }
     return Array.from(groups.entries())
       .sort(([a], [b]) => (a === 'Local' || a === 'Sessions' ? -1 : b === 'Local' || b === 'Sessions' ? 1 : a.localeCompare(b)))
-      .map(([groupLabel, items]) => ({
+      .map(([groupLabel, groupItems]) => ({
         groupLabel,
-        items: items.sort((a, b) => stateRank[a.signal.state] - stateRank[b.signal.state] || a.session.name.localeCompare(b.session.name)),
+        items: groupItems.sort((a, b) => stateRank[a.signal.state] - stateRank[b.signal.state] || a.session.name.localeCompare(b.session.name)),
       }))
-  }, [foregroundSessions, getSessionEvents, getSessionActivity, hasMultipleHosts, isSessionInActiveTurn])
+  }, [items, hasMultipleHosts])
+
+  const byState = useMemo(() => COLUMN_ORDER.map(state => ({
+    state,
+    items: items
+      .filter(i => i.signal.state === state)
+      .sort((a, b) => {
+        // needs_you: longest-blocked first (oldest loud event); else by name
+        if (state === 'needs_you') return (a.event?.timestamp || '').localeCompare(b.event?.timestamp || '')
+        return a.session.name.localeCompare(b.session.name)
+      }),
+  })), [items])
 
   const activeHostSections = hosts.filter(h => h.stats)
 
   return (
     <div className="flex-1 p-8 overflow-y-auto font-sans text-sm font-medium bg-canvas">
+      <div className="flex items-center justify-end mb-4">
+        <div className="inline-flex rounded-sm border border-hairline overflow-hidden text-[11px] font-bold">
+          {(['grid', 'board'] as const).map(l => (
+            <button
+              key={l}
+              onClick={() => setLayout(l)}
+              className={`px-3 py-1.5 transition-colors ${layout === l ? 'bg-surface-elevated text-ink' : 'text-mute/60 hover:text-ink'}`}
+            >
+              {l === 'grid' ? 'Grid' : 'Board'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {foregroundSessions.length === 0 && (
         <div className="mb-10">
           <div className="text-mute text-[13px] font-medium mb-4 ml-1">
@@ -191,77 +323,37 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
         </div>
       )}
 
-      {grouped.map(({ groupLabel, items }) => (
-        <div key={groupLabel} className="mb-10">
-          <h3 className="font-display text-[13px] font-bold text-ink mb-4 flex items-center gap-2">
-            {groupLabel}
-            {hasMultipleHosts && <span className={`text-[10px] font-medium ${items[0]?.session.host_online !== false ? 'text-success' : 'text-mute/50'}`}>{items[0]?.session.host_online !== false ? 'online' : 'offline'}</span>}
-            <span className="text-mute/40 font-bold text-xs ml-1">({items.length})</span>
-          </h3>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
-            {items.map(({ session, key, signal, event, activity }) => {
-              const t = signalTreatment[signal.state]
-              const isWaiting = signal.state === 'needs_you'
-              const loudEvent = event || getSessionEvents(key).find(e => e.status === 'waiting' || e.status === 'stuck' || e.status === 'error')
-              return (
-                <button
-                  key={key}
-                  onClick={() => {
-                    if (signal.state === 'needs_you' && loudEvent) onJumpToSession(loudEvent.host ? `${loudEvent.host}/${loudEvent.session}` : loudEvent.session, loudEvent.window, loudEvent.pane)
-                    else onSessionSelect(session)
-                  }}
-                  className={`text-left border bg-surface rounded-sm p-4 min-h-36 flex flex-col gap-2 transition-all ${signal.state === 'offline' ? 'opacity-60' : ''}`}
-                  style={{
-                    borderColor: isWaiting ? 'var(--warning)' : 'var(--hairline)',
-                    boxShadow: isWaiting ? '0 0 0 1px var(--warning), 0 0 12px color-mix(in oklch, var(--warning) 25%, transparent)' : undefined,
-                  }}
-                >
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start gap-2">
-                        <span className={`font-display text-[15px] font-bold truncate ${signal.state === 'idle' ? 'text-mute' : 'text-ink'}`}>{session.display_name || session.name}</span>
-                        {session.attached && <span className="text-[9px] font-bold tracking-wider text-success px-1.5 py-[1.5px] rounded-sm bg-success/10 border border-success/20">attached</span>}
-                      </div>
-                      <div className="text-[10px] text-mute/60">{formatSessionUptime(session.created, prefs.timestamp_format)}</div>
-                    </div>
-                    {signal.state === 'needs_you' && loudEvent && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onDismissAlert(loudEvent) }}
-                        className="text-mute/30 hover:text-ink transition-colors leading-none"
-                        title="Dismiss alert"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-3 text-xs font-bold text-mute/70">
-                    <span className="flex items-center gap-1.5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>{session.windows?.length || 0}</span>
-                    {signal.agentCount > 0 && <span className="flex items-center gap-1.5" style={{ color: toolColors.claude }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>{signal.agentCount}</span>}
-                    {signal.state === 'working' ? <span className="text-success">working</span> : signal.state === 'idle' ? <span className="text-mute/40">idle</span> : signal.state === 'offline' ? <span className="text-mute/40">offline</span> : signal.state === 'needs_you' ? <span className="text-warning font-bold">needs you</span> : null}
-                  </div>
-
-                  {signal.state === 'needs_you' && loudEvent ? (
-                    <div className="text-[12px] text-ink leading-snug flex-1">
-                      <span style={{ color: toolColors[loudEvent.tool] || 'var(--mute)' }} className="font-bold">{loudEvent.tool.toUpperCase()}</span>{' '}
-                      <span style={{ color: t.text }} className="font-medium">{(statusConfig[loudEvent.status] || { label: loudEvent.status }).label}</span>{' '}
-                      <span className="text-mute/70">{loudEvent.host_name ? `${loudEvent.host_name}: ` : ''}{loudEvent.message || 'Needs attention'}</span>
-                    </div>
-                  ) : signal.state === 'working' ? (
-                    prefs.sparklines_visible && activity?.sparkline ? (
-                      <div className="mt-auto pt-2 border-t border-hairline/40">
-                        <Sparkline data={activity.sparkline} height={18} />
-                      </div>
-                    ) : null
-                  ) : (
-                    <div className="mt-auto text-[12px] text-mute/60">{isSessionActive(session) ? 'active' : 'calm'}</div>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+      {layout === 'board' ? (
+        <div className="flex gap-3 mb-10 items-start">
+          {byState.filter(({ state, items: colItems }) => state === 'needs_you' || colItems.length > 0).map(({ state, items: colItems }) => (
+            <div key={state} className="flex-1 min-w-[240px] max-w-[400px] flex flex-col gap-2">
+              <h3 className="font-display text-[13px] font-bold text-ink mb-1 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLUMN_META[state].color }} />
+                {COLUMN_META[state].label}
+                <span className="text-mute/40 font-bold text-xs">({colItems.length})</span>
+              </h3>
+              {colItems.map(item => (
+                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
+              ))}
+            </div>
+          ))}
         </div>
-      ))}
+      ) : (
+        grouped.map(({ groupLabel, items: groupItems }) => (
+          <div key={groupLabel} className="mb-10">
+            <h3 className="font-display text-[13px] font-bold text-ink mb-4 flex items-center gap-2">
+              {groupLabel}
+              {hasMultipleHosts && <span className={`text-[10px] font-medium ${groupItems[0]?.session.host_online !== false ? 'text-success' : 'text-mute/50'}`}>{groupItems[0]?.session.host_online !== false ? 'online' : 'offline'}</span>}
+              <span className="text-mute/40 font-bold text-xs ml-1">({groupItems.length})</span>
+            </h3>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+              {groupItems.map(item => (
+                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
+              ))}
+            </div>
+          </div>
+        ))
+      )}
 
       <details open className="mt-4 rounded-md border border-hairline bg-surface tex-yardgrid overflow-hidden">
         <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between font-display text-[13px] text-ink">
