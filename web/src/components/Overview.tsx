@@ -271,8 +271,8 @@ function SessionCard({
               className="flex items-center gap-1.5 text-[11px] text-mute/60 hover:text-ink cursor-pointer truncate"
               title={`Open ${m.session.display_name || m.session.name}`}
             >
-              <span className="text-mute/30">▸</span>
-              <span className="truncate">{m.session.display_name || m.session.name}</span>
+              <span className="text-mute/30">↳</span>
+              <span className="truncate font-mono">{m.session.display_name || m.session.name}</span>
             </div>
           ))}
         </div>
@@ -338,7 +338,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }, [])
-  const [layout, setLayout] = useState<'grid' | 'board'>(() => (localStorage.getItem('overview_layout') === 'board' ? 'board' : 'grid'))
+  const [layout, setLayout] = useState<'grid' | 'board'>(() => (localStorage.getItem('overview_layout') === 'grid' ? 'grid' : 'board'))
   useEffect(() => { localStorage.setItem('overview_layout', layout) }, [layout])
   const [hiddenRailOpen, setHiddenRailOpen] = useState(() => localStorage.getItem('overview_rail_hidden') === 'open')
   const [bgRailOpen, setBgRailOpen] = useState(() => localStorage.getItem('overview_rail_bg') === 'open')
@@ -478,7 +478,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
       )}
 
       {layout === 'board' ? (
-        <div className="flex gap-3 mb-10 items-start overflow-x-auto">
+        <div className="flex gap-3 mb-10 items-start overflow-x-auto tex-yardgrid rounded-sm p-3">
           {byState.filter(({ state, items: colItems }) => state === 'needs_you' || colItems.length > 0).map(({ state, items: colItems }) => (
             <div key={state} className={`flex flex-col gap-2 ${colItems.length === 0 ? 'min-w-[160px]' : split ? 'min-w-[220px]' : 'min-w-[260px]'}`} style={{ flexGrow: Math.max(colItems.length, 0.5), flexBasis: 0 }}>
               <h3 className="font-display text-[13px] font-bold text-ink mb-1 flex items-center gap-2">
