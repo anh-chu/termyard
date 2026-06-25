@@ -284,6 +284,28 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
   }, [sessions, selected])
   const split = !!selected
   const selectedKey = selected ? sessionKey(selected) : null
+  const [splitWidth, setSplitWidth] = useState(() => {
+    const v = parseInt(localStorage.getItem('overview_split_width') || '', 10)
+    return Number.isFinite(v) && v >= 360 ? Math.min(v, 1200) : 520
+  })
+  useEffect(() => { localStorage.setItem('overview_split_width', String(Math.round(splitWidth))) }, [splitWidth])
+  const startResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const onMove = (ev: PointerEvent) => {
+      const max = Math.max(window.innerWidth - 320, 360) // keep >=320px for the board
+      setSplitWidth(Math.min(Math.max(window.innerWidth - ev.clientX, 360), max))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [])
   const [layout, setLayout] = useState<'grid' | 'board'>(() => (localStorage.getItem('overview_layout') === 'board' ? 'board' : 'grid'))
   useEffect(() => { localStorage.setItem('overview_layout', layout) }, [layout])
   const [hiddenRailOpen, setHiddenRailOpen] = useState(() => localStorage.getItem('overview_rail_hidden') === 'open')
@@ -473,7 +495,9 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
       )}
     </div>
     {selected && (
-      <div className="shrink-0 border-l border-hairline flex flex-col" style={{ width: 'clamp(420px, 42%, 720px)' }}>
+      <>
+      <div onPointerDown={startResize} title="Drag to resize" className="shrink-0 w-1.5 cursor-col-resize bg-hairline/40 hover:bg-primary/50 transition-colors" />
+      <div className="shrink-0 border-l border-hairline flex flex-col" style={{ width: splitWidth }}>
         <div className="shrink-0 h-9 flex items-center gap-2 px-3 border-b border-hairline bg-surface-elevated/40">
           <span className="font-display text-[13px] font-bold text-ink truncate min-w-0 flex-1">{selected.display_name || selected.name}</span>
           <button title="Open full view" onClick={() => onSessionSelect(selected)} className="p-1.5 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-all">
@@ -489,6 +513,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
         </div>
         <div className="min-h-0 flex-1 flex flex-col overflow-hidden"><Terminal key={selectedKey} sessionName={selected.name} hostId={selected.host} /></div>
       </div>
+      </>
     )}
     {glance.popover}
     </div>
