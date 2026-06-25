@@ -1047,6 +1047,17 @@ export function Sidebar({
       (a.created || '') > (b.created || '') ? a : b
     , groupSessions[0])
     const collapsedProject = pathLeaf(groupSessions.find(s => s.project_path)?.project_path)
+    const isToolSession = (s: Session) => {
+      const ev = getSessionEvents(sessionKey(s))
+      const cmd = (() => {
+        for (const w of s.windows ?? []) for (const p of w.panes ?? []) if (p.active) return p.current_command
+        return s.windows?.[0]?.panes?.[0]?.current_command ?? ''
+      })()
+      return !s.agent_type
+        && !ev.some(e => e.status === 'active' && e.auto_detected)
+        && !(s.user_prompt?.trim() || s.last_agent_message?.trim())
+        && SHELL_COMMANDS.has(cmd)
+    }
     return (
       <li key={group.id} className="flex items-stretch">
         {/* Bracket: drag to reorder, click to collapse/expand */}
@@ -1255,17 +1266,50 @@ export function Sidebar({
                   )}
                 </div>
               )}
-              <ul className="space-y-0.5">
-                {groupSessions.map((session) => {
-                  return (
-                    <div key={sessionKey(session)} onClick={() =>
-                      group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sessionKey(session))
-                    }>
-                      {renderSessionItem(session, false, inHostGroup)}
-                    </div>
-                  )
-                })}
-              </ul>
+              {(() => {
+                const tools = groupSessions.filter(isToolSession)
+                const agents = groupSessions.filter(s => !tools.includes(s))
+                const fold = agents.length > 0 && tools.length > 0
+                const primaryKey = fold
+                  ? (group.activeKey && agents.some(s => sessionKey(s) === group.activeKey)
+                    ? group.activeKey
+                    : sessionKey(agents[0]))
+                  : null
+                const renderSessions = fold ? agents : groupSessions
+                return (
+                  <ul className="space-y-0.5">
+                    {renderSessions.map((session) => {
+                      const sk = sessionKey(session)
+                      return (
+                        <div key={sk} onClick={() =>
+                          group.isActive ? onSessionSelect(session) : onSwitchGroup?.(group.id, sk)
+                        }>
+                          {renderSessionItem(session, false, inHostGroup)}
+                          {fold && sk === primaryKey && tools.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pl-3 pr-2 pb-1">
+                              {tools.map((t) => (
+                                <button
+                                  key={sessionKey(t)}
+                                  type="button"
+                                  {...glancePreview.trigger({ name: t.name, host: t.host, display_name: t.display_name, host_name: t.host_name })}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    group.isActive ? onSessionSelect(t) : onSwitchGroup?.(group.id, sessionKey(t))
+                                  }}
+                                  className="inline-flex items-center gap-1 max-w-[12rem] px-1 py-0.5 text-xs text-mute/70 hover:text-ink truncate"
+                                >
+                                  <span className="text-mute/40 shrink-0">↳</span>
+                                  <span className="truncate font-mono text-[11px]">{t.display_name || t.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </ul>
+                )
+              })()}
             </>
           )}
         </div>
