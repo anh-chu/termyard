@@ -13,6 +13,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/activity"
 	"github.com/anh-chu/termyard/pkg/auth"
 	"github.com/anh-chu/termyard/pkg/common"
+	"github.com/anh-chu/termyard/pkg/groupsync"
 	"github.com/anh-chu/termyard/pkg/identity"
 	"github.com/anh-chu/termyard/pkg/namer"
 	"github.com/anh-chu/termyard/pkg/peer"
@@ -22,6 +23,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/scheduler"
 	"github.com/anh-chu/termyard/pkg/server"
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
+	"github.com/anh-chu/termyard/pkg/sessionorder"
 	"github.com/anh-chu/termyard/pkg/state"
 	"github.com/anh-chu/termyard/pkg/tmux"
 	"github.com/anh-chu/termyard/pkg/toolevents"
@@ -86,6 +88,18 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		logrus.WithError(err).Warn("failed to load session-attrs store, sync disabled")
 		attrsStore = nil
+	}
+
+	orderStore, err := sessionorder.NewStore()
+	if err != nil {
+		logrus.WithError(err).Warn("failed to load session-order store, sync disabled")
+		orderStore = nil
+	}
+
+	groupStore, err := groupsync.NewStore()
+	if err != nil {
+		logrus.WithError(err).Warn("failed to load groups store, sync disabled")
+		groupStore = nil
 	}
 
 	var health *recovery.HealthPoller
@@ -260,6 +274,8 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PushStore:        pushStore,
 		PrefStore:        prefStore,
 		AttrsStore:       attrsStore,
+		OrderStore:       orderStore,
+		GroupStore:       groupStore,
 		AuthEnabled:      authEnabled,
 		PasswordStore:    passwordStore,
 		SessionMgr:       sessionMgr,

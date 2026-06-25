@@ -88,9 +88,20 @@ func (s *LinkSupervisor) SetAttrsSink(sink SessionAttrsSink) {
 	s.deps.AttrsSink = sink
 }
 
+// SetOrderSink wires the session-order store after construction.
+func (s *LinkSupervisor) SetOrderSink(sink SessionOrderSink) {
+	s.deps.OrderSink = sink
+}
+
+// SetGroupSink wires the group store after construction.
+func (s *LinkSupervisor) SetGroupSink(sink GroupSink) {
+	s.deps.GroupSink = sink
+}
+
 // SetBrowserHub wires the browser-events hub after construction.
 func (s *LinkSupervisor) SetBrowserHub(hub BrowserBroadcaster) {
 	s.deps.BrowserHub = hub
+
 }
 
 // Start begins supervision. Spawns reconnectors for enabled dialer-side peers

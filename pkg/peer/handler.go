@@ -38,9 +38,20 @@ func (h *Handler) SetAttrsSink(sink SessionAttrsSink) {
 	h.deps.AttrsSink = sink
 }
 
+// SetOrderSink wires the session-order store after construction.
+func (h *Handler) SetOrderSink(sink SessionOrderSink) {
+	h.deps.OrderSink = sink
+}
+
+// SetGroupSink wires the group store after construction.
+func (h *Handler) SetGroupSink(sink GroupSink) {
+	h.deps.GroupSink = sink
+}
+
 // SetBrowserHub wires the browser-events hub after construction.
 func (h *Handler) SetBrowserHub(hub BrowserBroadcaster) {
 	h.deps.BrowserHub = hub
+
 }
 
 // HandlePeer handles /ws/peer for incoming control-channel connections.

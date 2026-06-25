@@ -53,6 +53,18 @@ const (
 	// MsgSessionAttrsDelta carries a single-key shared session-attribute
 	// update across paired peers. Per-key LWW by UpdatedAt.
 	MsgSessionAttrsDelta = "session-attrs-delta"
+	// MsgSessionOrderSnapshot carries the full shared session-order map
+	// (rank per session key) to a freshly-connected peer for per-key LWW
+	// reconciliation.
+	MsgSessionOrderSnapshot = "session-order-snapshot"
+	// MsgSessionOrderDelta carries a single-key shared session-order update
+	// across paired peers. Per-key LWW by UpdatedAt.
+	MsgSessionOrderDelta = "session-order-delta"
+	// MsgGroupSnapshot carries the full shared group map to a freshly-connected
+	// peer for field-level LWW reconciliation.
+	MsgGroupSnapshot = "group-snapshot"
+	// MsgGroupDelta carries a single group update across paired peers.
+	MsgGroupDelta = "group-delta"
 )
 
 // Message types reserved for future per-terminal stream setup.
@@ -181,6 +193,49 @@ type SessionAttrsDeltaPayload struct {
 	Origin string      `json:"origin"`
 	Key    string      `json:"key"`
 	Attr   SessionAttr `json:"attr"`
+}
+
+// SessionOrder is the shared rank set for one global session key.
+type SessionOrder struct {
+	Rank      string    `json:"rank"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SessionOrderSnapshotPayload carries the full order map to a peer.
+type SessionOrderSnapshotPayload struct {
+	Origin string                  `json:"origin"`
+	Orders map[string]SessionOrder `json:"orders"`
+}
+
+// SessionOrderDeltaPayload carries a single-key order update.
+type SessionOrderDeltaPayload struct {
+	Origin string       `json:"origin"`
+	Key    string       `json:"key"`
+	Order  SessionOrder `json:"order"`
+}
+
+// Group is the wire form for one synced group record.
+type Group struct {
+	Tree          json.RawMessage `json:"tree"`
+	TreeUpdatedAt time.Time       `json:"tree_updated_at"`
+	Name          string          `json:"name"`
+	NameUpdatedAt time.Time       `json:"name_updated_at"`
+	Rank          string          `json:"rank"`
+	RankUpdatedAt time.Time       `json:"rank_updated_at"`
+	DeletedAt     time.Time       `json:"deleted_at"`
+}
+
+// GroupSnapshotPayload carries the full group map to a peer.
+type GroupSnapshotPayload struct {
+	Origin string           `json:"origin"`
+	Groups map[string]Group `json:"groups"`
+}
+
+// GroupDeltaPayload carries a single group update.
+type GroupDeltaPayload struct {
+	Origin string `json:"origin"`
+	ID     string `json:"id"`
+	Group  Group  `json:"group"`
 }
 
 // SessionActionPayload forwards a session API action to a peer

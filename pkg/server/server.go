@@ -35,6 +35,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/auth"
 	"github.com/anh-chu/termyard/pkg/common"
 	"github.com/anh-chu/termyard/pkg/git"
+	"github.com/anh-chu/termyard/pkg/groupsync"
 	"github.com/anh-chu/termyard/pkg/identity"
 	"github.com/anh-chu/termyard/pkg/namer"
 	"github.com/anh-chu/termyard/pkg/peer"
@@ -43,6 +44,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/recovery"
 	"github.com/anh-chu/termyard/pkg/scheduler"
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
+	"github.com/anh-chu/termyard/pkg/sessionorder"
 	"github.com/anh-chu/termyard/pkg/socket"
 	"github.com/anh-chu/termyard/pkg/state"
 	"github.com/anh-chu/termyard/pkg/stats"
@@ -67,6 +69,8 @@ type Options struct {
 	PrefStore        *preferences.Store
 	OnPrefsChanged   func(*preferences.Preferences)
 	AttrsStore       *sessionattrs.Store
+	OrderStore       *sessionorder.Store
+	GroupStore       *groupsync.Store
 	AuthEnabled      bool
 	PasswordStore    *auth.PasswordStore
 	SessionMgr       *auth.SessionManager
@@ -109,6 +113,84 @@ func (a attrsStoreAdapter) SnapshotAttrs() map[string]peer.SessionAttr {
 	out := make(map[string]peer.SessionAttr, len(snap))
 	for k, v := range snap {
 		out[k] = peer.SessionAttr{Background: v.Background, Hidden: v.Hidden, UpdatedAt: v.UpdatedAt}
+	}
+	return out
+}
+
+// sessionOrderStoreAdapter bridges sessionorder.Store to the peer narrow sink.
+type sessionOrderStoreAdapter struct {
+	store *sessionorder.Store
+}
+
+func (a sessionOrderStoreAdapter) ApplyRemoteDelta(key, rank string, updatedAt time.Time) (bool, error) {
+	_, accepted, err := a.store.ApplyRemote(key, sessionorder.Order{Rank: rank, UpdatedAt: updatedAt})
+	return accepted, err
+}
+
+func (a sessionOrderStoreAdapter) ApplyRemoteSnapshot(orders map[string]peer.SessionOrder) ([]string, error) {
+	conv := make(map[string]sessionorder.Order, len(orders))
+	for k, v := range orders {
+		conv[k] = sessionorder.Order{Rank: v.Rank, UpdatedAt: v.UpdatedAt}
+	}
+	return a.store.ApplySnapshot(conv)
+}
+
+func (a sessionOrderStoreAdapter) SnapshotOrders() map[string]peer.SessionOrder {
+	snap := a.store.Snapshot()
+	out := make(map[string]peer.SessionOrder, len(snap))
+	for k, v := range snap {
+		out[k] = peer.SessionOrder{Rank: v.Rank, UpdatedAt: v.UpdatedAt}
+	}
+	return out
+}
+
+// groupStoreAdapter bridges groupsync.Store to the peer narrow sink.
+type groupStoreAdapter struct {
+	store *groupsync.Store
+}
+
+func (a groupStoreAdapter) ApplyRemoteDelta(id string, group peer.Group) (bool, error) {
+	_, accepted, err := a.store.ApplyRemote(id, groupsync.Group{
+		Tree:          append(json.RawMessage(nil), group.Tree...),
+		TreeUpdatedAt: group.TreeUpdatedAt,
+		Name:          group.Name,
+		NameUpdatedAt: group.NameUpdatedAt,
+		Rank:          group.Rank,
+		RankUpdatedAt: group.RankUpdatedAt,
+		DeletedAt:     group.DeletedAt,
+	})
+	return accepted, err
+}
+
+func (a groupStoreAdapter) ApplyRemoteSnapshot(groups map[string]peer.Group) ([]string, error) {
+	conv := make(map[string]groupsync.Group, len(groups))
+	for id, g := range groups {
+		conv[id] = groupsync.Group{
+			Tree:          append(json.RawMessage(nil), g.Tree...),
+			TreeUpdatedAt: g.TreeUpdatedAt,
+			Name:          g.Name,
+			NameUpdatedAt: g.NameUpdatedAt,
+			Rank:          g.Rank,
+			RankUpdatedAt: g.RankUpdatedAt,
+			DeletedAt:     g.DeletedAt,
+		}
+	}
+	return a.store.ApplySnapshot(conv)
+}
+
+func (a groupStoreAdapter) SnapshotGroups() map[string]peer.Group {
+	snap := a.store.Snapshot()
+	out := make(map[string]peer.Group, len(snap))
+	for id, g := range snap {
+		out[id] = peer.Group{
+			Tree:          append(json.RawMessage(nil), g.Tree...),
+			TreeUpdatedAt: g.TreeUpdatedAt,
+			Name:          g.Name,
+			NameUpdatedAt: g.NameUpdatedAt,
+			Rank:          g.Rank,
+			RankUpdatedAt: g.RankUpdatedAt,
+			DeletedAt:     g.DeletedAt,
+		}
 	}
 	return out
 }
@@ -161,6 +243,48 @@ func fanoutAttrsDeltaToPeers(opts *Options, key string, a sessionattrs.Attr) {
 		Origin: opts.Identity.Fingerprint(),
 		Key:    key,
 		Attr:   peer.SessionAttr{Background: a.Background, Hidden: a.Hidden, UpdatedAt: a.UpdatedAt},
+	})
+	if err != nil {
+		return
+	}
+	for _, pc := range opts.PeerMgr.ConnectedPeers() {
+		pc.Enqueue(msg)
+	}
+}
+
+func fanoutOrderDeltaToPeers(opts *Options, key string, o sessionorder.Order) {
+	if opts.PeerMgr == nil || opts.Identity == nil {
+		return
+	}
+	msg, err := peer.NewMessage(peer.MsgSessionOrderDelta, peer.SessionOrderDeltaPayload{
+		Origin: opts.Identity.Fingerprint(),
+		Key:    key,
+		Order:  peer.SessionOrder{Rank: o.Rank, UpdatedAt: o.UpdatedAt},
+	})
+	if err != nil {
+		return
+	}
+	for _, pc := range opts.PeerMgr.ConnectedPeers() {
+		pc.Enqueue(msg)
+	}
+}
+
+func fanoutGroupDeltaToPeers(opts *Options, id string, g groupsync.Group) {
+	if opts.PeerMgr == nil || opts.Identity == nil {
+		return
+	}
+	msg, err := peer.NewMessage(peer.MsgGroupDelta, peer.GroupDeltaPayload{
+		Origin: opts.Identity.Fingerprint(),
+		ID:     id,
+		Group: peer.Group{
+			Tree:          append(json.RawMessage(nil), g.Tree...),
+			TreeUpdatedAt: g.TreeUpdatedAt,
+			Name:          g.Name,
+			NameUpdatedAt: g.NameUpdatedAt,
+			Rank:          g.Rank,
+			RankUpdatedAt: g.RankUpdatedAt,
+			DeletedAt:     g.DeletedAt,
+		},
 	})
 	if err != nil {
 		return
@@ -623,20 +747,15 @@ func setupHub(opts *Options) *ws.Hub {
 }
 
 func wireSessionAttrsSync(opts *Options, hub *ws.Hub) {
-	// Wire cross-machine session-attribute sync. The peer subsystem applies
-	// inbound MsgSessionAttrs{Snapshot,Delta} to our server-authoritative store
-	// (per-key LWW) and bounces session-attrs-updated through the browser hub.
-	// Keys are global and host-qualified on every node — no translation layer.
-	if opts.AttrsStore != nil {
-		// Migrate shared session attributes (schedule_id, background, hidden)
-		// across a rename so a scheduled/parked session keeps its grouping and
-		// state when AI naming or a manual rename changes the tmux session key.
-		if opts.StateMgr != nil {
-			localHost := ""
-			if opts.Identity != nil {
-				localHost = opts.Identity.Fingerprint()
-			}
-			opts.StateMgr.SetRenameHook(func(oldName, newName string) {
+	// Wire cross-machine sync. Peer subsystem applies inbound snapshots/deltas to
+	// server-authoritative stores and bounces browser events through hub.
+	if opts.StateMgr != nil {
+		localHost := ""
+		if opts.Identity != nil {
+			localHost = opts.Identity.Fingerprint()
+		}
+		opts.StateMgr.SetRenameHook(func(oldName, newName string) {
+			if opts.AttrsStore != nil {
 				migrated, err := opts.AttrsStore.MigrateKey(localHost, oldName, newName)
 				if err != nil {
 					logrus.WithError(err).WithField("session", newName).Warn("failed to persist migrated session attrs")
@@ -648,16 +767,69 @@ func wireSessionAttrsSync(opts *Options, hub *ws.Hub) {
 						hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": key})
 					}
 				}
-			})
-		}
+			}
+			if opts.OrderStore != nil {
+				migrated, err := opts.OrderStore.MigrateKey(localHost, oldName, newName)
+				if err != nil {
+					logrus.WithError(err).WithField("session", newName).Warn("failed to persist migrated session order")
+				}
+				for _, key := range migrated {
+					order := opts.OrderStore.Get(key)
+					fanoutOrderDeltaToPeers(opts, key, order)
+					if hub != nil {
+						hub.BroadcastJSON(map[string]interface{}{"type": "session-order-updated", "key": key})
+					}
+				}
+			}
+			if opts.GroupStore != nil {
+				changed, err := opts.GroupStore.MigrateKey(localHost, oldName, newName)
+				if err != nil {
+					logrus.WithError(err).WithField("session", newName).Warn("failed to persist migrated groups")
+				}
+				for _, id := range changed {
+					group, ok := opts.GroupStore.Get(id)
+					if !ok {
+						continue
+					}
+					fanoutGroupDeltaToPeers(opts, id, group)
+					if hub != nil {
+						hub.BroadcastJSON(map[string]interface{}{"type": "groups-updated", "id": id})
+					}
+				}
+			}
+		})
+	}
+	if opts.AttrsStore != nil {
 		sink := attrsStoreAdapter{store: opts.AttrsStore}
 		if opts.LinkSupervisor != nil {
 			opts.LinkSupervisor.SetAttrsSink(sink)
-			opts.LinkSupervisor.SetBrowserHub(hub)
 		}
 		if opts.PeerHandler != nil {
 			opts.PeerHandler.SetAttrsSink(sink)
-			opts.PeerHandler.SetBrowserHub(hub)
+		}
+	}
+	if opts.LinkSupervisor != nil {
+		opts.LinkSupervisor.SetBrowserHub(hub)
+	}
+	if opts.PeerHandler != nil {
+		opts.PeerHandler.SetBrowserHub(hub)
+	}
+	if opts.OrderStore != nil {
+		sink := sessionOrderStoreAdapter{store: opts.OrderStore}
+		if opts.LinkSupervisor != nil {
+			opts.LinkSupervisor.SetOrderSink(sink)
+		}
+		if opts.PeerHandler != nil {
+			opts.PeerHandler.SetOrderSink(sink)
+		}
+	}
+	if opts.GroupStore != nil {
+		sink := groupStoreAdapter{store: opts.GroupStore}
+		if opts.LinkSupervisor != nil {
+			opts.LinkSupervisor.SetGroupSink(sink)
+		}
+		if opts.PeerHandler != nil {
+			opts.PeerHandler.SetGroupSink(sink)
 		}
 	}
 }
@@ -1481,6 +1653,99 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				fanoutAttrsDeltaToPeers(opts, body.Key, a)
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(opts.AttrsStore.Sets())
+			})
+
+			// Session-order endpoints — server-authoritative, per-session rank map.
+			r.Get("/session-order", func(w http.ResponseWriter, r *http.Request) {
+				if opts.OrderStore == nil {
+					http.Error(w, "session order not available", http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(opts.OrderStore.Ranks())
+			})
+			r.Post("/session-order", func(w http.ResponseWriter, r *http.Request) {
+				if opts.OrderStore == nil {
+					http.Error(w, "session order not available", http.StatusServiceUnavailable)
+					return
+				}
+				var body struct {
+					Key  string `json:"key"`
+					Rank string `json:"rank"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Key == "" {
+					http.Error(w, "key is required", http.StatusBadRequest)
+					return
+				}
+				order, err := opts.OrderStore.Set(body.Key, body.Rank)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if hub != nil {
+					hub.BroadcastJSON(map[string]interface{}{"type": "session-order-updated", "key": body.Key})
+				}
+				fanoutOrderDeltaToPeers(opts, body.Key, order)
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(opts.OrderStore.Ranks())
+			})
+
+			// Group endpoints — server-authoritative, durable field-LWW records.
+			r.Get("/groups", func(w http.ResponseWriter, r *http.Request) {
+				if opts.GroupStore == nil {
+					http.Error(w, "groups not available", http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(opts.GroupStore.Live())
+			})
+			r.Post("/groups", func(w http.ResponseWriter, r *http.Request) {
+				if opts.GroupStore == nil {
+					http.Error(w, "groups not available", http.StatusServiceUnavailable)
+					return
+				}
+				var body struct {
+					ID   string          `json:"id"`
+					Op   string          `json:"op"`
+					Tree json.RawMessage `json:"tree,omitempty"`
+					Name string          `json:"name,omitempty"`
+					Rank string          `json:"rank,omitempty"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" || body.Op == "" {
+					http.Error(w, "id and op are required", http.StatusBadRequest)
+					return
+				}
+				var (
+					group groupsync.Group
+					err   error
+				)
+				switch body.Op {
+				case "tree":
+					if len(body.Tree) == 0 {
+						http.Error(w, "tree is required", http.StatusBadRequest)
+						return
+					}
+					group, err = opts.GroupStore.SetTree(body.ID, body.Tree)
+				case "name":
+					group, err = opts.GroupStore.SetName(body.ID, body.Name)
+				case "rank":
+					group, err = opts.GroupStore.SetRank(body.ID, body.Rank)
+				case "delete":
+					group, err = opts.GroupStore.Delete(body.ID)
+				default:
+					http.Error(w, "invalid op", http.StatusBadRequest)
+					return
+				}
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if hub != nil {
+					hub.BroadcastJSON(map[string]interface{}{"type": "groups-updated", "id": body.ID, "op": body.Op})
+				}
+				fanoutGroupDeltaToPeers(opts, body.ID, groupsync.Group(group))
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(opts.GroupStore.Live())
 			})
 
 			// Schedule registry

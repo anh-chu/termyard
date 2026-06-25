@@ -9,7 +9,6 @@ import { ScheduleModal } from './components/ScheduleModal'
 import { TopBar } from './components/TopBar'
 import { TiledView } from './components/TiledView'
 import { PaneTree, getLeaves, findLeaf, splitLeaf, insertBesideLeaf, removeLeaf, replaceLeaf, updateRatio, popOut, swapLeaves, movePane } from './lib/paneTree'
-import { pruneGroupTree } from './lib/prune'
 import { SettingsDrawer } from './components/SettingsDrawer'
 import { HelpModal } from './components/HelpModal'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -25,19 +24,23 @@ import { usePushNotifications } from './hooks/usePushNotifications'
 import { usePreferencesProvider, usePreferences, PreferencesContext } from './hooks/usePreferences'
 import { useAuth } from './hooks/useAuth'
 import { useSessionAttrs } from './hooks/useSessionAttrs'
+import { useSessionOrder } from './hooks/useSessionOrder'
+import { useGroupSync } from './hooks/useGroupSync'
 import { Toasts, Toast } from './components/Toasts'
 import { useSelfUpdate, type UpdateStatus } from './hooks/useSelfUpdate'
 import { applyTheme } from './theme'
 import { sessionSignal } from './lib/sessionState'
+import { generateKeyBetween } from 'fractional-indexing'
 
 type View = 'overview' | 'session' | 'settings' | 'setup'
 
 
 type LayoutGroup = {
   id: string
-  tree: PaneTree
+  leaves: string[]
+  isActive: boolean
   activeKey: string | null
-  name?: string
+  name: string | undefined
 }
 
 function getViewFromPath(): { view: View; sessionKey: string | null } {
@@ -61,7 +64,7 @@ function getViewFromPath(): { view: View; sessionKey: string | null } {
   return { view: 'overview', sessionKey: null }
 }
 
-function AppInner({ onLogout }: { onLogout?: () => void }) {
+function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenticated: boolean }) {
   const { sessions, loading: sessionsLoading, refresh } = useSessions()
   const { events: allToolEvents, handleEvent: handleToolEvent, getSessionEvents, sessionNeedsAttention, isSessionInActiveTurn, dismissEvent, dismissAll: dismissAllEvents } = useToolEvents()
   const { getSessionActivity, handleActivityEvent } = useActivity()
@@ -112,13 +115,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     } catch {}
     return null
   })
-  const [savedGroups, setSavedGroups] = useState<LayoutGroup[]>(() => {
-    try {
-      const stored = localStorage.getItem('termyard:saved-groups')
-      if (stored) return JSON.parse(stored)
-    } catch {}
-    return []
-  })
+  const { groups: syncedGroups, loaded: groupsLoaded, refresh: refreshGroups, setTree: setGroupTree, setName: setGroupName, setRank: setGroupRank } = useGroupSync(authenticated)
+  const { ranks: sessionOrderRanks, loaded: sessionOrderLoaded, refresh: refreshSessionOrder, setRank: setSessionOrderRank } = useSessionOrder(authenticated)
   const [activeGroupId, setActiveGroupId] = useState<string>(() => {
     try {
       const stored = localStorage.getItem('termyard:active-group-id')
@@ -126,28 +124,19 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     } catch {}
     return Math.random().toString(36).slice(2)
   })
-  const [activeGroupName, setActiveGroupName] = useState<string>(() => {
-    try { return localStorage.getItem('termyard:active-group-name') || '' } catch { return '' }
-  })
-  const [groupOrder, setGroupOrder] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem('termyard:group-order')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      }
-    } catch {}
-    // Seed from existing group IDs (first run)
-    try {
-      const activeId = localStorage.getItem('termyard:active-group-id')
-      const savedStr = localStorage.getItem('termyard:saved-groups')
-      const saved: LayoutGroup[] = savedStr ? JSON.parse(savedStr) : []
-      const ids = [activeId, ...saved.map(g => g.id)].filter(Boolean) as string[]
-      return Array.from(new Set(ids))
-    } catch {}
-    return []
-  })
+  const migrationStartedRef = useRef(false)
   const selectedSession = singleView ?? activeKey
+  const activeGroup = syncedGroups[activeGroupId]
+  const activeGroupName = activeGroup?.name ?? ''
+
+  useEffect(() => {
+    if (!authenticated || !groupsLoaded || !activeGroup || !paneTree || currentView !== 'session' || singleView) return
+    const id = window.setTimeout(() => {
+      if (JSON.stringify(activeGroup.tree) === JSON.stringify(paneTree)) return
+      void setGroupTree(activeGroupId, paneTree)
+    }, 250)
+    return () => window.clearTimeout(id)
+  }, [authenticated, groupsLoaded, activeGroup, activeGroupId, currentView, paneTree, singleView, setGroupTree])
   const hasMultipleHosts = hosts.length > 1
   const localHostId = hosts.find(h => h.local)?.id
   const [serverVersion, setServerVersion] = useState<string | null>(null)
@@ -190,8 +179,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   // Shared session attributes (background / hidden) — server-authoritative,
   // mirrored across the mesh. Viewport state (pane-tree, active-key,
-  // saved-groups, sidebar-collapsed) stays per-device in localStorage.
-  const { sets: sessionAttrs, setAttr: setSessionAttr, refresh: refreshSessionAttrs } = useSessionAttrs(true)
+  // active-group-id, sidebar-collapsed) stays per-device in localStorage.
+  const { sets: sessionAttrs, setAttr: setSessionAttr, refresh: refreshSessionAttrs } = useSessionAttrs(authenticated)
 
   // Auto-lock: idle detection + optional background accelerator
   const lastActivityRef = useRef<number>(Date.now())
@@ -257,12 +246,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   // Persist saved groups across reloads. Per-device — NOT synced.
   useEffect(() => {
     try {
-      localStorage.setItem('termyard:saved-groups', JSON.stringify(savedGroups))
       localStorage.setItem('termyard:active-group-id', activeGroupId)
-      localStorage.setItem('termyard:active-group-name', activeGroupName)
-      localStorage.setItem('termyard:group-order', JSON.stringify(groupOrder))
     } catch {}
-  }, [savedGroups, activeGroupId, activeGroupName, groupOrder])
+  }, [activeGroupId])
 
   // Sync URL -> state on popstate (back/forward)
   useEffect(() => {
@@ -366,14 +352,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   const removeSessionFromLayout = useCallback((sessKey: string) => {
     closePane(sessKey)
     setSingleView(prev => prev === sessKey ? null : prev)
-    setSavedGroups(prev =>
-      prev.map(group => {
-        if (!findLeaf(group.tree, sessKey)) return group
-        const keep = new Set(getLeaves(group.tree).filter(k => k !== sessKey))
-        const pruned = pruneGroupTree(group.tree, group.activeKey, keep)
-        return pruned ? { ...group, tree: pruned.tree, activeKey: pruned.activeKey } : null
-      }).filter(Boolean) as LayoutGroup[]
-    )
+
   }, [closePane])
 
   const popOutPane = useCallback((sessKey: string) => {
@@ -406,19 +385,25 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   // Navigate back to overview when the tree becomes empty (but not if singleView is active)
   useEffect(() => {
     if (paneTree === null && !singleView && currentView === 'session') {
-      // Remove empty group from order
-      const newOrder = groupOrder.filter(id => id !== activeGroupId)
-      setGroupOrder(newOrder)
-      if (savedGroups.length > 0) {
-        // Pick next in stable order
-        const nextId = newOrder.find(id => savedGroups.some(g => g.id === id)) ?? savedGroups[0].id
-        const next = savedGroups.find(g => g.id === nextId)!
-        setSavedGroups(prev => prev.filter(g => g.id !== nextId))
-        setPaneTree(next.tree)
-        setActiveKey(next.activeKey)
+      const next = Object.entries(syncedGroups)
+        .sort(([idA, a], [idB, b]) => {
+          const aRank = a.rank ?? ''
+          const bRank = b.rank ?? ''
+          if (aRank !== bRank) {
+            if (!aRank) return 1
+            if (!bRank) return -1
+            return aRank.localeCompare(bRank)
+          }
+          return idA.localeCompare(idB)
+        })
+        .find(([id]) => id !== activeGroupId)
+      if (next) {
+        const [nextId, nextGroup] = next
+        setPaneTree(nextGroup.tree)
+        setActiveKey(getLeaves(nextGroup.tree)[0] ?? null)
         setActiveGroupId(nextId)
-        setActiveGroupName(next.name ?? '')
-        const focusKey = next.activeKey ?? getLeaves(next.tree)[0] ?? null
+        setSingleView(null)
+        const focusKey = getLeaves(nextGroup.tree)[0] ?? null
         if (focusKey) {
           const { host, name } = parseSessionKey(focusKey)
           const path = host
@@ -430,7 +415,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         navigateTo(null)
       }
     }
-  }, [paneTree, singleView, currentView, savedGroups, groupOrder, activeGroupId, navigateTo])
+  }, [paneTree, singleView, currentView, syncedGroups, activeGroupId, navigateTo])
 
   // Dissolve active group to standalone when only 1 session remains
   useEffect(() => {
@@ -442,13 +427,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     setSingleView(lastLeaf)
     setActiveKey(null)
     setPaneTree(null)
-    setGroupOrder(prev => prev.filter(id => id !== activeGroupId))
     const { host, name } = parseSessionKey(lastLeaf)
     const path = host
       ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
       : `/session/${encodeURIComponent(name)}`
     if (window.location.pathname !== path) window.history.replaceState(null, '', path)
-  }, [paneTree, activeGroupId])
+  }, [paneTree])
 
   // Refs for latest values used in keyboard shortcuts (avoids effect churn)
 
@@ -456,8 +440,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
   sessionsRef.current = sessions
   const selectedSessionRef = useRef(selectedSession)
   selectedSessionRef.current = selectedSession
-  const savedGroupsRef = useRef(savedGroups)
-  savedGroupsRef.current = savedGroups
+  const syncedGroupsRef = useRef(syncedGroups)
+  syncedGroupsRef.current = syncedGroups
   const setActiveKeyRef = useRef(setActiveKey)
   setActiveKeyRef.current = setActiveKey
   const switchToGroupRef = useRef<((id: string) => void) | null>(null)
@@ -491,9 +475,10 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             : skeys.length - 1
       const targetKey = skeys[nextIdx]
       // If target belongs to a saved group, switch to that group first
-      const group = savedGroupsRef.current.find(g => findLeaf(g.tree, targetKey))
+      const group = Object.entries(syncedGroupsRef.current).find(([, g]) => findLeaf(g.tree, targetKey))
       if (group) {
-        switchToGroupRef.current?.(group.id)
+        const [groupId] = group
+        switchToGroupRef.current?.(groupId)
         setActiveKeyRef.current(targetKey)
         const { host, name } = parseSessionKey(targetKey)
         const path = host
@@ -584,15 +569,6 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     })
     setActiveKey(prev => (prev === oldKey ? newKey : prev))
     setSingleView(prev => (prev === oldKey ? newKey : prev))
-    setSavedGroups(prev => prev.map(group => {
-      const hasOldKey = findLeaf(group.tree, oldKey)
-      if (!hasOldKey && group.activeKey !== oldKey) return group
-      return {
-        ...group,
-        tree: hasOldKey ? replaceLeaf(group.tree, oldKey, newKey) : group.tree,
-        activeKey: group.activeKey === oldKey ? newKey : group.activeKey,
-      }
-    }))
 
     const { host: oldHost, name: oldName } = parseSessionKey(oldKey)
     const oldPath = oldHost
@@ -650,6 +626,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       const newKey = host ? `${host}/${newName}` : newName
       migrateSessionKey(oldKey, newKey)
       refresh()
+      refreshSessionOrder()
+      refreshGroups()
       return
     }
     if (evt.type === 'recovery-started') {
@@ -664,6 +642,14 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (['session-added', 'session-removed', 'sessions-changed'].includes(evt.type)) {
       refresh()
     }
+    if (evt.type === 'session-order-updated') {
+      refreshSessionOrder()
+      return
+    }
+    if (evt.type === 'groups-updated') {
+      refreshGroups()
+      return
+    }
     if (['peer-connected', 'peer-disconnected'].includes(evt.type)) {
       refresh()
       refreshHosts()
@@ -675,16 +661,14 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (evt.type === 'session-attrs-updated') {
       refreshSessionAttrs()
     }
-  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs, migrateSessionKey])
+  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs, refreshSessionOrder, refreshGroups, migrateSessionKey])
 
   const { connected } = useWebSocket('/ws/events', onEvent)
 
   // After a WS (re)connect — server restart, network blip, peer rejoin — the
   // session list is still converging: peer/remote sessions and freshly
-  // discovered tmux sessions trickle in over the next few seconds. Pruning
-  // per-device layout (saved-groups) and ordering against that half-built list
-  // permanently deletes entries for sessions that just haven't reappeared yet,
-  // which is why grouping and ordering vanished on server restarts.
+  // discovered tmux sessions trickle in over the next few seconds. Keep grace
+  // only for local projection / filters; synced group/order now live on server.
   // ponytail: fixed 12s grace; switch to "missing across N stable snapshots" if peers reconnect slower.
   const [reconnectGrace, setReconnectGrace] = useState(true)
   const graceTimerRef = useRef<number | undefined>(undefined)
@@ -726,15 +710,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
     setSingleView(prev => (prev && !validKeys.has(prev)) ? null : prev)
 
-    setSavedGroups(prev =>
-      prev.map(group => {
-        const pruned = pruneGroupTree(group.tree, group.activeKey, validKeys)
-        if (!pruned) return null
-        if (pruned.tree === group.tree && pruned.activeKey === group.activeKey) return group
-        return { ...group, tree: pruned.tree, activeKey: pruned.activeKey }
-      }).filter(Boolean) as LayoutGroup[]
-    )
-  }, [sessions, sessionsLoading, paneTree, savedGroups, singleView, pruningSuspended]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessions, sessionsLoading, paneTree, singleView, pruningSuspended])
 
   // Release the pending-session guard once the freshly created session shows
   // up in state (remote creates arrive via a delayed peer broadcast).
@@ -744,7 +720,72 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (sessions.some(s => sessionKey(s) === pending)) pendingSessionRef.current = null
   }, [sessions])
 
-  // (saved-group pruning is handled by the unified grace-based effect above)
+  useEffect(() => {
+    if (!authenticated || !groupsLoaded || !sessionOrderLoaded) return
+    if (migrationStartedRef.current) return
+    try {
+      if (localStorage.getItem('termyard:sync-migrated') === '1') return
+    } catch {}
+    migrationStartedRef.current = true
+    void (async () => {
+      try {
+        const legacyGroupsRaw = localStorage.getItem('termyard:saved-groups')
+        const legacyGroupOrderRaw = localStorage.getItem('termyard:group-order')
+        const legacySessionOrderRaw = localStorage.getItem('termyard:session-order')
+        const legacyGroups = legacyGroupsRaw ? (JSON.parse(legacyGroupsRaw) as Array<{ id: string; tree: PaneTree; activeKey: string | null; name?: string }>) : []
+        const legacyOrder = legacyGroupOrderRaw ? (JSON.parse(legacyGroupOrderRaw) as unknown[]) : []
+        const orderIds = (Array.isArray(legacyOrder) && legacyOrder.length > 0
+          ? legacyOrder.filter((id): id is string => typeof id === 'string')
+          : [activeGroupId, ...legacyGroups.map(g => g.id)])
+          .filter((id, idx, all) => id && all.indexOf(id) === idx)
+        const legacyById = new Map(legacyGroups.map(group => [group.id, group]))
+        let prevRank: string | null = null
+        for (const id of orderIds) {
+          const serverGroup = syncedGroups[id]
+          if (serverGroup) {
+            if (serverGroup.rank) {
+              prevRank = serverGroup.rank
+              continue
+            }
+            const rank = generateKeyBetween(prevRank, null)
+            await setGroupRank(id, rank)
+            prevRank = rank
+            continue
+          }
+          const localGroup = id === activeGroupId && paneTree
+            ? { id, tree: paneTree, name: activeGroupName || undefined }
+            : legacyById.get(id)
+          if (!localGroup) continue
+          const rank = generateKeyBetween(prevRank, null)
+          await setGroupTree(id, localGroup.tree)
+          if (localGroup.name) await setGroupName(id, localGroup.name)
+          await setGroupRank(id, rank)
+          prevRank = rank
+
+      }
+
+        const legacySessionOrder = legacySessionOrderRaw ? (JSON.parse(legacySessionOrderRaw) as unknown[]) : []
+        const sessionIds = Array.isArray(legacySessionOrder)
+          ? legacySessionOrder.filter((id): id is string => typeof id === 'string')
+          : []
+        let prevSessionRank: string | null = null
+        for (const key of sessionIds) {
+          const serverRank = sessionOrderRanks[key]
+          if (serverRank) {
+            prevSessionRank = serverRank
+            continue
+          }
+          const rank = generateKeyBetween(prevSessionRank, null)
+          await setSessionOrderRank(key, rank)
+          prevSessionRank = rank
+        }
+        try { localStorage.setItem('termyard:sync-migrated', '1') } catch {}
+      } catch {
+        migrationStartedRef.current = false
+      }
+    })()
+  }, [authenticated, groupsLoaded, sessionOrderLoaded, syncedGroups, sessionOrderRanks, paneTree, activeGroupId, activeGroupName, setGroupTree, setGroupName, setGroupRank, setSessionOrderRank])
+
 
 
 
@@ -789,19 +830,17 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       const newTree: PaneTree = { type: 'split', direction: 'h', ratio: 0.5,
         first: { type: 'leaf', sessionKey: targetKey },
         second: { type: 'leaf', sessionKey: draggedKey } }
-      // Save current group if it has a tree
+      const currentRank = syncedGroups[activeGroupId]?.rank ?? null
       if (paneTree) {
-        setSavedGroups(prev => [...prev, { id: activeGroupId, tree: paneTree, activeKey, name: activeGroupName || undefined }])
+        void setGroupTree(activeGroupId, paneTree)
+        if (!currentRank) void setGroupRank(activeGroupId, generateKeyBetween(null, generateKeyBetween(currentRank, null)))
       }
+      const nextRank = generateKeyBetween(currentRank, null)
+      void setGroupTree(newId, newTree)
+      void setGroupRank(newId, nextRank)
       setPaneTree(newTree)
       setActiveKey(draggedKey)
       setActiveGroupId(newId)
-      setActiveGroupName('')
-      setGroupOrder(prev => {
-        // ensure current activeGroupId is in order, then append new group
-        const withCurrent = prev.includes(activeGroupId) ? prev : [...prev, activeGroupId]
-        return [...withCurrent, newId]
-      })
       setSingleView(null)
       const { host, name } = parseSessionKey(draggedKey)
       const path = host ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}` : `/session/${encodeURIComponent(name)}`
@@ -823,7 +862,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     const path = host ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}` : `/session/${encodeURIComponent(name)}`
     if (window.location.pathname !== path) window.history.pushState(null, '', path)
     setCurrentView('session')
-  }, [paneTree, activeKey, activeGroupId, groupOrder])
+  }, [paneTree, activeGroupId, syncedGroups, setGroupRank, setGroupTree])
 
   const switchToGroup = useCallback((groupId: string, focusKey?: string) => {
     // If re-selecting the already-active group (e.g. after navigating to a standalone session),
@@ -842,27 +881,19 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       setTimeout(refocusTerminal, 150)
       return
     }
-    const targetGroup = savedGroups.find(g => g.id === groupId)
+    const targetGroup = syncedGroups[groupId]
     if (!targetGroup) return
-    // Save current active group if it has a tree
     if (paneTree) {
-      setSavedGroups(prev => [
-        ...prev.filter(g => g.id !== groupId),
-        { id: activeGroupId, tree: paneTree, activeKey, name: activeGroupName || undefined }
-      ])
-    } else {
-      setSavedGroups(prev => prev.filter(g => g.id !== groupId))
+      void setGroupTree(activeGroupId, paneTree)
     }
     const targetKey = (focusKey && findLeaf(targetGroup.tree, focusKey))
       ? focusKey
-      : (targetGroup.activeKey ?? getLeaves(targetGroup.tree)[0] ?? null)
+      : (activeGroupId === groupId && activeKey ? activeKey : getLeaves(targetGroup.tree)[0] ?? null)
     setPaneTree(targetGroup.tree)
     setActiveKey(targetKey)
     setActiveGroupId(groupId)
-    setActiveGroupName(targetGroup.name ?? '')
     setSingleView(null)
     setCurrentView('session')
-    // Navigate URL to the target leaf
     if (targetKey) {
       const { host, name } = parseSessionKey(targetKey)
       const path = host
@@ -871,16 +902,12 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       if (window.location.pathname !== path) window.history.pushState(null, '', path)
     }
     setTimeout(refocusTerminal, 150)
-  }, [savedGroups, activeGroupId, activeGroupName, paneTree, activeKey, refocusTerminal])
+  }, [syncedGroups, activeGroupId, paneTree, activeKey, refocusTerminal, setGroupTree])
   switchToGroupRef.current = switchToGroup
 
   const renameGroup = useCallback((groupId: string, name: string) => {
-    if (groupId === activeGroupId) {
-      setActiveGroupName(name)
-    } else {
-      setSavedGroups(prev => prev.map(g => g.id === groupId ? { ...g, name: name || undefined } : g))
-    }
-  }, [activeGroupId])
+    void setGroupName(groupId, name)
+  }, [setGroupName])
 
   // Safety-net refocus when activeKey changes via paths that don't call
   // selectSession (e.g. onActivate from clicking inside TiledView).
@@ -997,17 +1024,17 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
     if (!targetKey && singleView) {
       key = singleView
       const newGroupId = Math.random().toString(36).slice(2)
+      const currentRank = syncedGroups[activeGroupId]?.rank ?? null
       if (paneTree) {
-        setSavedGroups(prev => [...prev, { id: activeGroupId, tree: paneTree, activeKey, name: activeGroupName || undefined }])
+        void setGroupTree(activeGroupId, paneTree)
+        if (!currentRank) void setGroupRank(activeGroupId, generateKeyBetween(null, generateKeyBetween(currentRank, null)))
       }
-      setGroupOrder(prev => {
-        const withCurrent = paneTree && !prev.includes(activeGroupId) ? [...prev, activeGroupId] : prev
-        return [...withCurrent, newGroupId]
-      })
+      const newRank = generateKeyBetween(currentRank, null)
+      void setGroupTree(newGroupId, popOut(singleView))
+      void setGroupRank(newGroupId, newRank)
       setPaneTree(popOut(singleView))
       setActiveKey(singleView)
       setActiveGroupId(newGroupId)
-      setActiveGroupName('')
       setSingleView(null)
     }
 
@@ -1042,6 +1069,31 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
       setTerminalFullscreen(false)
     }
   }, [currentView])
+
+  const layoutGroups = useMemo<LayoutGroup[]>(() => {
+    const ids = new Set<string>(Object.keys(syncedGroups))
+    if (paneTree) ids.add(activeGroupId)
+    return Array.from(ids).map(id => {
+      const group = syncedGroups[id]
+      const isActive = id === activeGroupId && currentView === 'session' && singleView === null
+      const leaves = id === activeGroupId && paneTree ? getLeaves(paneTree) : (group ? getLeaves(group.tree) : [])
+      const activeLeaf = id === activeGroupId ? activeKey : (group ? getLeaves(group.tree)[0] ?? null : null)
+      return {
+        id,
+        leaves,
+        isActive,
+        activeKey: activeLeaf,
+        name: group?.name ?? (id === activeGroupId ? activeGroupName || undefined : undefined),
+      }
+    }).sort((a, b) => {
+      const ar = syncedGroups[a.id]?.rank ?? (a.id === activeGroupId ? activeGroup?.rank ?? '' : '')
+      const br = syncedGroups[b.id]?.rank ?? (b.id === activeGroupId ? activeGroup?.rank ?? '' : '')
+      if (!ar && br) return 1
+      if (ar && !br) return -1
+      if (ar !== br) return ar.localeCompare(br)
+      return a.id.localeCompare(b.id)
+    })
+  }, [syncedGroups, paneTree, activeGroupId, activeKey, currentView, singleView, activeGroup?.rank, activeGroupName])
 
   const showingTerminal = currentView === 'session' && !!selectedSession
 
@@ -1157,16 +1209,9 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             agentCount={allToolEvents.filter(e => e.auto_detected || e.status === 'waiting' || e.status === 'error' || e.status === 'stuck').length}
             glance={glance}
             onToggleCollapse={() => setSidebarCollapsed(c => !c)}
-            layoutGroups={groupOrder
-              .map(id => {
-                if (id === activeGroupId && paneTree)
-                  return { id, leaves: getLeaves(paneTree), isActive: currentView === 'session' && singleView === null, activeKey, name: activeGroupName || undefined }
-                const g = savedGroups.find(g => g.id === id)
-                if (g) return { id, leaves: getLeaves(g.tree), isActive: false, activeKey: g.activeKey, name: g.name }
-                return null
-              })
-              .filter((g): g is { id: string; leaves: string[]; isActive: boolean; activeKey: string | null; name: string | undefined } => g !== null)
-            }
+            layoutGroups={layoutGroups}
+            sessionOrderRanks={sessionOrderRanks}
+            setSessionOrderRank={setSessionOrderRank}
             onSwitchGroup={switchToGroup}
             onRenameGroup={renameGroup}
             onPairSessions={handlePairSessions}
@@ -1428,7 +1473,7 @@ export default function App() {
 
   return (
     <PreferencesContext.Provider value={prefsProvider}>
-      <AppInner onLogout={authRequired ? logout : undefined} />
+      <AppInner onLogout={authRequired ? logout : undefined} authenticated={authRequired ? authenticated : true} />
     </PreferencesContext.Provider>
   )
 }

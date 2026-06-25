@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
+import { generateKeyBetween } from 'fractional-indexing'
 import { Session, sessionKey, sessionLabel, sessionScheduleID } from '../hooks/useSessions'
 import type { SessionAttrSets } from '../hooks/useSessionAttrs'
 import { Host } from '../hooks/useHosts'
@@ -48,6 +49,8 @@ interface SidebarProps {
   glance?: { parked: number; working: number; waiting: number }
   onToggleCollapse?: () => void
   layoutGroups?: { id: string; leaves: string[]; isActive: boolean; activeKey: string | null; name: string | undefined }[]
+  sessionOrderRanks: Record<string, string>
+  setSessionOrderRank: (key: string, rank: string) => void
   onSwitchGroup?: (groupId: string, focusKey?: string) => void
   onRenameGroup?: (groupId: string, name: string) => void
   onPairSessions?: (keyA: string, keyB: string) => void
@@ -175,15 +178,22 @@ function sortNewestFirst<T extends { created?: string; last_activity?: string }>
   })
 }
 
-function orderSessions(sessions: Session[], order: string[]): Session[] {
-  const rank = new Map(order.map((value, index) => [value, index]))
+function orderSessions(sessions: Session[], ranks: Record<string, string>): Session[] {
   return [...sessions].sort((a, b) => {
-    const aRank = rank.get(sessionKey(a))
-    const bRank = rank.get(sessionKey(b))
-    if (aRank !== undefined && bRank !== undefined) return aRank - bRank
-    if (aRank !== undefined) return -1
-    if (bRank !== undefined) return 1
-    return a.name.localeCompare(b.name)
+    const aKey = sessionKey(a)
+    const bKey = sessionKey(b)
+    const aRank = ranks[aKey]
+    const bRank = ranks[bKey]
+    const aHas = aRank !== undefined && aRank !== ''
+    const bHas = bRank !== undefined && bRank !== ''
+    if (aHas && bHas) {
+      if (aRank !== bRank) return aRank.localeCompare(bRank)
+      return aKey.localeCompare(bKey)
+    }
+    if (aHas) return -1
+    if (bHas) return 1
+    const byName = a.name.localeCompare(b.name)
+    return byName !== 0 ? byName : aKey.localeCompare(bKey)
   })
 }
 
@@ -207,6 +217,8 @@ export function Sidebar({
   glance,
   onToggleCollapse,
   layoutGroups,
+  sessionOrderRanks,
+  setSessionOrderRank,
   onSwitchGroup,
   onRenameGroup,
   onPairSessions,
@@ -225,7 +237,6 @@ export function Sidebar({
   const backgroundSet = sessionAttrs.background
   const scheduleIDs = sessionAttrs.scheduleIDs
   const scheduleById = useMemo(() => new Map(schedules.map(schedule => [schedule.id, schedule])), [schedules])
-  const [manualOrder, setManualOrder] = useState<string[]>(() => readStoredList('termyard:session-order'))
   const [projectFilters, setProjectFilters] = useState<string[]>(() => readStoredList('termyard:project-filters'))
   const [hiddenExpanded, setHiddenExpanded] = useState(false)
   const [scheduledExpanded, setScheduledExpanded] = useState(() => {
@@ -387,29 +398,9 @@ export function Sidebar({
     el.style.top = `${top}px`
   }, [contextMenu])
 
-  // session-order: per-device manual ordering. NOT synced (stays local).
-  useEffect(() => {
-    writeStoredList('termyard:session-order', manualOrder)
-  }, [manualOrder])
-
   useEffect(() => {
     writeStoredList('termyard:project-filters', projectFilters)
   }, [projectFilters])
-
-  // Prune per-device manual ordering for sessions that have disappeared.
-  // background/hidden are server-authoritative and GC'd server-side, so they
-  // are NOT pruned here.
-  useEffect(() => {
-    // Don't clear persisted ordering during the initial empty session snapshot
-    // before the first /api/sessions refresh completes, nor while the list is
-    // still converging after a (re)connect (server restart, peer rejoin).
-    if (sessions.length === 0 || pruningSuspended) return
-    const validKeys = new Set(sessions.map(sessionKey))
-    const nextOrder = manualOrder.filter(key => validKeys.has(key))
-    if (nextOrder.length !== manualOrder.length) {
-      setManualOrder(nextOrder)
-    }
-  }, [sessions, manualOrder, pruningSuspended])
 
   const projects = useMemo(
     () => Array.from(new Set(sessions.map(s => s.project_path).filter((value): value is string => Boolean(value)))).sort(),
@@ -425,7 +416,7 @@ export function Sidebar({
     }
   }, [projectFilters, projects, pruningSuspended])
 
-  const orderedSessions = useMemo(() => orderSessions(sessions, manualOrder), [sessions, manualOrder])
+  const orderedSessions = useMemo(() => orderSessions(sessions, sessionOrderRanks), [sessions, sessionOrderRanks])
 
   const visibleSessions = useMemo(() => {
     const filtered = orderedSessions.filter(session => !hiddenSet.has(sessionKey(session)) && !backgroundSet.has(sessionKey(session)))
@@ -835,65 +826,17 @@ export function Sidebar({
               onPairSessions?.(draggingKey, sk)
             } else {
               const position = ratio < 0.25 ? 'above' : 'below'
-              const dragGroup = layoutGroups?.find(g => g.leaves.includes(draggingKey)) ?? null
-              const targetGroup = layoutGroups?.find(g => g.leaves.includes(sk)) ?? null
-
-              const applyOrder = (newOrder: string[]) => {
-                const full = orderedSessions.map(sessionKey)
-                const s = new Set(newOrder); let i = 0
-                setManualOrder(full.map(k => s.has(k) ? newOrder[i++] : k))
-              }
-
-              if (dragGroup && targetGroup && dragGroup.id === targetGroup.id) {
-                // Same group — no-op
-              } else if (dragGroup && targetGroup) {
-                // Group onto group: move dragGroup as a unit before/after targetGroup
-                const keys = visibleSessions.map(sessionKey)
-                const withoutDragGroup = keys.filter(k => !dragGroup.leaves.includes(k))
-                const targetIdxs = targetGroup.leaves.map(k => withoutDragGroup.indexOf(k)).filter(i => i !== -1)
-                if (targetIdxs.length > 0) {
-                  const insertAt = position === 'above'
-                    ? Math.min(...targetIdxs)
-                    : Math.max(...targetIdxs) + 1
-                  withoutDragGroup.splice(Math.max(0, insertAt), 0, ...dragGroup.leaves)
-                  applyOrder(withoutDragGroup)
-                }
-              } else if (!dragGroup && targetGroup) {
-                // Session onto group edge: move session before/after the whole group
-                const keys = visibleSessions.map(sessionKey)
-                const withoutDrag = keys.filter(k => k !== draggingKey)
-                const targetIdxs = targetGroup.leaves.map(k => withoutDrag.indexOf(k)).filter(i => i !== -1)
-                if (targetIdxs.length > 0) {
-                  const insertAt = position === 'above'
-                    ? Math.min(...targetIdxs)
-                    : Math.max(...targetIdxs) + 1
-                  withoutDrag.splice(Math.max(0, insertAt), 0, draggingKey)
-                  applyOrder(withoutDrag)
-                }
-              } else if (dragGroup && !targetGroup) {
-                // Group onto session: move whole group before/after target
-                const keys = visibleSessions.map(sessionKey)
-                const withoutGroup = keys.filter(k => !dragGroup.leaves.includes(k))
-                const targetIdx = withoutGroup.indexOf(sk)
-                if (targetIdx !== -1) {
-                  const insertAt = position === 'above' ? targetIdx : targetIdx + 1
-                  withoutGroup.splice(Math.max(0, insertAt), 0, ...dragGroup.leaves)
-                  applyOrder(withoutGroup)
-                }
-              } else {
-                // Both ungrouped: normal reorder
-                const keys = visibleSessions.map(sessionKey)
-                const from = keys.indexOf(draggingKey)
-                const to = keys.indexOf(sk)
-                if (from !== -1 && to !== -1) {
-                  const reordered = [...keys]
-                  reordered.splice(from, 1)
-                  const insertAt = position === 'above'
-                    ? (to > from ? to - 1 : to)
-                    : (to > from ? to : to + 1)
-                  reordered.splice(Math.max(0, insertAt), 0, draggingKey)
-                  applyOrder(reordered)
-                }
+              const keys = visibleSessions.map(sessionKey)
+              const withoutDragged = keys.filter(k => k !== draggingKey)
+              const targetIdx = withoutDragged.indexOf(sk)
+              if (targetIdx !== -1) {
+                const insertAt = position === 'above' ? targetIdx : targetIdx + 1
+                withoutDragged.splice(Math.max(0, insertAt), 0, draggingKey)
+                const idx = withoutDragged.indexOf(draggingKey)
+                const before = idx > 0 ? withoutDragged[idx - 1] : null
+                const after = idx < withoutDragged.length - 1 ? withoutDragged[idx + 1] : null
+                const newRank = generateKeyBetween(before ? sessionOrderRanks[before] ?? null : null, after ? sessionOrderRanks[after] ?? null : null)
+                setSessionOrderRank(draggingKey, newRank)
               }
             }
             setDraggingKey(null)
@@ -1147,22 +1090,18 @@ export function Sidebar({
             onDrop={(e) => {
               e.preventDefault()
               if (!draggingKey || !firstLeaf || draggingKey === firstLeaf) return
-              const dragGroup = layoutGroups?.find(g => g.leaves.includes(draggingKey)) ?? null
-              const targetGroup = group
+              const group = layoutGroups?.find(g => g.leaves.includes(firstLeaf)) ?? null
               const keys = visibleSessions.map(sessionKey)
-              const applyOrder = (newOrder: string[]) => {
-                const full = orderedSessions.map(sessionKey)
-                const s = new Set(newOrder); let i = 0
-                setManualOrder(full.map(k => s.has(k) ? newOrder[i++] : k))
-              }
-              if (dragGroup) {
-                const withoutDrag = keys.filter(k => !dragGroup.leaves.includes(k))
-                const insertAt = targetGroup.leaves.map(k => withoutDrag.indexOf(k)).filter(i => i !== -1).reduce((a, b) => Math.min(a, b), Infinity)
-                if (isFinite(insertAt)) { withoutDrag.splice(insertAt, 0, ...dragGroup.leaves); applyOrder(withoutDrag) }
-              } else {
-                const withoutDrag = keys.filter(k => k !== draggingKey)
-                const insertAt = targetGroup.leaves.map(k => withoutDrag.indexOf(k)).filter(i => i !== -1).reduce((a, b) => Math.min(a, b), Infinity)
-                if (isFinite(insertAt)) { withoutDrag.splice(insertAt, 0, draggingKey); applyOrder(withoutDrag) }
+              const withoutDragged = keys.filter(k => k !== draggingKey)
+              const targetIdxs = group ? group.leaves.map(k => withoutDragged.indexOf(k)).filter(i => i !== -1) : []
+              if (targetIdxs.length > 0) {
+                const insertAt = Math.min(...targetIdxs)
+                withoutDragged.splice(Math.max(0, insertAt), 0, draggingKey)
+                const idx = withoutDragged.indexOf(draggingKey)
+                const before = idx > 0 ? withoutDragged[idx - 1] : null
+                const after = idx < withoutDragged.length - 1 ? withoutDragged[idx + 1] : null
+                const newRank = generateKeyBetween(before ? sessionOrderRanks[before] ?? null : null, after ? sessionOrderRanks[after] ?? null : null)
+                setSessionOrderRank(draggingKey, newRank)
               }
               setDraggingKey(null); setDropIndicator(null)
             }}
@@ -1541,22 +1480,14 @@ export function Sidebar({
               onDrop={(e) => {
                 e.preventDefault()
                 if (!draggingKey) return
-                const dragGroup = layoutGroups?.find(g => g.leaves.includes(draggingKey)) ?? null
                 const keys = visibleSessions.map(sessionKey)
-                const applyOrder = (newOrder: string[]) => {
-                  const full = orderedSessions.map(sessionKey)
-                  const s = new Set(newOrder); let i = 0
-                  setManualOrder(full.map(k => s.has(k) ? newOrder[i++] : k))
-                }
-                if (dragGroup) {
-                  const withoutDrag = keys.filter(k => !dragGroup.leaves.includes(k))
-                  withoutDrag.unshift(...dragGroup.leaves)
-                  applyOrder(withoutDrag)
-                } else {
-                  const withoutDrag = keys.filter(k => k !== draggingKey)
-                  withoutDrag.unshift(draggingKey)
-                  applyOrder(withoutDrag)
-                }
+                const withoutDragged = keys.filter(k => k !== draggingKey)
+                withoutDragged.unshift(draggingKey)
+                const idx = withoutDragged.indexOf(draggingKey)
+                const before = idx > 0 ? withoutDragged[idx - 1] : null
+                const after = idx < withoutDragged.length - 1 ? withoutDragged[idx + 1] : null
+                const newRank = generateKeyBetween(before ? sessionOrderRanks[before] ?? null : null, after ? sessionOrderRanks[after] ?? null : null)
+                setSessionOrderRank(draggingKey, newRank)
                 setDraggingKey(null)
                 setDropIndicator(null)
               }}

@@ -49,6 +49,21 @@ type SessionAttrsSink interface {
 	SnapshotAttrs() map[string]SessionAttr
 }
 
+// SessionOrderSink is the narrow slice of session-order storage the peer loop
+// needs.
+type SessionOrderSink interface {
+	ApplyRemoteDelta(key, rank string, updatedAt time.Time) (accepted bool, err error)
+	ApplyRemoteSnapshot(orders map[string]SessionOrder) (changed []string, err error)
+	SnapshotOrders() map[string]SessionOrder
+}
+
+// GroupSink is the narrow slice of group storage the peer loop needs.
+type GroupSink interface {
+	ApplyRemoteDelta(id string, group Group) (accepted bool, err error)
+	ApplyRemoteSnapshot(groups map[string]Group) (changed []string, err error)
+	SnapshotGroups() map[string]Group
+}
+
 // BrowserBroadcaster pushes a JSON message to every connected browser. Used
 // to forward session-attrs-updated events to the local UI after we accept a
 // remote update from a paired peer.
@@ -67,6 +82,8 @@ type SessionDeps struct {
 	TmuxClient  *tmux.Client
 	StreamReg   *StreamRegistry
 	AttrsSink   SessionAttrsSink
+	OrderSink   SessionOrderSink
+	GroupSink   GroupSink
 	BrowserHub  BrowserBroadcaster
 }
 
@@ -206,6 +223,8 @@ func runSession(
 	sendStateUpdate(pc, deps)
 	sendInitialPeerState(pc, deps, peerID)
 	sendInitialSessionAttrs(pc, deps)
+	sendInitialSessionOrder(pc, deps)
+	sendInitialGroups(pc, deps)
 
 	// Background loops.
 	go pingLoop(sessionCtx, cw)
@@ -253,6 +272,42 @@ func sendInitialSessionAttrs(pc *PeerConnection, deps SessionDeps) {
 	msg, err := NewMessage(MsgSessionAttrsSnapshot, SessionAttrsSnapshotPayload{
 		Origin: deps.Identity.Fingerprint(),
 		Attrs:  attrs,
+	})
+	if err != nil {
+		return
+	}
+	pc.Enqueue(msg)
+}
+
+func sendInitialSessionOrder(pc *PeerConnection, deps SessionDeps) {
+	if deps.OrderSink == nil {
+		return
+	}
+	orders := deps.OrderSink.SnapshotOrders()
+	if len(orders) == 0 {
+		return
+	}
+	msg, err := NewMessage(MsgSessionOrderSnapshot, SessionOrderSnapshotPayload{
+		Origin: deps.Identity.Fingerprint(),
+		Orders: orders,
+	})
+	if err != nil {
+		return
+	}
+	pc.Enqueue(msg)
+}
+
+func sendInitialGroups(pc *PeerConnection, deps SessionDeps) {
+	if deps.GroupSink == nil {
+		return
+	}
+	groups := deps.GroupSink.SnapshotGroups()
+	if len(groups) == 0 {
+		return
+	}
+	msg, err := NewMessage(MsgGroupSnapshot, GroupSnapshotPayload{
+		Origin: deps.Identity.Fingerprint(),
+		Groups: groups,
 	})
 	if err != nil {
 		return
@@ -631,6 +686,98 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 			})
 		}
 		log.WithField("origin", p.Origin).WithField("key", p.Key).Debug("applied remote session-attrs delta")
+	case MsgSessionOrderSnapshot:
+		var p SessionOrderSnapshotPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid session-order-snapshot")
+			return
+		}
+		if p.Origin == deps.Identity.Fingerprint() || deps.OrderSink == nil {
+			return
+		}
+		changed, err := deps.OrderSink.ApplyRemoteSnapshot(p.Orders)
+		if err != nil {
+			log.WithError(err).Warn("apply remote session-order snapshot failed")
+			return
+		}
+		if len(changed) > 0 && deps.BrowserHub != nil {
+			deps.BrowserHub.BroadcastJSON(map[string]interface{}{
+				"type":   "session-order-updated",
+				"origin": p.Origin,
+			})
+		}
+		log.WithField("origin", p.Origin).WithField("changed", len(changed)).Debug("applied remote session-order snapshot")
+	case MsgSessionOrderDelta:
+		var p SessionOrderDeltaPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid session-order-delta")
+			return
+		}
+		if p.Origin == deps.Identity.Fingerprint() || deps.OrderSink == nil {
+			return
+		}
+		accepted, err := deps.OrderSink.ApplyRemoteDelta(p.Key, p.Order.Rank, p.Order.UpdatedAt)
+		if err != nil {
+			log.WithError(err).Warn("apply remote session-order delta failed")
+			return
+		}
+		if !accepted {
+			return
+		}
+		if deps.BrowserHub != nil {
+			deps.BrowserHub.BroadcastJSON(map[string]interface{}{
+				"type":   "session-order-updated",
+				"origin": p.Origin,
+				"key":    p.Key,
+			})
+		}
+		log.WithField("origin", p.Origin).WithField("key", p.Key).Debug("applied remote session-order delta")
+	case MsgGroupSnapshot:
+		var p GroupSnapshotPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid group-snapshot")
+			return
+		}
+		if p.Origin == deps.Identity.Fingerprint() || deps.GroupSink == nil {
+			return
+		}
+		changed, err := deps.GroupSink.ApplyRemoteSnapshot(p.Groups)
+		if err != nil {
+			log.WithError(err).Warn("apply remote group snapshot failed")
+			return
+		}
+		if len(changed) > 0 && deps.BrowserHub != nil {
+			deps.BrowserHub.BroadcastJSON(map[string]interface{}{
+				"type":   "groups-updated",
+				"origin": p.Origin,
+			})
+		}
+		log.WithField("origin", p.Origin).WithField("changed", len(changed)).Debug("applied remote group snapshot")
+	case MsgGroupDelta:
+		var p GroupDeltaPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid group-delta")
+			return
+		}
+		if p.Origin == deps.Identity.Fingerprint() || deps.GroupSink == nil {
+			return
+		}
+		accepted, err := deps.GroupSink.ApplyRemoteDelta(p.ID, p.Group)
+		if err != nil {
+			log.WithError(err).Warn("apply remote group delta failed")
+			return
+		}
+		if !accepted {
+			return
+		}
+		if deps.BrowserHub != nil {
+			deps.BrowserHub.BroadcastJSON(map[string]interface{}{
+				"type":   "groups-updated",
+				"origin": p.Origin,
+				"id":     p.ID,
+			})
+		}
+		log.WithField("origin", p.Origin).WithField("id", p.ID).Debug("applied remote group delta")
 
 	default:
 		log.WithField("type", msg.Type).Debug("unknown session message")
