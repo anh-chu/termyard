@@ -54,6 +54,10 @@ interface SidebarProps {
   onSessionKilled?: (key: string) => void
   sessionAttrs: SessionAttrSets
   setSessionAttr: (key: string, next: { background?: boolean; hidden?: boolean }) => void
+  // True while the session list is still converging after a WS (re)connect.
+  // Pruning per-device ordering then would delete entries for sessions that
+  // simply haven't reappeared yet.
+  pruningSuspended?: boolean
 }
 
 interface RenameState {
@@ -209,6 +213,7 @@ export function Sidebar({
   onSessionKilled,
   sessionAttrs,
   setSessionAttr,
+  pruningSuspended,
 }: SidebarProps) {
   const { prefs } = usePreferences()
   const { schedules } = useSchedules()
@@ -395,14 +400,15 @@ export function Sidebar({
   // are NOT pruned here.
   useEffect(() => {
     // Don't clear persisted ordering during the initial empty session snapshot
-    // before the first /api/sessions refresh completes.
-    if (sessions.length === 0) return
+    // before the first /api/sessions refresh completes, nor while the list is
+    // still converging after a (re)connect (server restart, peer rejoin).
+    if (sessions.length === 0 || pruningSuspended) return
     const validKeys = new Set(sessions.map(sessionKey))
     const nextOrder = manualOrder.filter(key => validKeys.has(key))
     if (nextOrder.length !== manualOrder.length) {
       setManualOrder(nextOrder)
     }
-  }, [sessions, manualOrder])
+  }, [sessions, manualOrder, pruningSuspended])
 
   const projects = useMemo(
     () => Array.from(new Set(sessions.map(s => s.project_path).filter((value): value is string => Boolean(value)))).sort(),
@@ -410,13 +416,13 @@ export function Sidebar({
   )
 
   useEffect(() => {
-    if (projectFilters.length === 0) return
+    if (projectFilters.length === 0 || pruningSuspended) return
     const validProjects = new Set(projects)
     const nextFilters = projectFilters.filter(project => validProjects.has(project))
     if (nextFilters.length !== projectFilters.length) {
       setProjectFilters(nextFilters)
     }
-  }, [projectFilters, projects])
+  }, [projectFilters, projects, pruningSuspended])
 
   const orderedSessions = useMemo(() => orderSessions(sessions, manualOrder), [sessions, manualOrder])
 

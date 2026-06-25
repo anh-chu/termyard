@@ -679,12 +679,30 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
 
   const { connected } = useWebSocket('/ws/events', onEvent)
 
+  // After a WS (re)connect — server restart, network blip, peer rejoin — the
+  // session list is still converging: peer/remote sessions and freshly
+  // discovered tmux sessions trickle in over the next few seconds. Pruning
+  // per-device layout (saved-groups) and ordering against that half-built list
+  // permanently deletes entries for sessions that just haven't reappeared yet,
+  // which is why grouping and ordering vanished on server restarts.
+  // ponytail: fixed 12s grace; switch to "missing across N stable snapshots" if peers reconnect slower.
+  const [reconnectGrace, setReconnectGrace] = useState(true)
+  const graceTimerRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (connected !== true) return
+    setReconnectGrace(true)
+    clearTimeout(graceTimerRef.current)
+    graceTimerRef.current = window.setTimeout(() => setReconnectGrace(false), 12000)
+    return () => clearTimeout(graceTimerRef.current)
+  }, [connected])
+  const pruningSuspended = recovering || reconnectGrace
+
   // Prune leaves whose session is gone from the live list. While the server is
   // alive the list is authoritative, so a missing session is a genuine kill and
   // its pane is removed at once. Recovery (full-server rebuild) is the only time
   // a live session is transiently absent; pruning is suspended then.
   useEffect(() => {
-    if (sessionsLoading || sessions.length === 0 || recovering) return
+    if (sessionsLoading || sessions.length === 0 || pruningSuspended) return
     const validKeys = new Set(sessions.map(s => sessionKey(s)))
     if (pendingSessionRef.current) validKeys.add(pendingSessionRef.current)
 
@@ -716,7 +734,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
         return { ...group, tree: pruned.tree, activeKey: pruned.activeKey }
       }).filter(Boolean) as LayoutGroup[]
     )
-  }, [sessions, sessionsLoading, paneTree, savedGroups, singleView, recovering]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessions, sessionsLoading, paneTree, savedGroups, singleView, pruningSuspended]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Release the pending-session guard once the freshly created session shows
   // up in state (remote creates arrive via a delayed peer broadcast).
@@ -1156,6 +1174,7 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
             onSessionKilled={removeSessionFromLayout}
             sessionAttrs={sessionAttrs}
             setSessionAttr={setSessionAttr}
+            pruningSuspended={pruningSuspended}
           />
         )}
         <div
