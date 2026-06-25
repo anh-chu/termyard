@@ -190,6 +190,22 @@ func (sm *SessionManager) Cleanup() {
 }
 
 const cookieName = "termyard_session"
+const cookieMaxAge = 86400 // 24h, matches SessionManager TTL
+
+// writeSessionCookie sets the session cookie with the standard attributes.
+// Re-issued on every authenticated request so the browser cookie tracks the
+// server-side sliding-window expiry instead of expiring 24h after login.
+func writeSessionCookie(w http.ResponseWriter, token string, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   cookieMaxAge,
+	})
+}
 
 // isUnixSocket returns true if the request arrived over a unix socket.
 func isUnixSocket(r *http.Request) bool {
@@ -218,6 +234,9 @@ func Middleware(sm *SessionManager) func(http.Handler) http.Handler {
 				fmt.Fprintf(w, `{"error":"unauthorized"}`)
 				return
 			}
+			// ponytail: refresh cookie so it tracks the sliding session; secure=false
+			// matches login (secureCookies is always false today).
+			writeSessionCookie(w, cookie.Value, false)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -256,15 +275,7 @@ func SetupHandler(ps *PasswordStore, sm *SessionManager, secureCookies bool) htt
 			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    token,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   secureCookies,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   86400,
-		})
+		writeSessionCookie(w, token, secureCookies)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"ok":true}`)
 	}
@@ -291,15 +302,7 @@ func LoginHandler(ps *PasswordStore, sm *SessionManager, secureCookies bool) htt
 			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    token,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   secureCookies,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   86400, // 24h
-		})
+		writeSessionCookie(w, token, secureCookies)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"ok":true}`)
 	}
