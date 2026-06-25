@@ -15,6 +15,7 @@ Termyard parks all of that in one place. It renders your live tmux sessions in t
 ## Highlights
 
 - **Agent status at a glance.** See which agents are active, waiting for input, or errored across every session, without switching to each one.
+- **Overview board and peek.** Group every session into a kanban board by state (needs you, working, idle), hover any session for a read-only snapshot of its terminal, and click to dock a live, resizable terminal beside the board.
 - **Push notifications.** Get a browser or desktop alert when an agent needs you, including when the tab is closed or you are signed out.
 - **Multi-machine.** Connect any number of Termyard nodes through the dashboard. Sessions on every machine show up in one view.
 - **The real terminal, in the browser.** PTY-backed xterm.js rendering means you get the exact terminal: borders, splits, colors, scrollback. Type, scroll, and resize like you are local.
@@ -88,7 +89,7 @@ Useful flags: `--dry-run` previews changes without writing, `--config-dir agent=
 
 Once hooks are in place, status shows up on its own:
 
-- The **Overview** lists every session and surfaces any agent that needs attention.
+- The **Overview** lists every session and surfaces any agent that needs attention. Switch it to a **board** to sort sessions into columns by state, hover a session to glance at its terminal, and click one to open a docked terminal you can drag to resize.
 - The **sidebar** shows each session with its task and the agent's latest message, plus status badges for active, waiting, and errored agents.
 - **Push notifications** alert you when an agent needs input, even with the tab closed. Enable them under **Settings → Notifications**.
 - **Splits**: drag a session onto another to tile them side by side, or drop on an edge to pick orientation. `Ctrl+Shift+\` splits the active pane into a new session.
