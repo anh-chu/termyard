@@ -1,0 +1,1 @@
+/home/sil/.pi/agent/npm/node_modules/fito-plugin/agents/execution-fact-content-generator.md

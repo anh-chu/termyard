@@ -439,3 +439,34 @@ func (c *Client) CapturePaneHistory(paneID string, startLine int) (string, error
 	args = append(args, "-p")
 	return c.Exec(args...)
 }
+
+// PrimaryPaneID resolves the active (primary) pane ID for a session.
+func (c *Client) PrimaryPaneID(session string) (string, error) {
+	wins, err := c.ListWindows(session)
+	if err != nil {
+		return "", err
+	}
+	for _, w := range wins {
+		if panes, err := c.ListPanes(w.ID); err == nil {
+			w.Panes = panes
+		}
+	}
+	p := PrimaryPane(wins)
+	if p == nil {
+		return "", fmt.Errorf("no pane found for session %q", session)
+	}
+	return p.ID, nil
+}
+
+// LastLines returns the last n lines of text (trailing newline ignored). n<=0
+// or empty text returns text unchanged.
+func LastLines(text string, n int) string {
+	if n <= 0 || text == "" {
+		return text
+	}
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}

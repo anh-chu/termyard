@@ -243,6 +243,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	reconciler.SetHost(peerMgr.LocalID(), peerMgr.LocalName())
 
 	streamReg := peer.NewStreamRegistry()
+	captureReg := peer.NewCaptureRegistry()
 
 	deps := peer.SessionDeps{
 		Manager:     peerMgr,
@@ -253,6 +254,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PeerStore:   peerStore,
 		TmuxClient:  client,
 		StreamReg:   streamReg,
+		CaptureReg:  captureReg,
 	}
 
 	peerHandler := peer.NewHandler(deps, streamReg)
@@ -284,6 +286,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PeerMgr:          peerMgr,
 		PeerHandler:      peerHandler,
 		StreamReg:        streamReg,
+		CaptureReg:       captureReg,
 		LinkSupervisor:   supervisor,
 		Detector:         detector,
 		PortForwardStore: portforward.NewStore(),

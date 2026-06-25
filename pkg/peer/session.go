@@ -81,6 +81,7 @@ type SessionDeps struct {
 	PeerStore   *identity.PeerStore
 	TmuxClient  *tmux.Client
 	StreamReg   *StreamRegistry
+	CaptureReg  *CaptureRegistry
 	AttrsSink   SessionAttrsSink
 	OrderSink   SessionOrderSink
 	GroupSink   GroupSink
@@ -522,6 +523,28 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 	_ = ws.BridgePTY(conn, deps.TmuxClient.TmuxPath(), p.Session, p.Cols, p.Rows, deps.ActTracker, log)
 }
 
+// handleCapturePane resolves this peer's own primary pane for the requested
+// session, captures its visible buffer (last p.Lines lines), and replies to the
+// hub with the same token. Read-only: no PTY attach, no pane side effects.
+func handleCapturePane(p CapturePanePayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
+	res := CapturePaneResultPayload{Token: p.Token}
+	if deps.TmuxClient == nil {
+		res.Error = "tmux unavailable"
+	} else if paneID, err := deps.TmuxClient.PrimaryPaneID(p.Session); err != nil {
+		res.Error = err.Error()
+	} else if text, err := deps.TmuxClient.CapturePaneContent(paneID); err != nil {
+		res.Error = err.Error()
+	} else {
+		res.Text = tmux.LastLines(text, p.Lines)
+	}
+	msg, err := NewMessage(MsgCapturePaneResult, res)
+	if err != nil {
+		log.WithError(err).Debug("capture-pane result marshal failed")
+		return
+	}
+	pc.Enqueue(msg)
+}
+
 // handleSessionMessage dispatches messages received from the remote peer.
 func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
 	switch msg.Type {
@@ -638,6 +661,23 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 
 	case MsgRequestState:
 		sendStateUpdate(pc, deps)
+
+	case MsgCapturePane:
+		var p CapturePanePayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid capture-pane")
+			return
+		}
+		go handleCapturePane(p, pc, deps, log)
+
+	case MsgCapturePaneResult:
+		var p CapturePaneResultPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if deps.CaptureReg != nil {
+			deps.CaptureReg.Deliver(p.Token, CaptureResult{Text: p.Text, Error: p.Error})
+		}
 
 	case MsgSessionAttrsSnapshot:
 		var p SessionAttrsSnapshotPayload
