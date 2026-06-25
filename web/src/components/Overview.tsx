@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type DOMAttributes } from 'react'
 import { Session, sessionKey } from '../hooks/useSessions'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
@@ -9,6 +9,8 @@ import { stateRank, sessionSignal, isSessionActive, SessionState } from '../lib/
 import { formatSessionUptime, formatSystemUptime } from '../lib/time'
 import { sessionLabel } from '../hooks/useSessions'
 import { SessionActionsMenu, SessionMenuTarget } from './SessionActionsMenu'
+import { Terminal } from './Terminal'
+import { useGlance, GlanceTarget } from './GlancePopover'
 
 interface OverviewProps {
   sessions: Session[]
@@ -159,20 +161,24 @@ function SessionCard({
   item,
   hasMultipleHosts,
   getSessionEvents,
-  onSessionSelect,
+  onOpen,
   onJumpToSession,
   onDismissAlert,
   onContextMenu,
   prefs,
+  selected,
+  glanceTrigger,
 }: {
   item: CardItem
   hasMultipleHosts: boolean
   getSessionEvents: (session: string) => ToolEvent[]
-  onSessionSelect: (session: Session) => void
+  onOpen: (session: Session) => void
   onJumpToSession: (session: string, windowIndex?: number, pane?: string) => void
   onDismissAlert: (evt: ToolEvent) => void
   onContextMenu: (e: ReactMouseEvent, item: CardItem) => void
   prefs: ReturnType<typeof usePreferences>['prefs']
+  selected: boolean
+  glanceTrigger: (t: GlanceTarget) => DOMAttributes<HTMLElement>
 }) {
   const { session, key, signal, event, events, activity } = item
   const isWaiting = signal.state === 'needs_you'
@@ -182,12 +188,13 @@ function SessionCard({
   return (
     <button
       key={key}
+      {...glanceTrigger({ name: session.name, host: session.host, display_name: session.display_name, host_name: session.host_name })}
       onClick={() => {
         if (signal.state === 'needs_you' && loudEvent) onJumpToSession(loudEvent.host ? `${loudEvent.host}/${loudEvent.session}` : loudEvent.session, loudEvent.window, loudEvent.pane)
-        else onSessionSelect(session)
+        else onOpen(session)
       }}
       onContextMenu={(e) => onContextMenu(e, item)}
-      className={`text-left border bg-surface rounded-sm p-4 min-h-36 flex flex-col gap-2 transition-all ${signal.state === 'offline' ? 'opacity-60' : ''}`}
+      className={`text-left border bg-surface rounded-sm p-4 min-h-36 flex flex-col gap-2 transition-all ${signal.state === 'offline' ? 'opacity-60' : ''} ${selected ? 'ring-1 ring-primary' : ''}`}
       style={{
         borderColor: isWaiting ? 'var(--warning)' : 'var(--hairline)',
         boxShadow: isWaiting ? '0 0 0 1px var(--warning), 0 0 12px color-mix(in oklch, var(--warning) 25%, transparent)' : undefined,
@@ -256,6 +263,27 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
     })
   }, [])
   const hasMultipleHosts = hosts.length > 1
+  const glance = useGlance(hasMultipleHosts)
+  // Docked live-terminal split. Engages only on wide, fine-pointer viewports;
+  // otherwise a card click falls back to full-view nav.
+  const [selected, setSelected] = useState<Session | null>(null)
+  const [canDock, setCanDock] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 900px) and (pointer: fine)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 900px) and (pointer: fine)')
+    const sync = () => { setCanDock(mq.matches); if (!mq.matches) setSelected(null) }
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+  const handleCardOpen = useCallback((session: Session) => {
+    if (canDock) setSelected(session)
+    else onSessionSelect(session)
+  }, [canDock, onSessionSelect])
+  // Drop the dock if its session disappears (e.g. killed).
+  useEffect(() => {
+    if (selected && !sessions.some(s => sessionKey(s) === sessionKey(selected))) setSelected(null)
+  }, [sessions, selected])
+  const split = !!selected
+  const selectedKey = selected ? sessionKey(selected) : null
   const [layout, setLayout] = useState<'grid' | 'board'>(() => (localStorage.getItem('overview_layout') === 'board' ? 'board' : 'grid'))
   useEffect(() => { localStorage.setItem('overview_layout', layout) }, [layout])
   const [hiddenRailOpen, setHiddenRailOpen] = useState(() => localStorage.getItem('overview_rail_hidden') === 'open')
@@ -339,7 +367,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
         </h3>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start">
           {railItems.map(item => (
-            <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} />
+            <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
           ))}
         </div>
       </div>
@@ -347,7 +375,8 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
   }
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto font-sans text-sm font-medium bg-canvas">
+    <div className="flex-1 flex min-h-0">
+    <div className="flex-1 min-w-0 p-8 overflow-y-auto font-sans text-sm font-medium bg-canvas">
       <div className="flex items-center justify-end mb-4">
         <div className="inline-flex rounded-sm border border-hairline overflow-hidden text-[11px] font-bold">
           {(['grid', 'board'] as const).map(l => (
@@ -375,17 +404,17 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
       )}
 
       {layout === 'board' ? (
-        <div className="flex gap-3 mb-10 items-start">
+        <div className="flex gap-3 mb-10 items-start overflow-x-auto">
           {byState.filter(({ state, items: colItems }) => state === 'needs_you' || colItems.length > 0).map(({ state, items: colItems }) => (
-            <div key={state} className={`flex flex-col gap-2 ${colItems.length === 0 ? 'min-w-[160px]' : 'min-w-[260px]'}`} style={{ flexGrow: Math.max(colItems.length, 0.5), flexBasis: 0 }}>
+            <div key={state} className={`flex flex-col gap-2 ${colItems.length === 0 ? 'min-w-[160px]' : split ? 'min-w-[220px]' : 'min-w-[260px]'}`} style={{ flexGrow: Math.max(colItems.length, 0.5), flexBasis: 0 }}>
               <h3 className="font-display text-[13px] font-bold text-ink mb-1 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLUMN_META[state].color }} />
                 {COLUMN_META[state].label}
                 <span className="text-mute/40 font-bold text-xs">({colItems.length})</span>
               </h3>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start">
+              <div className={split ? 'grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2 items-start' : 'grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start'}>
                 {colItems.map(item => (
-                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} />
+                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
                 ))}
               </div>
             </div>
@@ -401,9 +430,9 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
               {hasMultipleHosts && <span className={`text-[10px] font-medium ${groupItems[0]?.session.host_online !== false ? 'text-success' : 'text-mute/50'}`}>{groupItems[0]?.session.host_online !== false ? 'online' : 'offline'}</span>}
               <span className="text-mute/40 font-bold text-xs ml-1">({groupItems.length})</span>
             </h3>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+            <div className={split ? 'grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2' : 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2'}>
               {groupItems.map(item => (
-                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} />
+                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
               ))}
             </div>
           </div>
@@ -442,6 +471,26 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
           onClose={() => setMenu(null)}
         />
       )}
+    </div>
+    {selected && (
+      <div className="shrink-0 border-l border-hairline flex flex-col" style={{ width: 'clamp(420px, 42%, 720px)' }}>
+        <div className="shrink-0 h-9 flex items-center gap-2 px-3 border-b border-hairline bg-surface-elevated/40">
+          <span className="font-display text-[13px] font-bold text-ink truncate min-w-0 flex-1">{selected.display_name || selected.name}</span>
+          <button title="Open full view" onClick={() => onSessionSelect(selected)} className="p-1.5 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
+          <button title="Close" onClick={() => setSelected(null)} className="p-1.5 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="min-h-0 flex-1"><Terminal key={selectedKey} sessionName={selected.name} hostId={selected.host} /></div>
+      </div>
+    )}
+    {glance.popover}
     </div>
   )
 }

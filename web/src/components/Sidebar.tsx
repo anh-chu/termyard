@@ -13,6 +13,7 @@ import { describeCron } from '../lib/cron'
 import { formatRelativeTime, formatUptime } from '../lib/time'
 import { hostColor } from '../lib/hostColor'
 import { AgentMark } from './AgentMark'
+import { useGlance } from './GlancePopover'
 
 function SparkleIcon({ spinning, size = 11 }: { spinning?: boolean; size?: number }) {
   if (spinning) {
@@ -229,6 +230,7 @@ export function Sidebar({
   pruningSuspended,
 }: SidebarProps) {
   const { prefs } = usePreferences()
+  const glancePreview = useGlance(!!hasMultipleHosts)
   const { schedules } = useSchedules()
   // background/hidden are SERVER-AUTHORITATIVE and arrive via props. They are
   // NOT cached in localStorage — the server owns the truth and broadcasts
@@ -782,6 +784,7 @@ export function Sidebar({
         <div
           role="button"
           tabIndex={0}
+          {...glancePreview.trigger({ name: session.name, host: session.host, display_name: session.display_name, host_name: session.host_name })}
           draggable={!collapsed && !isRenaming}
 
           onDragStart={(e) => {
@@ -1352,6 +1355,7 @@ export function Sidebar({
         : '',
       !isHidden && 'border-r border-hairline',
     )}>
+      {glancePreview.popover}
       {!collapsed && (
         <div
           onMouseDown={startResize}
