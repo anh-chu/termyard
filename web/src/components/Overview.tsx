@@ -25,6 +25,9 @@ interface OverviewProps {
   onDismissAlert: (evt: ToolEvent) => void
   setSessionAttr: (key: string, next: { background?: boolean; hidden?: boolean }) => void
   onSessionKilled?: (key: string) => void
+  // Tiled layout groups (sessionKeys per group). Used to fold non-agent
+  // "tool" panes (build/dev terminals) into the agent card they were tiled with.
+  layoutGroups?: { leaves: string[]; activeKey: string | null }[]
 }
 
 interface SystemStats {
@@ -168,6 +171,7 @@ function SessionCard({
   prefs,
   selected,
   glanceTrigger,
+  mates,
 }: {
   item: CardItem
   hasMultipleHosts: boolean
@@ -179,6 +183,7 @@ function SessionCard({
   prefs: ReturnType<typeof usePreferences>['prefs']
   selected: boolean
   glanceTrigger: (t: GlanceTarget) => DOMAttributes<HTMLElement>
+  mates?: CardItem[]
 }) {
   const { session, key, signal, event, events, activity } = item
   const isWaiting = signal.state === 'needs_you'
@@ -226,6 +231,7 @@ function SessionCard({
         <span className="flex items-center gap-1.5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>{session.windows?.length || 0}</span>
         {signal.agentCount > 0 && <span className="flex items-center gap-1.5" style={{ color: toolColors.claude }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>{signal.agentCount}</span>}
         {signal.state === 'working' ? <span className="text-success">working</span> : signal.state === 'idle' ? <span className="text-mute/40">idle</span> : signal.state === 'offline' ? <span className="text-mute/40">offline</span> : signal.state === 'needs_you' ? <span className="text-warning font-bold">needs you</span> : null}
+        {mates && mates.length > 0 && <span className="flex items-center gap-1 text-mute/50" title={`${mates.length + 1} tiled panes`}>⧉{mates.length + 1}</span>}
       </div>
 
       {signal.state === 'needs_you' && loudEvent ? (
@@ -245,11 +251,27 @@ function SessionCard({
           {!taskLine && <div className="mt-auto text-[12px] text-mute/60">{isSessionActive(session) ? 'active' : 'calm'}</div>}
         </>
       )}
+      {mates && mates.length > 0 && (
+        <div className="pt-2 mt-1 border-t border-hairline/40 flex flex-col gap-1">
+          {mates.map(m => (
+            <div
+              key={m.key}
+              {...glanceTrigger({ name: m.session.name, host: m.session.host, display_name: m.session.display_name, host_name: m.session.host_name })}
+              onClick={(e) => { e.stopPropagation(); onOpen(m.session) }}
+              className="flex items-center gap-1.5 text-[11px] text-mute/60 hover:text-ink cursor-pointer truncate"
+              title={`Open ${m.session.display_name || m.session.name}`}
+            >
+              <span className="text-mute/30">▸</span>
+              <span className="truncate">{m.session.display_name || m.session.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </button>
   )
 }
 
-export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert, setSessionAttr, onSessionKilled }: OverviewProps) {
+export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert, setSessionAttr, onSessionKilled, layoutGroups }: OverviewProps) {
   const [stats, setStats] = useState<Stats | null>(null)
   const { prefs } = usePreferences()
   const [menu, setMenu] = useState<{ target: SessionMenuTarget; x: number; y: number } | null>(null)
@@ -339,6 +361,26 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
   }, [getSessionEvents, getSessionActivity, isSessionInActiveTurn])
 
   const items = useMemo<CardItem[]>(() => foregroundSessions.map(buildItem), [foregroundSessions, buildItem])
+
+  // Fold tiled "tool" panes (no agent) into the agent card they were tiled with.
+  // Per tile group: agent sessions keep their own card; non-agent sessions become
+  // mate rows under the group's primary agent card and drop out of the board columns.
+  const { matesByCard, hiddenMateKeys } = useMemo(() => {
+    const itemByKey = new Map(items.map(it => [it.key, it]))
+    const matesByCard = new Map<string, CardItem[]>()
+    const hiddenMateKeys = new Set<string>()
+    for (const g of layoutGroups ?? []) {
+      if (g.leaves.length < 2) continue
+      const leaf = g.leaves.map(k => itemByKey.get(k)).filter((x): x is CardItem => !!x)
+      const agents = leaf.filter(i => i.signal.agentCount > 0)
+      const tools = leaf.filter(i => i.signal.agentCount === 0)
+      if (agents.length === 0 || tools.length === 0) continue
+      const primary = agents.find(i => i.key === g.activeKey) ?? agents[0]
+      matesByCard.set(primary.key, [...(matesByCard.get(primary.key) ?? []), ...tools])
+      for (const t of tools) hiddenMateKeys.add(t.key)
+    }
+    return { matesByCard, hiddenMateKeys }
+  }, [items, layoutGroups])
   const hiddenItems = useMemo<CardItem[]>(() => sessions.filter(s => hiddenSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, buildItem])
   const bgItems = useMemo<CardItem[]>(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && backgroundSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, backgroundSet, buildItem])
 
@@ -360,13 +402,13 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
   const byState = useMemo(() => COLUMN_ORDER.map(state => ({
     state,
     items: items
-      .filter(i => i.signal.state === state)
+      .filter(i => i.signal.state === state && !hiddenMateKeys.has(i.key))
       .sort((a, b) => {
         // needs_you: longest-blocked first (oldest loud event); else by name
         if (state === 'needs_you') return (a.event?.timestamp || '').localeCompare(b.event?.timestamp || '')
         return a.session.name.localeCompare(b.session.name)
       }),
-  })), [items])
+  })), [items, hiddenMateKeys])
 
   const activeHostSections = hosts.filter(h => h.stats)
 
@@ -436,7 +478,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
               </h3>
               <div className={split ? 'grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2 items-start' : 'grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start'}>
                 {colItems.map(item => (
-                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
+                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} mates={matesByCard.get(item.key)} />
                 ))}
               </div>
             </div>

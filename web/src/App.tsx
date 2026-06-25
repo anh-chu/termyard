@@ -1363,6 +1363,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
               onDismissAlert={dismissEvent}
               setSessionAttr={setSessionAttr}
               onSessionKilled={removeSessionFromLayout}
+              layoutGroups={layoutGroups}
             />
           )}
           <SettingsDrawer
