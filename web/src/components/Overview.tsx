@@ -188,8 +188,12 @@ function SessionCard({
   const { session, key, signal, event, events, activity } = item
   const isWaiting = signal.state === 'needs_you'
   const loudEvent = event || getSessionEvents(key).find(e => e.status === 'waiting' || e.status === 'stuck' || e.status === 'error')
-  // Same task text the sidebar shows: live activity label, else last agent msg / user prompt / capture
-  const taskLine = (events.find(e => e.status === 'active' && !e.auto_detected)?.message || session.last_agent_message?.trim() || session.user_prompt?.trim() || session.prompt_preview?.trim() || '')
+  // Mirror the sidebar: the user prompt is the task (the "what"), the live
+  // activity label / last agent message is the status shown beneath it.
+  const userPrompt = session.user_prompt?.trim() || ''
+  const activityText = (events.find(e => e.status === 'active' && !e.auto_detected)?.message || session.last_agent_message?.trim() || session.prompt_preview?.trim() || '')
+  const taskPrimary = userPrompt || activityText
+  const taskSecondary = userPrompt && activityText && activityText !== userPrompt ? activityText : ''
   return (
     <button
       key={key}
@@ -241,13 +245,14 @@ function SessionCard({
         </div>
       ) : (
         <>
-          {taskLine && <div className="text-[12px] text-mute/80 leading-snug flex-1 line-clamp-3">{taskLine}</div>}
+          {taskPrimary && <div className="text-[12px] text-ink/85 leading-snug line-clamp-2">{taskPrimary}</div>}
+          {taskSecondary && <div className="text-[11px] text-mute/60 leading-snug line-clamp-2">{taskSecondary}</div>}
           {signal.state === 'working' && prefs.sparklines_visible && activity?.sparkline && (
             <div className="mt-auto pt-2 border-t border-hairline/40">
               <Sparkline data={activity.sparkline} height={18} />
             </div>
           )}
-          {!taskLine && <div className="mt-auto text-[12px] text-mute/60">{isSessionActive(session) ? 'active' : 'calm'}</div>}
+          {!taskPrimary && <div className="mt-auto text-[12px] text-mute/60">{isSessionActive(session) ? 'active' : 'calm'}</div>}
         </>
       )}
       {mates && mates.length > 0 && (
