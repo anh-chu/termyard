@@ -1309,6 +1309,8 @@ function AppInner({ onLogout }: { onLogout?: () => void }) {
               isSessionInActiveTurn={isSessionInActiveTurn}
               onJumpToSession={jumpToSession}
               onDismissAlert={dismissEvent}
+              setSessionAttr={setSessionAttr}
+              onSessionKilled={removeSessionFromLayout}
             />
           )}
           <SettingsDrawer

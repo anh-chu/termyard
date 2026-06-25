@@ -7,6 +7,7 @@ import { ActivitySnapshot } from '../hooks/useActivity'
 import { usePreferences } from '../hooks/usePreferences'
 import { useSchedules } from '../hooks/useSchedules'
 import { cn } from '../lib/utils'
+import { renameSession, aiNameSession as aiNameSessionApi, killSession as killSessionApi } from '../lib/sessionActions'
 import { describeCron } from '../lib/cron'
 import { formatRelativeTime, formatUptime } from '../lib/time'
 import { hostColor } from '../lib/hostColor'
@@ -461,36 +462,20 @@ export function Sidebar({
     setContextMenu(null)
   }
 
-  const killSession = async (id: string, name: string, host?: string) => {
+  const killSession = (id: string, name: string, host?: string) => {
     setContextMenu(null)
     setConfirmKillKey(null)
     setConfirmWorktreeKillKey(null)
     onSessionKilled?.(host ? `${host}/${name}` : name)
-    try {
-      await fetch('/api/session/kill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, name, host: host || undefined }),
-      })
-    } catch (err) {
-      console.error('Failed to kill session:', err)
-    }
+    killSessionApi(id, name, host)
   }
 
-  const killSessionAndWorktree = async (id: string, name: string, host?: string) => {
+  const killSessionAndWorktree = (id: string, name: string, host?: string) => {
     setContextMenu(null)
     setConfirmKillKey(null)
     setConfirmWorktreeKillKey(null)
     onSessionKilled?.(host ? `${host}/${name}` : name)
-    try {
-      await fetch('/api/session/kill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, name, host: host || undefined, remove_worktree: true }),
-      })
-    } catch (err) {
-      console.error('Failed to kill session + worktree:', err)
-    }
+    killSessionApi(id, name, host, true)
   }
 
   const submitRename = async () => {
@@ -498,48 +483,18 @@ export function Sidebar({
       setRenamingSession(null)
       return
     }
-    const nextName = renameValue.trim()
-    try {
-      // Rename sets the friendly display label only; the underlying tmux
-      // session name is left untouched (renaming it would break session keys,
-      // attachment, and agent hooks keyed by session name). clear=false marks
-      // it user-set so the AI namer never overwrites it. The new label arrives
-      // via the websocket state update, so no local mutation is needed.
-      await fetch('/api/session/display-name', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session: renamingSession.name,
-          display_name: nextName,
-          clear: false,
-          host: renamingSession.host || undefined,
-        }),
-      })
-    } catch (err) {
-      console.error('Failed to rename session:', err)
-    }
+    await renameSession(renamingSession.name, renameValue.trim(), renamingSession.host)
     setRenamingSession(null)
   }
 
   // Manually (re)generate an AI name for a session. The new name arrives via
-  // the websocket state update, so no local state mutation is needed here.
+  // the websocket state update; we only own the per-session naming spinner.
   const aiNameSession = async (name: string, host?: string) => {
     setContextMenu(null)
     const key = host ? `${host}/${name}` : name
     setNaming(key, true)
     try {
-      const res = await fetch('/api/session/regenerate-name', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: name, host: host || undefined }),
-      })
-      // The new name arrives via the websocket state update; failures surface
-      // as backend notice toasts. Log here too for console debugging.
-      if (!res.ok && res.status !== 204) {
-        console.error('AI name failed:', res.status, await res.text().catch(() => ''))
-      }
-    } catch (err) {
-      console.error('Failed to AI name session:', err)
+      await aiNameSessionApi(name, host)
     } finally {
       setNaming(key, false)
     }

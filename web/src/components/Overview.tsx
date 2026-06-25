@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Session, sessionKey } from '../hooks/useSessions'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
@@ -7,6 +7,8 @@ import { usePreferences } from '../hooks/usePreferences'
 import { toolColors, statusConfig, signalTreatment } from '../theme'
 import { stateRank, sessionSignal, isSessionActive, SessionState } from '../lib/sessionState'
 import { formatSessionUptime, formatSystemUptime } from '../lib/time'
+import { sessionLabel } from '../hooks/useSessions'
+import { SessionActionsMenu, SessionMenuTarget } from './SessionActionsMenu'
 
 interface OverviewProps {
   sessions: Session[]
@@ -19,6 +21,8 @@ interface OverviewProps {
   isSessionInActiveTurn: (key: string) => boolean
   onJumpToSession: (session: string, windowIndex?: number, pane?: string) => void
   onDismissAlert: (evt: ToolEvent) => void
+  setSessionAttr: (key: string, next: { background?: boolean; hidden?: boolean }) => void
+  onSessionKilled?: (key: string) => void
 }
 
 interface SystemStats {
@@ -158,6 +162,7 @@ function SessionCard({
   onSessionSelect,
   onJumpToSession,
   onDismissAlert,
+  onContextMenu,
   prefs,
 }: {
   item: CardItem
@@ -166,6 +171,7 @@ function SessionCard({
   onSessionSelect: (session: Session) => void
   onJumpToSession: (session: string, windowIndex?: number, pane?: string) => void
   onDismissAlert: (evt: ToolEvent) => void
+  onContextMenu: (e: ReactMouseEvent, item: CardItem) => void
   prefs: ReturnType<typeof usePreferences>['prefs']
 }) {
   const { session, key, signal, event, events, activity } = item
@@ -180,6 +186,7 @@ function SessionCard({
         if (signal.state === 'needs_you' && loudEvent) onJumpToSession(loudEvent.host ? `${loudEvent.host}/${loudEvent.session}` : loudEvent.session, loudEvent.window, loudEvent.pane)
         else onSessionSelect(session)
       }}
+      onContextMenu={(e) => onContextMenu(e, item)}
       className={`text-left border bg-surface rounded-sm p-4 min-h-36 flex flex-col gap-2 transition-all ${signal.state === 'offline' ? 'opacity-60' : ''}`}
       style={{
         borderColor: isWaiting ? 'var(--warning)' : 'var(--hairline)',
@@ -235,9 +242,19 @@ function SessionCard({
   )
 }
 
-export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert }: OverviewProps) {
+export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert, setSessionAttr, onSessionKilled }: OverviewProps) {
   const [stats, setStats] = useState<Stats | null>(null)
   const { prefs } = usePreferences()
+  const [menu, setMenu] = useState<{ target: SessionMenuTarget; x: number; y: number } | null>(null)
+  const openMenu = useCallback((e: ReactMouseEvent, item: CardItem) => {
+    e.preventDefault()
+    const s = item.session
+    setMenu({
+      target: { key: item.key, id: s.id, name: s.name, label: sessionLabel(s), host: s.host, isWorktree: s.is_worktree ?? false },
+      x: e.clientX,
+      y: e.clientY,
+    })
+  }, [])
   const hasMultipleHosts = hosts.length > 1
   const [layout, setLayout] = useState<'grid' | 'board'>(() => (localStorage.getItem('overview_layout') === 'board' ? 'board' : 'grid'))
   useEffect(() => { localStorage.setItem('overview_layout', layout) }, [layout])
@@ -322,7 +339,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
         </h3>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start">
           {railItems.map(item => (
-            <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
+            <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} />
           ))}
         </div>
       </div>
@@ -368,7 +385,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
               </h3>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start">
                 {colItems.map(item => (
-                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
+                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} />
                 ))}
               </div>
             </div>
@@ -386,7 +403,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
             </h3>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
               {groupItems.map(item => (
-                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
+                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} />
               ))}
             </div>
           </div>
@@ -412,6 +429,19 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
           )}
         </div>
       </details>
+
+      {menu && (
+        <SessionActionsMenu
+          target={menu.target}
+          x={menu.x}
+          y={menu.y}
+          hiddenSet={hiddenSet}
+          backgroundSet={backgroundSet}
+          setSessionAttr={setSessionAttr}
+          onSessionKilled={onSessionKilled}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }
