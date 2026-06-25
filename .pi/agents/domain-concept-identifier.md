@@ -1,1 +1,0 @@
-/home/sil/.pi/agent/npm/node_modules/fito-plugin/agents/domain-concept-identifier.md
