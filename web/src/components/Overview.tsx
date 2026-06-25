@@ -487,7 +487,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
             </svg>
           </button>
         </div>
-        <div className="min-h-0 flex-1"><Terminal key={selectedKey} sessionName={selected.name} hostId={selected.host} /></div>
+        <div className="min-h-0 flex-1 flex flex-col overflow-hidden"><Terminal key={selectedKey} sessionName={selected.name} hostId={selected.host} /></div>
       </div>
     )}
     {glance.popover}
