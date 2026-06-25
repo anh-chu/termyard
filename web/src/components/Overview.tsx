@@ -245,8 +245,12 @@ function SessionCard({
         </div>
       ) : (
         <>
-          {taskPrimary && <div className="text-[12px] text-ink/85 leading-snug line-clamp-2">{taskPrimary}</div>}
-          {taskSecondary && <div className="text-[11px] text-mute/60 leading-snug line-clamp-2">{taskSecondary}</div>}
+          {taskPrimary && (
+            <div className="flex flex-col gap-0.5">
+              <div className="text-[12px] text-ink/85 leading-snug line-clamp-2">{taskPrimary}</div>
+              {taskSecondary && <div className="text-[11px] text-mute/60 leading-snug line-clamp-2">{taskSecondary}</div>}
+            </div>
+          )}
           {signal.state === 'working' && prefs.sparklines_visible && activity?.sparkline && (
             <div className="mt-auto pt-2 border-t border-hairline/40">
               <Sparkline data={activity.sparkline} height={18} />
