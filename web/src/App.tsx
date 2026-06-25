@@ -115,7 +115,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     } catch {}
     return null
   })
-  const { groups: syncedGroups, loaded: groupsLoaded, refresh: refreshGroups, setTree: setGroupTree, setName: setGroupName, setRank: setGroupRank } = useGroupSync(authenticated)
+  const { groups: syncedGroups, loaded: groupsLoaded, refresh: refreshGroups, setTree: setGroupTree, setName: setGroupName, setRank: setGroupRank, deleteGroup } = useGroupSync(authenticated)
   const { ranks: sessionOrderRanks, loaded: sessionOrderLoaded, refresh: refreshSessionOrder, setRank: setSessionOrderRank } = useSessionOrder(authenticated)
   const [activeGroupId, setActiveGroupId] = useState<string>(() => {
     try {
@@ -385,6 +385,9 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   // Navigate back to overview when the tree becomes empty (but not if singleView is active)
   useEffect(() => {
     if (paneTree === null && !singleView && currentView === 'session') {
+      // The active group just emptied (last session removed); delete its server
+      // record before promoting the next group, so it does not linger.
+      if (syncedGroupsRef.current[activeGroupId]) void deleteGroup(activeGroupId)
       const next = Object.entries(syncedGroups)
         .sort(([idA, a], [idB, b]) => {
           const aRank = a.rank ?? ''
@@ -415,7 +418,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
         navigateTo(null)
       }
     }
-  }, [paneTree, singleView, currentView, syncedGroups, activeGroupId, navigateTo])
+  }, [paneTree, singleView, currentView, syncedGroups, activeGroupId, navigateTo, deleteGroup])
 
   // Dissolve active group to standalone when only 1 session remains
   useEffect(() => {
@@ -427,12 +430,16 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     setSingleView(lastLeaf)
     setActiveKey(null)
     setPaneTree(null)
+    // The active layout is no longer a group; drop its server record so the
+    // dissolved (broken-out) session stops re-rendering as grouped. Guard on a
+    // real record to avoid tombstoning ids that were never persisted.
+    if (syncedGroupsRef.current[activeGroupId]) void deleteGroup(activeGroupId)
     const { host, name } = parseSessionKey(lastLeaf)
     const path = host
       ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}`
       : `/session/${encodeURIComponent(name)}`
     if (window.location.pathname !== path) window.history.replaceState(null, '', path)
-  }, [paneTree])
+  }, [paneTree, activeGroupId, deleteGroup])
 
   // Refs for latest values used in keyboard shortcuts (avoids effect churn)
 
