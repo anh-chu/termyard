@@ -171,12 +171,20 @@ export function TopBar({
   return (
     <header className="flex items-center gap-3 px-4 h-11 border-b border-hairline bg-canvas shrink-0 font-sans text-sm font-semibold relative">
       <div className="flex items-center gap-3 shrink-0">
-        <button className="flex items-center gap-2 shrink-0" onClick={onOverview} title="Overview">
+        <button className={cn('flex items-center gap-2 shrink-0 rounded-sm px-1.5 py-1 -mx-1 transition-colors', currentView === 'overview' ? 'bg-surface-elevated' : 'hover:bg-surface-elevated')} onClick={onOverview} title="Home">
           <img src="/favicon.svg" alt="termyard" width="18" height="18" className="rounded-sm" />
           <span className="font-display text-[11px] font-bold tracking-[0.12em] text-ink">Termyard</span>
         </button>
 
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onOverview}
+            title="Home"
+            className={cn('p-1.5 rounded-sm transition-colors', currentView === 'overview' ? 'bg-surface-elevated text-ink' : 'text-mute hover:bg-surface-elevated hover:text-ink')}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /></svg>
+          </button>
           {onNewSession && (
             <button
               type="button"
