@@ -208,8 +208,7 @@ function SessionCard({
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            <span className={`font-display text-[15px] font-bold truncate ${signal.state === 'idle' ? 'text-mute' : 'text-ink'}`}>{session.display_name || session.name}</span>
-            {session.attached && <span className="text-[9px] font-bold tracking-wider text-success px-1.5 py-[1.5px] rounded-sm bg-success/10 border border-success/20">attached</span>}
+            <span className={`font-display text-[13px] font-bold truncate ${signal.state === 'idle' ? 'text-mute' : 'text-ink'}`}>{session.display_name || session.name}</span>
           </div>
           <div className="text-[10px] text-mute/60">
             {hasMultipleHosts && <span className="text-mute/50">{session.host_name || 'Local'} · </span>}
