@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Session, sessionKey } from '../hooks/useSessions'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
@@ -241,6 +241,10 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
   const hasMultipleHosts = hosts.length > 1
   const [layout, setLayout] = useState<'grid' | 'board'>(() => (localStorage.getItem('overview_layout') === 'board' ? 'board' : 'grid'))
   useEffect(() => { localStorage.setItem('overview_layout', layout) }, [layout])
+  const [hiddenRailOpen, setHiddenRailOpen] = useState(() => localStorage.getItem('overview_rail_hidden') === 'open')
+  const [bgRailOpen, setBgRailOpen] = useState(() => localStorage.getItem('overview_rail_bg') === 'open')
+  useEffect(() => { localStorage.setItem('overview_rail_hidden', hiddenRailOpen ? 'open' : 'closed') }, [hiddenRailOpen])
+  useEffect(() => { localStorage.setItem('overview_rail_bg', bgRailOpen ? 'open' : 'closed') }, [bgRailOpen])
 
   const foregroundSessions = useMemo(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && !backgroundSet.has(sessionKey(s))), [sessions, hiddenSet, backgroundSet])
   const hiddenCount = sessions.length - foregroundSessions.length
@@ -258,14 +262,18 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
     return () => clearInterval(interval)
   }, [prefs.overview_refresh_interval])
 
-  const items = useMemo<CardItem[]>(() => foregroundSessions.map(session => {
+  const buildItem = useCallback((session: Session): CardItem => {
     const key = sessionKey(session)
     const events = getSessionEvents(key)
     const activity = getSessionActivity(key)
     const signal = sessionSignal(session, events, activity, isSessionInActiveTurn(key))
     const event = events.find(e => e.status === 'waiting' || e.status === 'stuck' || e.status === 'error')
     return { session, key, signal, event, events, activity }
-  }), [foregroundSessions, getSessionEvents, getSessionActivity, isSessionInActiveTurn])
+  }, [getSessionEvents, getSessionActivity, isSessionInActiveTurn])
+
+  const items = useMemo<CardItem[]>(() => foregroundSessions.map(buildItem), [foregroundSessions, buildItem])
+  const hiddenItems = useMemo<CardItem[]>(() => sessions.filter(s => hiddenSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, buildItem])
+  const bgItems = useMemo<CardItem[]>(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && backgroundSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, backgroundSet, buildItem])
 
   const grouped = useMemo(() => {
     const groups = new Map<string, CardItem[]>()
@@ -294,6 +302,32 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
   })), [items])
 
   const activeHostSections = hosts.filter(h => h.stats)
+
+  const renderRail = (railKey: string, label: string, railItems: CardItem[], open: boolean, setOpen: (v: boolean) => void) => {
+    if (railItems.length === 0) return null
+    if (!open) return (
+      <button key={railKey} onClick={() => setOpen(true)} title={`Show ${label.toLowerCase()}`}
+        className="shrink-0 w-9 self-stretch min-h-[120px] flex flex-col items-center gap-3 py-3 rounded-sm border border-hairline bg-surface text-mute/50 hover:text-ink hover:border-hairline transition-colors">
+        <span className="text-[12px] font-bold">{railItems.length}</span>
+        <span className="text-[11px] font-bold tracking-wide [writing-mode:vertical-rl] rotate-180">{label}</span>
+      </button>
+    )
+    return (
+      <div key={railKey} className="min-w-[260px] flex flex-col gap-2" style={{ flexGrow: railItems.length, flexBasis: 0 }}>
+        <h3 className="font-display text-[13px] font-bold text-mute mb-1 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-mute/40" />
+          {label}
+          <span className="text-mute/40 font-bold text-xs">({railItems.length})</span>
+          <button onClick={() => setOpen(false)} className="ml-auto text-mute/40 hover:text-ink leading-none" title="Collapse">×</button>
+        </h3>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start">
+          {railItems.map(item => (
+            <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 p-8 overflow-y-auto font-sans text-sm font-medium bg-canvas">
@@ -326,17 +360,21 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
       {layout === 'board' ? (
         <div className="flex gap-3 mb-10 items-start">
           {byState.filter(({ state, items: colItems }) => state === 'needs_you' || colItems.length > 0).map(({ state, items: colItems }) => (
-            <div key={state} className="flex-1 min-w-[240px] max-w-[400px] flex flex-col gap-2">
+            <div key={state} className={`flex flex-col gap-2 ${colItems.length === 0 ? 'min-w-[160px]' : 'min-w-[260px]'}`} style={{ flexGrow: Math.max(colItems.length, 0.5), flexBasis: 0 }}>
               <h3 className="font-display text-[13px] font-bold text-ink mb-1 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLUMN_META[state].color }} />
                 {COLUMN_META[state].label}
                 <span className="text-mute/40 font-bold text-xs">({colItems.length})</span>
               </h3>
-              {colItems.map(item => (
-                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
-              ))}
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start">
+                {colItems.map(item => (
+                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onSessionSelect={onSessionSelect} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} prefs={prefs} />
+                ))}
+              </div>
             </div>
           ))}
+          {renderRail('hidden', 'Hidden', hiddenItems, hiddenRailOpen, setHiddenRailOpen)}
+          {renderRail('backgrounded', 'Backgrounded', bgItems, bgRailOpen, setBgRailOpen)}
         </div>
       ) : (
         grouped.map(({ groupLabel, items: groupItems }) => (
