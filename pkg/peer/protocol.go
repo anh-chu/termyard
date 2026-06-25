@@ -23,6 +23,8 @@ const (
 	MsgActivityUpdate = "activity-update"
 	// MsgStats sends system stats
 	MsgStats = "stats"
+	// MsgCapturePaneResult returns a capture-pane snapshot to the hub.
+	MsgCapturePaneResult = "capture-pane-result"
 )
 
 // Message types sent from hub to peer over control WebSocket
@@ -65,6 +67,8 @@ const (
 	MsgGroupSnapshot = "group-snapshot"
 	// MsgGroupDelta carries a single group update across paired peers.
 	MsgGroupDelta = "group-delta"
+	// MsgCapturePane asks a peer to capture its primary pane's visible buffer.
+	MsgCapturePane = "capture-pane"
 )
 
 // Message types reserved for future per-terminal stream setup.
@@ -242,6 +246,20 @@ type GroupDeltaPayload struct {
 type SessionActionPayload struct {
 	Action string          `json:"action"` // new, rename, select-window
 	Params json.RawMessage `json:"params"`
+}
+
+// CapturePanePayload asks a peer to capture a session's primary pane buffer.
+type CapturePanePayload struct {
+	Token   string `json:"token"`
+	Session string `json:"session"`
+	Lines   int    `json:"lines"`
+}
+
+// CapturePaneResultPayload returns captured text (or an error) keyed by token.
+type CapturePaneResultPayload struct {
+	Token string `json:"token"`
+	Text  string `json:"text"`
+	Error string `json:"error,omitempty"`
 }
 
 // NewMessage creates a Message with a typed payload

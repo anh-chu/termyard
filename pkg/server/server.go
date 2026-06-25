@@ -79,6 +79,7 @@ type Options struct {
 	PeerMgr          *peer.Manager
 	PeerHandler      *peer.Handler
 	StreamReg        *peer.StreamRegistry
+	CaptureReg       *peer.CaptureRegistry
 	LinkSupervisor   *peer.LinkSupervisor
 	Detector         *toolevents.Detector
 	PortForwardStore *portforward.Store
@@ -950,6 +951,79 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode([]interface{}{})
 				}
+			})
+
+			// Read-only snapshot of a session's primary pane visible buffer.
+			// Works for local and remote (peer) sessions; no PTY attach.
+			r.Get("/pane-capture", func(w http.ResponseWriter, r *http.Request) {
+				session := r.URL.Query().Get("session")
+				if session == "" {
+					http.Error(w, "session is required", http.StatusBadRequest)
+					return
+				}
+				lines := 40
+				if v, err := strconv.Atoi(r.URL.Query().Get("lines")); err == nil && v > 0 {
+					lines = v
+				}
+				host := r.URL.Query().Get("host")
+
+				// Remote peer — request capture over the control link.
+				if host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(host) {
+					if opts.CaptureReg == nil {
+						http.Error(w, "capture unavailable", http.StatusInternalServerError)
+						return
+					}
+					peerConn := opts.PeerMgr.GetPeerConnection(host)
+					if peerConn == nil {
+						http.Error(w, "peer not connected", http.StatusBadGateway)
+						return
+					}
+					token := peer.NewToken()
+					msg, err := peer.NewMessage(peer.MsgCapturePane, peer.CapturePanePayload{
+						Token: token, Session: session, Lines: lines,
+					})
+					if err != nil {
+						http.Error(w, "internal error", http.StatusInternalServerError)
+						return
+					}
+					// Register before enqueue so a fast reply cannot be dropped.
+					ch, cancel := opts.CaptureReg.Register(token)
+					defer cancel()
+					if !peerConn.Enqueue(msg) {
+						http.Error(w, "peer send queue full", http.StatusBadGateway)
+						return
+					}
+					select {
+					case res := <-ch:
+						if res.Error != "" {
+							http.Error(w, "capture failed: "+res.Error, http.StatusInternalServerError)
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						json.NewEncoder(w).Encode(map[string]string{"text": res.Text})
+					case <-time.After(3 * time.Second):
+						http.Error(w, "peer capture timed out", http.StatusGatewayTimeout)
+					}
+					return
+				}
+
+				// Local session.
+				if opts.Client == nil {
+					http.Error(w, "tmux unavailable", http.StatusInternalServerError)
+					return
+				}
+				paneID, err := opts.Client.PrimaryPaneID(session)
+				if err != nil {
+					http.Error(w, "capture failed: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				text, err := opts.Client.CapturePaneContent(paneID)
+				if err != nil {
+					http.Error(w, "capture failed: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"text": tmux.LastLines(text, lines)})
 			})
 
 			r.Post("/session/new", func(w http.ResponseWriter, r *http.Request) {
