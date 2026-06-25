@@ -11,6 +11,7 @@ import { sessionLabel } from '../hooks/useSessions'
 import { SessionActionsMenu, SessionMenuTarget } from './SessionActionsMenu'
 import { Terminal } from './Terminal'
 import { useGlance, GlanceTarget } from './GlancePopover'
+import { pathLeaf } from '../lib/path'
 
 interface OverviewProps {
   sessions: Session[]
@@ -216,6 +217,7 @@ function SessionCard({
           </div>
           <div className="text-[10px] text-mute/60">
             {hasMultipleHosts && <span className="text-mute/50">{session.host_name || 'Local'} · </span>}
+            {session.project_path && <span className="text-mute/70" title={session.project_path}>{pathLeaf(session.project_path)} · </span>}
             {formatSessionUptime(session.created, prefs.timestamp_format)}
           </div>
         </div>

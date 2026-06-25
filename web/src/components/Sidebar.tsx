@@ -11,6 +11,7 @@ import { cn } from '../lib/utils'
 import { renameSession, aiNameSession as aiNameSessionApi, killSession as killSessionApi } from '../lib/sessionActions'
 import { describeCron } from '../lib/cron'
 import { formatRelativeTime, formatUptime } from '../lib/time'
+import { pathLeaf } from '../lib/path'
 import { hostColor } from '../lib/hostColor'
 import { AgentMark } from './AgentMark'
 import { useGlance } from './GlancePopover'
@@ -163,13 +164,6 @@ function writeStoredList(key: string, values: string[]) {
   localStorage.setItem(key, JSON.stringify(values))
 }
 
-function pathLeaf(path?: string): string {
-  if (!path) return ''
-  const trimmed = path.replace(/[\\/]+$/, '')
-  if (/^(\/home\/[^/]+|\/Users\/[^/]+|\/root)$/.test(trimmed)) return '~'
-  const parts = trimmed.split(/[\\/]/)
-  return parts[parts.length - 1] || trimmed
-}
 
 function sortNewestFirst<T extends { created?: string; last_activity?: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => {
