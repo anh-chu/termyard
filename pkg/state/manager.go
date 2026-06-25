@@ -80,13 +80,17 @@ func NewManager(client *tmux.Client) *Manager {
 }
 
 // persistedName is the on-disk shape for name metadata that must survive a
-// server restart. Transient fields (prompts, agent messages) are intentionally
-// not persisted; hooks repopulate them.
+// server restart, plus the prompt/message context the AI namer reads so a
+// post-restart rename has something to work from instead of a stale name with
+// no context. Hooks still refresh these on the next agent turn.
 type persistedName struct {
-	DisplayName  string `json:"display_name"`
-	UserSetName  bool   `json:"user_set_name"`
-	NameAssigned bool   `json:"name_assigned"`
-	TmuxRenamed  bool   `json:"tmux_renamed"`
+	DisplayName      string `json:"display_name"`
+	UserSetName      bool   `json:"user_set_name"`
+	NameAssigned     bool   `json:"name_assigned"`
+	TmuxRenamed      bool   `json:"tmux_renamed"`
+	UserPrompt       string `json:"user_prompt,omitempty"`
+	LastUserPrompt   string `json:"last_user_prompt,omitempty"`
+	LastAgentMessage string `json:"last_agent_message,omitempty"`
 }
 
 // loadNames seeds meta with persisted display names. Called once at startup
@@ -110,6 +114,9 @@ func (m *Manager) loadNames() {
 		meta.UserSetName = pn.UserSetName
 		meta.NameAssigned = pn.NameAssigned
 		meta.TmuxRenamed = pn.TmuxRenamed
+		meta.UserPrompt = pn.UserPrompt
+		meta.LastUserPrompt = pn.LastUserPrompt
+		meta.LastAgentMessage = pn.LastAgentMessage
 		m.meta[name] = meta
 	}
 }
@@ -127,10 +134,13 @@ func (m *Manager) saveNames() {
 			continue
 		}
 		snapshot[name] = persistedName{
-			DisplayName:  meta.DisplayName,
-			UserSetName:  meta.UserSetName,
-			NameAssigned: meta.NameAssigned,
-			TmuxRenamed:  meta.TmuxRenamed,
+			DisplayName:      meta.DisplayName,
+			UserSetName:      meta.UserSetName,
+			NameAssigned:     meta.NameAssigned,
+			TmuxRenamed:      meta.TmuxRenamed,
+			UserPrompt:       meta.UserPrompt,
+			LastUserPrompt:   meta.LastUserPrompt,
+			LastAgentMessage: meta.LastAgentMessage,
 		}
 	}
 	m.mu.RUnlock()
@@ -460,6 +470,10 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 
 	if firstPrompt || nameRefresh {
 		go m.triggerAgentNaming(evt.Session)
+	} else if meta.DisplayName != "" || meta.UserSetName {
+		// Named session whose prompt/message changed without a re-name: persist so
+		// the namer has fresh context after a restart instead of a stale prompt.
+		go m.saveNames()
 	}
 }
 
