@@ -463,6 +463,7 @@ export function TiledView({
             hostId={host || undefined}
             fullscreen={isActive ? fullscreen : false}
             onToggleFullscreen={isActive ? onToggleFullscreen : undefined}
+            keyBarEnabled={isActive}
           />
         </div>
       </div>

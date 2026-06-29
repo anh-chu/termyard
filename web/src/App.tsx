@@ -1350,6 +1350,9 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
               layoutGroups={layoutGroups}
             />
           )}
+          {/* Single shared slot: the active pane portals its mobile key bar here,
+              so split views show one full-width bar instead of one per pane. */}
+          <div id="mobile-keybar-slot" className="flex-none" />
           <SettingsDrawer
             open={settingsOpen}
             onClose={closeSettings}

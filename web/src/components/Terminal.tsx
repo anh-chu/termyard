@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
 import { cn } from '../lib/utils'
@@ -9,6 +10,8 @@ interface TerminalProps {
   hostId?: string
   fullscreen?: boolean
   onToggleFullscreen?: () => void
+  // In split view, only the active pane shows the mobile key bar to avoid duplicates.
+  keyBarEnabled?: boolean
 }
 
 type GestureDirection = 'up' | 'down' | 'left' | 'right'
@@ -141,7 +144,7 @@ function HoldableKey({
   )
 }
 
-export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }: TerminalProps) {
+export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, keyBarEnabled = true }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const {
     termRef,
@@ -161,6 +164,9 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
     clearAltModifier,
   } = useTerminal(sessionName, hostId)
   const [showMobileKeyBar, setShowMobileKeyBar] = useState(false)
+  // The mobile key bar renders into a single shared slot at the bottom of the
+  // app so split views show one full-width bar (active pane only), not one per pane.
+  const [keyBarSlot, setKeyBarSlot] = useState<HTMLElement | null>(null)
   const [capturedText, setCapturedText] = useState<string | null>(null)
   const [clipboardMenuOpen, setClipboardMenuOpen] = useState(false)
   const captureTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -194,6 +200,10 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
     sync()
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    setKeyBarSlot(document.getElementById('mobile-keybar-slot'))
   }, [])
 
   useEffect(() => {
@@ -520,8 +530,8 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
           )}
         </div>
         </div>
-        {showMobileKeyBar && (
-          <div className="flex-none pt-1">
+        {showMobileKeyBar && keyBarEnabled && keyBarSlot && createPortal(
+          <div className="flex-none pt-1 px-[3px] pb-[3px]">
             <div className="grid grid-cols-8 gap-1.5 p-1.5 bg-surface border border-hairline rounded-md">
               <div className="relative">
                 <button
@@ -632,7 +642,8 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen }
                 className="h-10 rounded-sm border border-hairline bg-surface-elevated flex items-center justify-center text-mute active:bg-surface transition-colors"
               />
             </div>
-          </div>
+          </div>,
+          keyBarSlot
         )}
       </div>
       {capturedText && (
