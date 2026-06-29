@@ -1296,13 +1296,19 @@ export function Sidebar({
     const latestStatus = latest ? statusOf(latest) : 'idle'
     const latestColor = statusBadgeConfig[latestStatus].color
     const attentionCount = sessions.filter(s => { const st = statusOf(s); return st === 'stuck' || st === 'waiting' }).length
-    const deleted = !schedule
+    const sessionHost = latest?.host || ''
+    // Schedule definition unknown locally: it either lives on a remote peer (its
+    // runs are on another host) or was deleted on this host. ponytail: a remote
+    // schedule's enabled/paused state is unknown until the schedule registry is
+    // synced peer-to-peer, so a reachable remote schedule just reads as active.
+    const isRemoteSchedule = !schedule && !!sessionHost && sessionHost !== localHostId
+    const deleted = !schedule && !isRemoteSchedule
     const enabled = schedule?.enabled ?? true
-    const host = schedule?.host || ''
+    const host = schedule?.host || sessionHost
     const hostOnline = !host || hosts?.some(item => item.id === host && item.online)
     const stateLabel = deleted ? 'deleted' : !enabled ? 'paused' : !hostOnline ? 'peer offline' : 'active'
     const stateColor = deleted ? 'text-mute/70 border-hairline bg-surface-elevated/70' : !enabled ? 'text-amber-400 border-amber-400/30 bg-amber-400/10' : !hostOnline ? 'text-mute/70 border-hairline bg-surface-elevated/70' : 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10'
-    const scheduleName = schedule?.name || latest?.name || scheduleId
+    const scheduleName = schedule?.name || (isRemoteSchedule ? (latest?.name ? latest.name.replace(/-\d+$/, '') : '') : latest?.name) || scheduleId
     return (
       <li key={`schedule:${scheduleId}`} data-schedule-id={scheduleId}>
         <div className={cn('rounded-sm border border-hairline bg-surface/70 overflow-hidden', !enabled && 'opacity-75')}>

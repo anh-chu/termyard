@@ -41,7 +41,7 @@ const (
 type SessionAttrsSink interface {
 	// ApplyRemoteDelta merges a single-key delta via per-key LWW. accepted=false
 	// means the local copy was newer-or-equal and the delta was dropped.
-	ApplyRemoteDelta(key string, background, hidden bool, updatedAt time.Time) (accepted bool, err error)
+	ApplyRemoteDelta(key string, background, hidden bool, scheduleID string, updatedAt time.Time) (accepted bool, err error)
 	// ApplyRemoteSnapshot merges a full peer snapshot via per-key LWW, returning
 	// the keys that changed locally.
 	ApplyRemoteSnapshot(attrs map[string]SessionAttr) (changed []string, err error)
@@ -710,7 +710,7 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 		if p.Origin == deps.Identity.Fingerprint() || deps.AttrsSink == nil {
 			return
 		}
-		accepted, err := deps.AttrsSink.ApplyRemoteDelta(p.Key, p.Attr.Background, p.Attr.Hidden, p.Attr.UpdatedAt)
+		accepted, err := deps.AttrsSink.ApplyRemoteDelta(p.Key, p.Attr.Background, p.Attr.Hidden, p.Attr.ScheduleID, p.Attr.UpdatedAt)
 		if err != nil {
 			log.WithError(err).Warn("apply remote session-attrs delta failed")
 			return

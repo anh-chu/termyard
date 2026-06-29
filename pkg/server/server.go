@@ -94,9 +94,9 @@ type attrsStoreAdapter struct {
 	store *sessionattrs.Store
 }
 
-func (a attrsStoreAdapter) ApplyRemoteDelta(key string, background, hidden bool, updatedAt time.Time) (bool, error) {
+func (a attrsStoreAdapter) ApplyRemoteDelta(key string, background, hidden bool, scheduleID string, updatedAt time.Time) (bool, error) {
 	_, accepted, err := a.store.ApplyRemote(key, sessionattrs.Attr{
-		Background: background, Hidden: hidden, UpdatedAt: updatedAt,
+		Background: background, Hidden: hidden, ScheduleID: scheduleID, UpdatedAt: updatedAt,
 	})
 	return accepted, err
 }
@@ -104,7 +104,7 @@ func (a attrsStoreAdapter) ApplyRemoteDelta(key string, background, hidden bool,
 func (a attrsStoreAdapter) ApplyRemoteSnapshot(attrs map[string]peer.SessionAttr) ([]string, error) {
 	conv := make(map[string]sessionattrs.Attr, len(attrs))
 	for k, v := range attrs {
-		conv[k] = sessionattrs.Attr{Background: v.Background, Hidden: v.Hidden, UpdatedAt: v.UpdatedAt}
+		conv[k] = sessionattrs.Attr{Background: v.Background, Hidden: v.Hidden, ScheduleID: v.ScheduleID, UpdatedAt: v.UpdatedAt}
 	}
 	return a.store.ApplySnapshot(conv)
 }
@@ -113,7 +113,7 @@ func (a attrsStoreAdapter) SnapshotAttrs() map[string]peer.SessionAttr {
 	snap := a.store.Snapshot()
 	out := make(map[string]peer.SessionAttr, len(snap))
 	for k, v := range snap {
-		out[k] = peer.SessionAttr{Background: v.Background, Hidden: v.Hidden, UpdatedAt: v.UpdatedAt}
+		out[k] = peer.SessionAttr{Background: v.Background, Hidden: v.Hidden, ScheduleID: v.ScheduleID, UpdatedAt: v.UpdatedAt}
 	}
 	return out
 }
@@ -243,7 +243,7 @@ func fanoutAttrsDeltaToPeers(opts *Options, key string, a sessionattrs.Attr) {
 	msg, err := peer.NewMessage(peer.MsgSessionAttrsDelta, peer.SessionAttrsDeltaPayload{
 		Origin: opts.Identity.Fingerprint(),
 		Key:    key,
-		Attr:   peer.SessionAttr{Background: a.Background, Hidden: a.Hidden, UpdatedAt: a.UpdatedAt},
+		Attr:   peer.SessionAttr{Background: a.Background, Hidden: a.Hidden, ScheduleID: a.ScheduleID, UpdatedAt: a.UpdatedAt},
 	})
 	if err != nil {
 		return
@@ -377,10 +377,14 @@ func CreateSession(opts *Options, req scheduler.CreateSessionReq) error {
 			return fmt.Errorf("peer send queue full")
 		}
 		if opts.AttrsStore != nil && req.ScheduleID != "" {
-			if _, err := opts.AttrsStore.SetScheduleID(sessionKey(req.Host, req.Name), req.ScheduleID); err != nil {
+			key := sessionKey(req.Host, req.Name)
+			if attr, err := opts.AttrsStore.SetScheduleID(key, req.ScheduleID); err != nil {
 				logrus.WithError(err).Warn("failed to store schedule id")
-			} else if opts.Hub != nil {
-				opts.Hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": sessionKey(req.Host, req.Name)})
+			} else {
+				fanoutAttrsDeltaToPeers(opts, key, attr)
+				if opts.Hub != nil {
+					opts.Hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": key})
+				}
 			}
 		}
 		return nil
@@ -421,10 +425,14 @@ func CreateSession(opts *Options, req scheduler.CreateSessionReq) error {
 		opts.StateMgr.SetSessionAgentType(req.Name, req.AgentType)
 	}
 	if opts.AttrsStore != nil && req.ScheduleID != "" {
-		if _, err := opts.AttrsStore.SetScheduleID(sessionKey(req.Host, req.Name), req.ScheduleID); err != nil {
+		key := sessionKey(req.Host, req.Name)
+		if attr, err := opts.AttrsStore.SetScheduleID(key, req.ScheduleID); err != nil {
 			logrus.WithError(err).Warn("failed to store schedule id")
-		} else if opts.Hub != nil {
-			opts.Hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": sessionKey(req.Host, req.Name)})
+		} else {
+			fanoutAttrsDeltaToPeers(opts, key, attr)
+			if opts.Hub != nil {
+				opts.Hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": key})
+			}
 		}
 	}
 	// Trigger state refresh so WebSocket clients get notified.

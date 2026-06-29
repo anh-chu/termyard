@@ -3,6 +3,7 @@ package sessionattrs
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSetsIncludesScheduleIDs(t *testing.T) {
@@ -70,5 +71,27 @@ func TestMigrateKeyPreservesAttrsAcrossRename(t *testing.T) {
 	}
 	if m, _ := s.MigrateKey("local-fp", "same", "same"); m != nil {
 		t.Fatal("expected nil for identical names")
+	}
+}
+
+func TestApplyRemoteCarriesAndPreservesScheduleID(t *testing.T) {
+	s := &Store{path: filepath.Join(t.TempDir(), "attrs.json"), attrs: map[string]Attr{}}
+
+	// First peer delta for a peer-owned scheduled session carries the schedule id.
+	t10 := time.Unix(10, 0)
+	if _, accepted, err := s.ApplyRemote("peer-fp/run-1", Attr{ScheduleID: "sched-9", UpdatedAt: t10}); err != nil || !accepted {
+		t.Fatalf("first delta: accepted=%v err=%v", accepted, err)
+	}
+	if got := s.attrs["peer-fp/run-1"].ScheduleID; got != "sched-9" {
+		t.Fatalf("schedule id not stored: %q", got)
+	}
+
+	// A later background/hidden delta with no schedule id must not wipe it.
+	t20 := time.Unix(20, 0)
+	if _, accepted, err := s.ApplyRemote("peer-fp/run-1", Attr{Background: true, UpdatedAt: t20}); err != nil || !accepted {
+		t.Fatalf("second delta: accepted=%v err=%v", accepted, err)
+	}
+	if got := s.attrs["peer-fp/run-1"]; got.ScheduleID != "sched-9" || !got.Background {
+		t.Fatalf("preserve failed: %#v", got)
 	}
 }

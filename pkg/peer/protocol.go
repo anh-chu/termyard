@@ -183,6 +183,7 @@ type StreamTokenPayload struct {
 type SessionAttr struct {
 	Background bool      `json:"background"`
 	Hidden     bool      `json:"hidden"`
+	ScheduleID string    `json:"schedule_id,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
