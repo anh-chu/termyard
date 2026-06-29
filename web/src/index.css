@@ -14,81 +14,81 @@
   --app-height: 100dvh;
   --app-width: 100vw;
 
-  /* Raycast Design Tokens — Surface */
-  --canvas: #07080a;
-  --surface: #0d0d0d;
-  --surface-elevated: #101111;
-  --surface-card: #121212;
+  /* Dark Design Tokens — Surface */
+  --canvas: oklch(0.1 0 0);
+  --surface: oklch(0.13 0 0);
+  --surface-elevated: oklch(0.15 0 0);
+  --surface-card: oklch(0.17 0 0);
 
-  /* Raycast Design Tokens — Hairline */
-  --hairline: #242728;
-  --hairline-soft: rgba(255, 255, 255, 0.08);
-  --hairline-strong: rgba(255, 255, 255, 0.16);
+  /* Dark Design Tokens — Hairline */
+  --hairline: oklch(0.25 0 0);
+  --hairline-soft: oklch(0.25 0 0 / 0.5);
+  --hairline-strong: oklch(0.25 0 0);
   --tex-line: rgba(255, 255, 255, 0.022);
 
-  /* Raycast Design Tokens — Text */
-  --ink: #f4f4f6;
-  --body-text: #cdcdcd;
+  /* Dark Design Tokens — Text */
+  --ink: oklch(0.85 0 0);
+  --body-text: oklch(0.7 0 0);
   --charcoal: #d3d3d4;
-  --mute: #9c9c9d;
-  --ash: #6a6b6c;
-  --stone: #434345;
-  --on-dark: #ffffff;
-  --on-dark-mute: rgba(255, 255, 255, 0.72);
+  --mute: oklch(0.55 0 0);
+  --ash: oklch(0.45 0 0);
+  --stone: oklch(0.35 0 0);
+  --on-dark: oklch(0.95 0 0);
+  --on-dark-mute: oklch(0.95 0 0 / 0.72);
 
   --font-display: "Space Mono", "JetBrains Mono", monospace;
 
-  /* Raycast Design Tokens — Brand */
-  --primary: #ffffff;
+  /* Dark Design Tokens — Brand */
+  --primary: oklch(0.7 0.1 210);
   --primary-pressed: #e8e8e8;
-  --on-primary: #000000;
+  --on-primary: oklch(0.1 0 0);
   --button-fg: #18191a;
 
-  /* Raycast Design Tokens — Accent */
-  --accent-blue: #57c1ff;
-  --accent-blue-soft: rgba(87, 193, 255, 0.15);
-  --accent-red: #ff6161;
-  --accent-red-soft: rgba(255, 97, 97, 0.15);
-  --accent-green: #59d499;
-  --accent-green-soft: rgba(89, 212, 153, 0.15);
-  --accent-yellow: #ffc533;
-  --accent-yellow-soft: rgba(255, 197, 51, 0.15);
-  --hero-stripe-start: #ff5757;
-  --hero-stripe-end: #a1131a;
+  /* Dark Design Tokens — Accent */
+  --accent-blue: oklch(0.7 0.1 210);
+  --accent-blue-soft: oklch(0.7 0.1 210 / 0.15);
+  --accent-red: oklch(0.55 0.2 25);
+  --accent-red-soft: oklch(0.55 0.2 25 / 0.15);
+  --accent-green: oklch(0.65 0.15 145);
+  --accent-green-soft: oklch(0.65 0.15 145 / 0.15);
+  --accent-yellow: oklch(0.65 0.15 80);
+  --accent-yellow-soft: oklch(0.65 0.15 80 / 0.15);
+  --hero-stripe-start: oklch(0.55 0.2 25);
+  --hero-stripe-end: oklch(0.4 0.15 25);
   --key-bg-start: #121212;
   --key-bg-end: #0d0d0d;
 
-  /* Shadcn-compatible mappings (Raycast-themed) */
+  /* Shadcn-compatible mappings (Dark-themed) */
   --background: var(--canvas);
-  --foreground: var(--body-text);
+  --foreground: var(--ink);
   --card: var(--surface);
   --card-foreground: var(--ink);
   --popover: var(--surface-elevated);
-  --popover-foreground: var(--body-text);
-  --secondary: var(--surface-elevated);
-  --secondary-foreground: var(--body-text);
-  --muted: var(--surface);
+  --popover-foreground: var(--ink);
+  --secondary: oklch(0.18 0 0);
+  --secondary-foreground: oklch(0.7 0 0);
+  --muted: var(--surface-elevated);
   --muted-foreground: var(--mute);
-  --accent: var(--accent-blue);
-  --accent-foreground: var(--on-dark);
+  --accent: oklch(0.65 0.1 210);
+  --accent-foreground: oklch(0.1 0 0);
   --destructive: var(--accent-red);
   --destructive-foreground: var(--on-dark);
   --border: var(--hairline);
   --input: var(--surface-elevated);
-  --ring: var(--accent-blue);
+  --ring: oklch(0.7 0.1 210);
   --success: var(--accent-green);
   --warning: var(--accent-yellow);
   --radius: 0.5rem;
   --sidebar: var(--canvas);
-  --sidebar-foreground: var(--body-text);
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--on-primary);
-  --sidebar-accent: var(--surface-elevated);
-  --sidebar-accent-foreground: var(--body-text);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: oklch(0.7 0.1 210);
+  --sidebar-primary-foreground: oklch(0.1 0 0);
+  --sidebar-accent: oklch(0.18 0 0);
+  --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--hairline);
-  --sidebar-ring: var(--accent-blue);
-  --chart-primary: var(--accent-blue);
-  --chart-secondary: var(--accent-green);
+  --sidebar-ring: oklch(0.7 0.1 210);
+  --chart-primary: oklch(0.65 0.1 210);
+  --chart-secondary: oklch(0.65 0.1 310);
 }
 
 @theme inline {

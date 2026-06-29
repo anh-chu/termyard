@@ -581,7 +581,7 @@ export const themePresets: Record<string, ThemePreset> = {
 }
 
 export function applyTheme(themeName: string) {
-    const theme = themePresets[themeName] || themePresets['raycast']
+    const theme = themePresets[themeName] || themePresets['dark']
     const root = document.documentElement
     for (const [key, value] of Object.entries(theme.cssVars)) {
         root.style.setProperty(key, value)
@@ -589,6 +589,6 @@ export function applyTheme(themeName: string) {
 }
 
 export function getXtermTheme(themeName: string) {
-    const theme = themePresets[themeName] || themePresets['raycast']
+    const theme = themePresets[themeName] || themePresets['dark']
     return theme.xterm
 }
