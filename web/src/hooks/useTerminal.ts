@@ -247,16 +247,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
     term.open(container)
     neutralizeXtermScrollbarFallback(term)
 
-    // Ligatures: opt-in. The addon reads glyph data from a LOCALLY INSTALLED
-    // font via the Local Font Access API (Chromium-only; prompts for
-    // permission). It no-ops gracefully on Firefox/Safari or when the font
-    // is not installed locally. Must load after term.open() (needs renderer).
-    if (prefs.terminal.ligatures) {
-      // Lazy-loaded: ~200KB addon, default-off, not on critical path.
-      import('@xterm/addon-ligatures')
-        .then(({ LigaturesAddon }) => { try { term.loadAddon(new LigaturesAddon()) } catch { /* ignored */ } })
-        .catch(() => { /* ignored */ })
-    }
     const helperTextarea = container.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null
 
     // Request clipboard-write permission early so OSC 52 writes may work directly
@@ -580,7 +570,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
     })
-  }, [sessionName, hostId, cleanupWs, prefs.theme, prefs.terminal.font_size, prefs.terminal.font_family, prefs.terminal.scrollback, prefs.terminal.ligatures, sendRawBytes])
+  }, [sessionName, hostId, cleanupWs, prefs.theme, prefs.terminal.font_size, prefs.terminal.font_family, prefs.terminal.scrollback, sendRawBytes])
 
   const disconnect = useCallback(() => {
     // Invalidate any active connection

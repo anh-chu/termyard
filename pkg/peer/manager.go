@@ -47,7 +47,7 @@ type wireFrame struct {
 // Queue depths. The hi lane carries interactive PTY traffic (keystrokes,
 // output, resize) and is deep so a burst of output never starves input. The
 // lo lane carries bulky, latency-tolerant control plane (state snapshots,
-// stats, activity sparklines, tool events).
+// stats, activity data, tool events).
 const (
 	hiQueueDepth = 1024
 	loQueueDepth = 128

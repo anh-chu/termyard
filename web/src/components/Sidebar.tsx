@@ -5,7 +5,6 @@ import type { SessionAttrSets } from '../hooks/useSessionAttrs'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
-import { usePreferences } from '../hooks/usePreferences'
 import { useSchedules } from '../hooks/useSchedules'
 import { cn } from '../lib/utils'
 import { renameSession, aiNameSession as aiNameSessionApi, killSession as killSessionApi } from '../lib/sessionActions'
@@ -124,30 +123,6 @@ const STATUS_BUCKETS: { id: string; label: string; statuses: StatusBadge[] }[] =
   { id: 'process',   label: 'Process',         statuses: ['process'] },
 ]
 
-function Sparkline({ data, height = 16 }: { data: number[]; height?: number }) {
-  if (!data || data.length === 0) return null
-  const max = Math.max(...data, 1)
-  const viewWidth = data.length
-  const barWidth = 1
-  return (
-    <svg viewBox={`0 0 ${viewWidth} ${height}`} preserveAspectRatio="none" width="100%" height={height} className="block">
-      {data.map((val, i) => {
-        const barHeight = (val / max) * height
-        return (
-          <rect
-            key={i}
-            x={i * barWidth}
-            y={height - barHeight}
-            width={Math.max(barWidth - 0.05, 0.05)}
-            height={barHeight}
-            style={{ fill: val > 0 ? 'var(--chart-primary)' : 'var(--muted)' }}
-            opacity={val > 0 ? 0.7 : 0.3}
-          />
-        )
-      })}
-    </svg>
-  )
-}
 
 function readStoredList(key: string): string[] {
   try {
@@ -223,7 +198,6 @@ export function Sidebar({
   setSessionAttr,
   pruningSuspended,
 }: SidebarProps) {
-  const { prefs } = usePreferences()
   const glancePreview = useGlance(!!hasMultipleHosts)
   const { schedules } = useSchedules()
   // background/hidden are SERVER-AUTHORITATIVE and arrive via props. They are
@@ -976,11 +950,6 @@ export function Sidebar({
             </div>
           )}
 
-          {!collapsed && prefs.sparklines_visible && act?.sparkline && (
-            <div className="mt-1.5 w-full">
-              <Sparkline data={act.sparkline} height={14} />
-            </div>
-          )}
           {pairTarget === sk && (
             <div className="absolute inset-0 rounded-sm bg-canvas/80 backdrop-blur-sm border-2 border-primary flex items-center justify-center pointer-events-none z-10">
               <span className="text-[10px] font-bold text-primary uppercase tracking-widest">⊞ Split</span>

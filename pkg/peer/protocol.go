@@ -19,7 +19,7 @@ const (
 	MsgStateEvent = "state-event"
 	// MsgToolEvent forwards a local tool event
 	MsgToolEvent = "tool-event"
-	// MsgActivityUpdate sends periodic sparkline data
+	// MsgActivityUpdate sends periodic activity data
 	MsgActivityUpdate = "activity-update"
 	// MsgStats sends system stats
 	MsgStats = "stats"
@@ -128,7 +128,7 @@ type ToolEventPayload struct {
 	Event *toolevents.Event `json:"event"`
 }
 
-// ActivityUpdatePayload carries sparkline data from a peer
+// ActivityUpdatePayload carries activity data from a peer
 type ActivityUpdatePayload struct {
 	Snapshots []*activity.Snapshot `json:"snapshots"`
 }

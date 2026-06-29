@@ -38,29 +38,12 @@ const terminalFontFamilies = [
   'monospace',
 ]
 
-const timestampFormats = [
-  { value: 'relative', label: 'Relative (2m ago)' },
-  { value: 'absolute', label: 'Absolute (14:32:05)' },
-]
 
 const notifStatuses = [
   { value: 'waiting', label: 'Waiting' },
   { value: 'stuck', label: 'Stuck' },
   { value: 'error', label: 'Error' },
   { value: 'completed', label: 'Completed' },
-]
-
-// Customizable CSS variables exposed to users, grouped by purpose
-const customizableVars = [
-  { key: '--primary', label: 'Accent' },
-  { key: '--background', label: 'Background' },
-  { key: '--foreground', label: 'Foreground' },
-  { key: '--border', label: 'Border' },
-  { key: '--card', label: 'Card' },
-  { key: '--muted', label: 'Muted' },
-  { key: '--success', label: 'Success' },
-  { key: '--warning', label: 'Warning' },
-  { key: '--destructive', label: 'Destructive' },
 ]
 
 const sectionIds = ['appearance', 'terminal', 'interface', 'naming', 'shortcuts', 'notifications', 'agents', 'peers', 'security'] as const
@@ -183,38 +166,6 @@ function Kbd({ children }: { children: string }) {
   )
 }
 
-function ColorInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <input
-      type="color"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-8 h-6 rounded border border-hairline cursor-pointer bg-transparent"
-    />
-  )
-}
-
-// Resolve a CSS variable value (possibly oklch) to a hex color for the color picker
-function resolvedColor(cssVar: string, customTheme: Record<string, string>): string {
-  const override = customTheme[cssVar]
-  if (override && override.startsWith('#')) return override
-  // Read from computed style
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim()
-  if (raw.startsWith('#')) return raw
-  // Convert oklch/rgb via a temp element
-  const el = document.createElement('div')
-  el.style.color = raw
-  document.body.appendChild(el)
-  const computed = getComputedStyle(el).color
-  document.body.removeChild(el)
-  // Parse rgb(r, g, b)
-  const match = computed.match(/(\d+),\s*(\d+),\s*(\d+)/)
-  if (match) {
-    const hex = (n: number) => n.toString(16).padStart(2, '0')
-    return `#${hex(+match[1])}${hex(+match[2])}${hex(+match[3])}`
-  }
-  return '#888888'
-}
 
 const sectionLabels: Record<typeof sectionIds[number], string> = {
   appearance: 'Appearance',
@@ -413,7 +364,6 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
 }) {
   const { prefs, updatePrefs } = usePreferences()
   const [saving, setSaving] = useState(false)
-  const [showCustomColors, setShowCustomColors] = useState(() => Object.keys(prefs.custom_theme || {}).length > 0)
   const [agentStatus, setAgentStatus] = useState<{ agents: { name: string; key: string; installed: boolean; configured: boolean }[]; setup_command: string } | null>(null)
   const [agentLoading, setAgentLoading] = useState(false)
 
@@ -445,21 +395,11 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
   }
 
   const handleThemeChange = async (theme: string) => {
-    applyTheme(theme, prefs.custom_theme)
+    applyTheme(theme)
     await update({ theme })
   }
 
-  const handleCustomColorChange = async (cssVar: string, hex: string) => {
-    const next = { ...(prefs.custom_theme || {}), [cssVar]: hex }
-    applyTheme(prefs.theme, next)
-    await update({ custom_theme: next })
-  }
 
-  const handleResetCustomColors = async () => {
-    applyTheme(prefs.theme, {})
-    await update({ custom_theme: {} })
-    setShowCustomColors(false)
-  }
 
   const toggleNotifStatus = async (status: string) => {
     const current = prefs.notifications.statuses
@@ -472,8 +412,6 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
   const bucketVisible: readonly SectionId[] = bucket ? bucketSections[bucket] : sectionIds
   const visibleSections: readonly SectionId[] = bucket ? bucketVisible : (onLogout ? sectionIds : sectionIds.filter(s => s !== 'security'))
   const showSection = (id: SectionId) => bucketVisible.includes(id) && (onLogout ? true : id !== 'security')
-  const customTheme = prefs.custom_theme || {}
-  const hasCustomColors = Object.values(customTheme).some(v => !!v)
 
   return (
     <div className={cn('flex-1 overflow-y-auto font-sans text-[13px] font-medium bg-canvas scroll-smooth', bucket ? 'px-5 pb-5 pt-5 sm:pt-12' : 'p-10')}>
@@ -500,7 +438,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
 
         <div className="flex flex-col gap-6">
           {/* ── Appearance ── */}
-          <Section hidden={!showSection('appearance')} id="appearance" title="Appearance" description="Theme, colors, fonts, and display formatting">
+          <Section hidden={!showSection('appearance')} id="appearance" title="Appearance" description="Theme and fonts">
             <div className="grid grid-cols-2 gap-3">
               {Object.values(themePresets).map(theme => (
                 <button
@@ -529,74 +467,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
 
             <Divider />
 
-            {/* Custom color overrides */}
-            <div className="py-1">
-              <button
-                onClick={() => setShowCustomColors(v => !v)}
-                className="text-xs font-bold uppercase tracking-widest text-mute/60 hover:text-ink transition-colors flex items-center gap-2"
-              >
-                <span className={cn('inline-block transition-transform text-xs', showCustomColors && 'rotate-90')}>▶</span>
-                Custom Colors
-                {hasCustomColors && <span className="text-xs text-primary">(ACTIVE)</span>}
-              </button>
-              {showCustomColors && (
-                <div className="mt-4 flex flex-col gap-3">
-                  <div className="grid grid-cols-3 gap-3">
-                    {customizableVars.map(({ key, label }) => (
-                      <div key={key} className="flex items-center gap-3">
-                        <ColorInput
-                          value={resolvedColor(key, customTheme)}
-                          onChange={(hex) => handleCustomColorChange(key, hex)}
-                        />
-                        <span className="text-xs font-bold text-mute/60 uppercase tracking-tight">{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {hasCustomColors && (
-                    <button
-                      onClick={handleResetCustomColors}
-                      className="text-xs font-bold uppercase tracking-widest text-mute/40 hover:text-destructive transition-colors self-start mt-1"
-                    >
-                      Reset to defaults
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
 
-            <Divider />
-
-            <Row label="Timestamp Format" description="How timestamps are shown in the UI">
-              <SelectInput
-                value={prefs.timestamp_format}
-                onChange={(v) => update({ timestamp_format: v })}
-                options={timestampFormats}
-              />
-            </Row>
-            <Row label="Overview Refresh" description="Stats refresh interval in seconds">
-              <NumberInput
-                value={prefs.overview_refresh_interval}
-                onChange={(v) => update({ overview_refresh_interval: Math.max(1, Math.min(60, v)) })}
-                min={1}
-                max={60}
-              />
-            </Row>
-
-            <Row label="Pane-grid Texture" description="Show faint grid texture across yard surfaces">
-              <Toggle checked={prefs.texture_enabled} onChange={(v) => update({ texture_enabled: v })} />
-            </Row>
-            <Row label="Display Font" description="Font for wordmarks and headings">
-              <SelectInput
-                value={prefs.display_font}
-                onChange={(v) => update({ display_font: v })}
-                options={[
-                  { value: 'Space Mono', label: 'Space Mono' },
-                  { value: 'VT323', label: 'VT323' },
-                  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
-                  { value: 'Inter', label: 'Inter' },
-                ]}
-              />
-            </Row>
           </Section>
 
           {/* ── Terminal ── */}
@@ -625,12 +496,6 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 step={500}
               />
             </Row>
-            <Row label="Ligatures" description="Render coding ligatures (=>, !=, ->). Requires a ligature font (Fira Code / JetBrains Mono) installed locally; Chromium-only, prompts for local-font access">
-              <Toggle
-                checked={prefs.terminal.ligatures}
-                onChange={(v) => updateNested('terminal', { ligatures: v })}
-              />
-            </Row>
             <Divider />
             <Row label="Hide Alerts in Fullscreen" description="Hide the agent alert banner when terminal is fullscreen">
               <Toggle
@@ -652,14 +517,14 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 ]}
               />
             </Row>
-            <Row label="Sidebar Default" description="Sidebar state on load">
+            <Row label="Sidebar on Launch" description="Start collapsed or expanded">
               <Toggle
                 checked={prefs.sidebar.default_collapsed}
                 onChange={(v) => updateNested('sidebar', { default_collapsed: v })}
                 label={prefs.sidebar.default_collapsed ? 'COLLAPSED' : 'EXPANDED'}
               />
             </Row>
-            <Row label="Sidebar Collapse Mode" description="How sidebar behaves when collapsed">
+            <Row label="Collapsed Style" description="Narrow column or fully hidden">
               <SelectInput
                 value={prefs.sidebar.collapse_mode || 'small'}
                 onChange={(v) => updateNested('sidebar', { collapse_mode: v })}
@@ -667,12 +532,6 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                   { value: 'small', label: 'Narrow column' },
                   { value: 'hidden', label: 'Completely hidden' },
                 ]}
-              />
-            </Row>
-            <Row label="Sparklines" description="Show activity sparklines in sidebar">
-              <Toggle
-                checked={prefs.sparklines_visible}
-                onChange={(v) => update({ sparklines_visible: v })}
               />
             </Row>
           </Section>
@@ -833,25 +692,7 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                   <span className="text-xs font-bold text-mute/40 uppercase tracking-widest">min</span>
                 </div>
               </Row>
-              <Row label="Lock Faster When Backgrounded" description="Use a shorter timeout when the tab is hidden or minimized">
-                <Toggle
-                  checked={prefs.lock_background_faster}
-                  onChange={(v) => update({ lock_background_faster: v })}
-                />
-              </Row>
-              {prefs.lock_background_faster && (
-                <Row label="Background Timeout" description="Idle timeout when tab is hidden">
-                  <div className="flex items-center gap-2">
-                    <NumberInput
-                      value={prefs.lock_background_minutes}
-                      onChange={(v) => update({ lock_background_minutes: Math.max(1, Math.min(120, v)) })}
-                      min={1}
-                      max={120}
-                    />
-                    <span className="text-xs font-bold text-mute/40 uppercase tracking-widest">min</span>
-                  </div>
-                </Row>
-              )}
+              <Divider />
               <Divider />
               <Row label="Sign Out" description="End your current session">
                 <button

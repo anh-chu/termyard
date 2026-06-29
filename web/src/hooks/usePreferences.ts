@@ -5,10 +5,8 @@ export interface Preferences {
     font_size: number
     font_family: string
     scrollback: number
-    ligatures: boolean
   }
   theme: string
-  custom_theme: Record<string, string>
   sidebar: {
     default_collapsed: boolean
     collapse_mode: string
@@ -20,14 +18,7 @@ export interface Preferences {
   agent_banner: {
     auto_dismiss_seconds: number
   }
-  sparklines_visible: boolean
-  overview_refresh_interval: number
-  timestamp_format: string
-  texture_enabled: boolean
-  display_font: string
   lock_timeout_minutes: number
-  lock_background_faster: boolean
-  lock_background_minutes: number
   fullscreen_hide_alerts: boolean
   default_agent: string
   ai_naming: {
@@ -43,10 +34,8 @@ export const defaultPreferences: Preferences = {
     font_size: 13,
     font_family: 'Space Mono',
     scrollback: 5000,
-    ligatures: false,
   },
   theme: 'raycast',
-  custom_theme: {},
   sidebar: {
     default_collapsed: false,
     collapse_mode: 'small',
@@ -58,15 +47,8 @@ export const defaultPreferences: Preferences = {
   agent_banner: {
     auto_dismiss_seconds: 0,
   },
-  sparklines_visible: true,
-  overview_refresh_interval: 5,
-  timestamp_format: 'relative',
   lock_timeout_minutes: 30,
-  lock_background_faster: true,
-  lock_background_minutes: 10,
   fullscreen_hide_alerts: true,
-  texture_enabled: true,
-  display_font: 'Space Mono',
   default_agent: 'claude',
   ai_naming: {
     enabled: false,
@@ -109,7 +91,6 @@ export function usePreferencesProvider() {
           notifications: { ...defaultPreferences.notifications, ...(data.notifications || {}) },
           agent_banner: { ...defaultPreferences.agent_banner, ...(data.agent_banner || {}) },
           ai_naming: { ...defaultPreferences.ai_naming, ...(data.ai_naming || {}) },
-          custom_theme: data.custom_theme || {},
         })
       }
     } catch {

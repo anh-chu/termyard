@@ -4,7 +4,6 @@ export interface ActivitySnapshot {
   host?: string
   session: string
   idle_seconds: number
-  sparkline: number[]
   total_bytes: number
 }
 

@@ -43,7 +43,7 @@ const evt = (over: Partial<ToolEvent> = {}): ToolEvent => ({
   ...over,
 })
 
-const act = (idle: number): ActivitySnapshot => ({ session: 'demo', idle_seconds: idle, sparkline: [], total_bytes: 0 })
+const act = (idle: number): ActivitySnapshot => ({ session: 'demo', idle_seconds: idle, total_bytes: 0 })
 
 describe('sessionSignal', () => {
   it('detects offline', () => {

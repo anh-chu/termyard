@@ -3,7 +3,6 @@ import { Session, sessionKey } from '../hooks/useSessions'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
-import { usePreferences } from '../hooks/usePreferences'
 import { toolColors, statusConfig, signalTreatment } from '../theme'
 import { stateRank, sessionSignal, isSessionActive, SessionState } from '../lib/sessionState'
 import { formatSessionUptime, formatSystemUptime } from '../lib/time'
@@ -56,30 +55,6 @@ interface Stats {
 
 const agentCommands = new Set(['claude', 'codex', 'copilot', 'opencode'])
 
-function Sparkline({ data, height = 20 }: { data: number[]; height?: number }) {
-  if (!data || data.length === 0) return null
-  const max = Math.max(...data, 1)
-  const viewWidth = data.length
-  const barWidth = 1
-  return (
-    <svg viewBox={`0 0 ${viewWidth} ${height}`} preserveAspectRatio="none" width="100%" height={height} className="block">
-      {data.map((val, i) => {
-        const barHeight = (val / max) * height
-        return (
-          <rect
-            key={i}
-            x={i * barWidth}
-            y={height - barHeight}
-            width={Math.max(barWidth - 0.05, 0.05)}
-            height={barHeight}
-            style={{ fill: val > 0 ? 'var(--chart-primary)' : 'var(--muted)' }}
-            opacity={val > 0 ? 0.7 : 0.3}
-          />
-        )
-      })}
-    </svg>
-  )
-}
 
 function ProcessBar({ processes, totalPanes }: { processes: { name: string; count: number }[]; totalPanes: number }) {
   if (processes.length === 0) return null
@@ -169,7 +144,6 @@ function SessionCard({
   onJumpToSession,
   onDismissAlert,
   onContextMenu,
-  prefs,
   selected,
   glanceTrigger,
   mates,
@@ -181,7 +155,6 @@ function SessionCard({
   onJumpToSession: (session: string, windowIndex?: number, pane?: string) => void
   onDismissAlert: (evt: ToolEvent) => void
   onContextMenu: (e: ReactMouseEvent, item: CardItem) => void
-  prefs: ReturnType<typeof usePreferences>['prefs']
   selected: boolean
   glanceTrigger: (t: GlanceTarget) => DOMAttributes<HTMLElement>
   mates?: CardItem[]
@@ -218,7 +191,7 @@ function SessionCard({
           <div className="text-[10px] text-mute/60">
             {hasMultipleHosts && <span className="text-mute/50">{session.host_name || 'Local'} · </span>}
             {session.project_path && <span className="text-mute/70" title={session.project_path}>{pathLeaf(session.project_path)} · </span>}
-            {formatSessionUptime(session.created, prefs.timestamp_format)}
+            {formatSessionUptime(session.created)}
           </div>
         </div>
         {signal.state === 'needs_you' && loudEvent && (
@@ -253,11 +226,6 @@ function SessionCard({
               {taskSecondary && <div className="text-[11px] text-mute/60 leading-snug line-clamp-2">{taskSecondary}</div>}
             </div>
           )}
-          {signal.state === 'working' && prefs.sparklines_visible && activity?.sparkline && (
-            <div className="mt-auto pt-2 border-t border-hairline/40">
-              <Sparkline data={activity.sparkline} height={18} />
-            </div>
-          )}
           {!taskPrimary && <div className="mt-auto text-[12px] text-mute/60">{isSessionActive(session) ? 'active' : 'calm'}</div>}
         </>
       )}
@@ -283,7 +251,6 @@ function SessionCard({
 
 export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert, setSessionAttr, onSessionKilled, layoutGroups }: OverviewProps) {
   const [stats, setStats] = useState<Stats | null>(null)
-  const { prefs } = usePreferences()
   const [menu, setMenu] = useState<{ target: SessionMenuTarget; x: number; y: number } | null>(null)
   const openMenu = useCallback((e: ReactMouseEvent, item: CardItem) => {
     e.preventDefault()
@@ -356,10 +323,9 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
       } catch {}
     }
     fetchStats()
-    const ms = (prefs.overview_refresh_interval || 5) * 1000
-    const interval = setInterval(fetchStats, ms)
+    const interval = setInterval(fetchStats, 5000)
     return () => clearInterval(interval)
-  }, [prefs.overview_refresh_interval])
+  }, [])
 
   const buildItem = useCallback((session: Session): CardItem => {
     const key = sessionKey(session)
@@ -441,7 +407,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
         </h3>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start">
           {railItems.map(item => (
-            <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
+            <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
           ))}
         </div>
       </div>
@@ -488,7 +454,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
               </h3>
               <div className={split ? 'grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2 items-start' : 'grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2 items-start'}>
                 {colItems.map(item => (
-                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} mates={matesByCard.get(item.key)} />
+                  <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} selected={selectedKey === item.key} glanceTrigger={glance.trigger} mates={matesByCard.get(item.key)} />
                 ))}
               </div>
             </div>
@@ -506,7 +472,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
             </h3>
             <div className={split ? 'grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2' : 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2'}>
               {groupItems.map(item => (
-                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} prefs={prefs} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
+                <SessionCard key={item.key} item={item} hasMultipleHosts={hasMultipleHosts} getSessionEvents={getSessionEvents} onOpen={handleCardOpen} onJumpToSession={onJumpToSession} onDismissAlert={onDismissAlert} onContextMenu={openMenu} selected={selectedKey === item.key} glanceTrigger={glance.trigger} />
               ))}
             </div>
           </div>

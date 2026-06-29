@@ -167,10 +167,6 @@
   background-size: 28px 28px;
 }
 
-html[data-texture="off"] .tex-yardgrid {
-  background-image: none;
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;

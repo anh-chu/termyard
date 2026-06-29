@@ -182,15 +182,12 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   // active-group-id, sidebar-collapsed) stays per-device in localStorage.
   const { sets: sessionAttrs, setAttr: setSessionAttr, refresh: refreshSessionAttrs } = useSessionAttrs(authenticated)
 
-  // Auto-lock: idle detection + optional background accelerator
+  // Auto-lock: idle detection
   const lastActivityRef = useRef<number>(Date.now())
   useEffect(() => {
     if (!onLogout || !prefs.lock_timeout_minutes) return
 
     const idleMs = prefs.lock_timeout_minutes * 60 * 1000
-    const bgMs = prefs.lock_background_faster && prefs.lock_background_minutes
-      ? prefs.lock_background_minutes * 60 * 1000
-      : idleMs
 
     // Track user activity
     const onActivity = () => { lastActivityRef.current = Date.now() }
@@ -201,29 +198,16 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     // Check idle on an interval
     const checkInterval = setInterval(() => {
       const elapsed = Date.now() - lastActivityRef.current
-      const timeout = document.hidden ? bgMs : idleMs
-      if (elapsed >= timeout) {
+      if (elapsed >= idleMs) {
         onLogout()
       }
     }, 30_000)
 
-    // Also check immediately when returning from background
-    const onVisibilityChange = () => {
-      if (!document.hidden) {
-        const elapsed = Date.now() - lastActivityRef.current
-        if (elapsed >= bgMs) {
-          onLogout()
-        }
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
-
     return () => {
       events.forEach(e => document.removeEventListener(e, onActivity, opts as EventListenerOptions))
       clearInterval(checkInterval)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [onLogout, prefs.lock_timeout_minutes, prefs.lock_background_faster, prefs.lock_background_minutes])
+  }, [onLogout, prefs.lock_timeout_minutes])
 
   // Persist sidebar state across reloads. Per-device — NOT synced.
   useEffect(() => {
@@ -1426,30 +1410,21 @@ export default function App() {
   useEffect(() => {
     try {
       const cached = localStorage.getItem('termyard:theme')
-      const cachedCustom = localStorage.getItem('termyard:custom-theme')
       if (cached) {
-        applyTheme(cached, cachedCustom ? JSON.parse(cachedCustom) : undefined)
+        applyTheme(cached)
       }
     } catch {}
   }, [])
 
-  // Apply theme when preferences load or theme/customizations change, and cache for login page
+  // Apply theme when preferences load or theme changes, and cache for login page
   useEffect(() => {
     if (prefsProvider.loaded) {
-      applyTheme(prefsProvider.prefs.theme, prefsProvider.prefs.custom_theme)
+      applyTheme(prefsProvider.prefs.theme)
       try {
         localStorage.setItem('termyard:theme', prefsProvider.prefs.theme)
-        localStorage.setItem('termyard:custom-theme', JSON.stringify(prefsProvider.prefs.custom_theme || {}))
       } catch {}
     }
-  }, [prefsProvider.loaded, prefsProvider.prefs.theme, prefsProvider.prefs.custom_theme])
-
-
-  useEffect(() => {
-    const displayFont = prefsProvider.prefs.display_font || 'Space Mono'
-    document.documentElement.style.setProperty('--font-display', `"${displayFont}", "JetBrains Mono", monospace`)
-    document.documentElement.setAttribute('data-texture', prefsProvider.prefs.texture_enabled === false ? 'off' : 'on')
-  }, [prefsProvider.prefs.display_font, prefsProvider.prefs.texture_enabled])
+  }, [prefsProvider.loaded, prefsProvider.prefs.theme])
 
   if (loading) {
     return <div className="flex items-center justify-center h-full w-full bg-background" />

@@ -5,20 +5,10 @@ import (
 	"time"
 )
 
-const (
-	// BucketDuration is the size of each sparkline bucket
-	BucketDuration = 15 * time.Second
-	// BucketCount is how many buckets to keep (20 buckets × 15s = 5 minutes of history)
-	BucketCount = 20
-)
-
 // SessionActivity tracks output activity for a single session
 type SessionActivity struct {
 	mu         sync.Mutex
-	buckets    [BucketCount]int64 // byte counts per bucket
-	headIdx    int                // current bucket index
-	headTime   time.Time          // start time of current bucket
-	lastActive time.Time          // last time any output was seen
+	lastActive time.Time
 	totalBytes int64
 }
 
@@ -27,7 +17,6 @@ type Snapshot struct {
 	Host        string  `json:"host,omitempty"` // peer fingerprint (empty = local)
 	SessionName string  `json:"session"`
 	IdleSeconds float64 `json:"idle_seconds"`
-	Sparkline   []int64 `json:"sparkline"` // most recent BucketCount buckets, oldest first
 	TotalBytes  int64   `json:"total_bytes"`
 }
 
@@ -54,9 +43,7 @@ func (t *Tracker) Record(session string, n int) {
 		t.mu.Lock()
 		sa, ok = t.sessions[session]
 		if !ok {
-			sa = &SessionActivity{
-				headTime: time.Now().Truncate(BucketDuration),
-			}
+			sa = &SessionActivity{}
 			t.sessions[session] = sa
 		}
 		t.mu.Unlock()
@@ -68,23 +55,6 @@ func (t *Tracker) Record(session string, n int) {
 
 	sa.lastActive = now
 	sa.totalBytes += int64(n)
-
-	// Advance buckets to current time
-	currentBucket := now.Truncate(BucketDuration)
-	elapsed := currentBucket.Sub(sa.headTime)
-	if elapsed > 0 {
-		steps := int(elapsed / BucketDuration)
-		if steps > BucketCount {
-			steps = BucketCount
-		}
-		for i := 0; i < steps; i++ {
-			sa.headIdx = (sa.headIdx + 1) % BucketCount
-			sa.buckets[sa.headIdx] = 0
-		}
-		sa.headTime = currentBucket
-	}
-
-	sa.buckets[sa.headIdx] += int64(n)
 }
 
 // Get returns a snapshot of a session's activity
@@ -97,42 +67,18 @@ func (t *Tracker) Get(session string) *Snapshot {
 		return &Snapshot{
 			SessionName: session,
 			IdleSeconds: -1, // never seen
-			Sparkline:   make([]int64, BucketCount),
 		}
 	}
 
 	sa.mu.Lock()
 	defer sa.mu.Unlock()
 
-	// Advance buckets to now before reading
 	now := time.Now()
-	currentBucket := now.Truncate(BucketDuration)
-	elapsed := currentBucket.Sub(sa.headTime)
-	if elapsed > 0 {
-		steps := int(elapsed / BucketDuration)
-		if steps > BucketCount {
-			steps = BucketCount
-		}
-		for i := 0; i < steps; i++ {
-			sa.headIdx = (sa.headIdx + 1) % BucketCount
-			sa.buckets[sa.headIdx] = 0
-		}
-		sa.headTime = currentBucket
-	}
-
-	// Build sparkline array, oldest first
-	sparkline := make([]int64, BucketCount)
-	for i := 0; i < BucketCount; i++ {
-		idx := (sa.headIdx + 1 + i) % BucketCount
-		sparkline[i] = sa.buckets[idx]
-	}
-
 	idle := now.Sub(sa.lastActive).Seconds()
 
 	return &Snapshot{
 		SessionName: session,
 		IdleSeconds: idle,
-		Sparkline:   sparkline,
 		TotalBytes:  sa.totalBytes,
 	}
 }

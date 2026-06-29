@@ -580,17 +580,11 @@ export const themePresets: Record<string, ThemePreset> = {
     }
 }
 
-export function applyTheme(themeName: string, customTheme?: Record<string, string>) {
+export function applyTheme(themeName: string) {
     const theme = themePresets[themeName] || themePresets['raycast']
     const root = document.documentElement
     for (const [key, value] of Object.entries(theme.cssVars)) {
         root.style.setProperty(key, value)
-    }
-    // Apply custom overrides on top of preset
-    if (customTheme) {
-        for (const [key, value] of Object.entries(customTheme)) {
-            if (value) root.style.setProperty(key, value)
-        }
     }
 }
 

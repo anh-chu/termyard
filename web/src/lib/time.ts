@@ -36,11 +36,9 @@ export function formatUptime(created?: string): string {
   return `${days}d`
 }
 
-// formatSessionUptime is the Overview variant: supports an 'absolute' format
-// (wall-clock time) and has no undefined/negative guards (sub-minute -> '0m').
+// formatSessionUptime is the Overview variant: relative-only.
 // Intentionally distinct from formatUptime; behaviors must not be merged.
-export function formatSessionUptime(created: string, format: string = 'relative'): string {
-  if (format === 'absolute') return new Date(created).toLocaleTimeString()
+export function formatSessionUptime(created: string): string {
   const diff = Date.now() - new Date(created).getTime()
   const hours = Math.floor(diff / 3600000)
   if (hours < 1) return `${Math.floor(diff / 60000)}m`

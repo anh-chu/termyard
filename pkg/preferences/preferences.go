@@ -13,7 +13,6 @@ type Terminal struct {
 	FontSize   int    `json:"font_size"`
 	FontFamily string `json:"font_family"`
 	Scrollback int    `json:"scrollback"`
-	Ligatures  bool   `json:"ligatures"`
 }
 
 type Sidebar struct {
@@ -32,7 +31,7 @@ type AgentBanner struct {
 // APIKeyMask is the placeholder returned in place of a stored AI naming API
 // key on reads, so the secret is never sent to the browser. On write, a value
 // equal to this mask means "keep the existing key".
-const APIKeyMask = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+const APIKeyMask = "••••••••"
 
 // AINaming configures the optional AI session namer. When Enabled is false the
 // namer is off regardless of endpoint. Empty Endpoint/Model fall back to
@@ -45,22 +44,16 @@ type AINaming struct {
 }
 
 type Preferences struct {
-	Terminal                Terminal          `json:"terminal"`
-	Theme                   string            `json:"theme"`
-	CustomTheme             map[string]string `json:"custom_theme,omitempty"`
-	Sidebar                 Sidebar           `json:"sidebar"`
-	DefaultView             string            `json:"default_view"`
-	Notifications           Notifications     `json:"notifications"`
-	AgentBanner             AgentBanner       `json:"agent_banner"`
-	SparklinesVisible       bool              `json:"sparklines_visible"`
-	OverviewRefreshInterval int               `json:"overview_refresh_interval"`
-	TimestampFormat         string            `json:"timestamp_format"`
-	LockTimeoutMinutes      int               `json:"lock_timeout_minutes"`
-	LockBackgroundFaster    bool              `json:"lock_background_faster"`
-	LockBackgroundMinutes   int               `json:"lock_background_minutes"`
-	FullscreenHideAlerts    bool              `json:"fullscreen_hide_alerts"`
-	DefaultAgent            string            `json:"default_agent"`
-	AINaming                AINaming          `json:"ai_naming"`
+	Terminal                Terminal      `json:"terminal"`
+	Theme                   string        `json:"theme"`
+	Sidebar                 Sidebar       `json:"sidebar"`
+	DefaultView             string        `json:"default_view"`
+	Notifications           Notifications `json:"notifications"`
+	AgentBanner             AgentBanner   `json:"agent_banner"`
+	LockTimeoutMinutes      int           `json:"lock_timeout_minutes"`
+	FullscreenHideAlerts    bool          `json:"fullscreen_hide_alerts"`
+	DefaultAgent            string        `json:"default_agent"`
+	AINaming                AINaming      `json:"ai_naming"`
 }
 
 func Default() *Preferences {
@@ -69,10 +62,8 @@ func Default() *Preferences {
 			FontSize:   13,
 			FontFamily: "Space Mono",
 			Scrollback: 5000,
-			Ligatures:  false,
 		},
-		Theme:       "raycast",
-		CustomTheme: map[string]string{},
+		Theme: "raycast",
 		Sidebar: Sidebar{
 			DefaultCollapsed: false,
 			CollapseMode:     "small",
@@ -84,12 +75,7 @@ func Default() *Preferences {
 		AgentBanner: AgentBanner{
 			AutoDismissSeconds: 0,
 		},
-		SparklinesVisible:       true,
-		OverviewRefreshInterval: 5,
-		TimestampFormat:         "relative",
 		LockTimeoutMinutes:      30,
-		LockBackgroundFaster:    true,
-		LockBackgroundMinutes:   10,
 		FullscreenHideAlerts:    true,
 		DefaultAgent:            "claude",
 		AINaming: AINaming{
