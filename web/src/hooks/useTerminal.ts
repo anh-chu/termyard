@@ -157,6 +157,14 @@ export function useTerminal(sessionName: string, hostId?: string) {
     sendRawBytes(new TextEncoder().encode(text))
   }, [sendRawBytes])
 
+  const sendImage = useCallback((file: File, fallbackType: string) => {
+    const currentWs = wsRef.current
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return
+    sendPastedImage(currentWs, file, fallbackType).catch((err) => {
+      console.error('Failed to send pasted image:', err)
+    })
+  }, [])
+
   const clearCtrlModifier = useCallback(() => {
     ctrlModifierRef.current = false
     setCtrlModifierActive(false)
@@ -638,6 +646,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
     termConnected,
     sendRawBytes,
     sendText,
+    sendImage,
     ctrlModifierActive,
     toggleCtrlModifier,
     clearCtrlModifier,

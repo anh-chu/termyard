@@ -156,6 +156,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     termConnected,
     sendRawBytes,
     sendText,
+    sendImage,
     ctrlModifierActive,
     toggleCtrlModifier,
     clearCtrlModifier,
@@ -448,14 +449,33 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
   const handlePaste = useCallback(async () => {
     setClipboardMenuOpen(false)
     try {
-      const text = await navigator.clipboard?.readText?.()
-      if (text) {
-        sendText(text)
+      // Async Clipboard API (secure context only) — handles images + text.
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read()
+        for (const item of items) {
+          const imageType = item.types.find((t) => t.startsWith('image/'))
+          if (imageType) {
+            const blob = await item.getType(imageType)
+            const ext = imageType.split('/')[1] || 'png'
+            sendImage(new File([blob], `pasted-image.${ext}`, { type: imageType }), imageType)
+            return
+          }
+        }
+        for (const item of items) {
+          if (item.types.includes('text/plain')) {
+            const blob = await item.getType('text/plain')
+            sendText(await blob.text())
+            return
+          }
+        }
+        return
       }
+      const text = await navigator.clipboard?.readText?.()
+      if (text) sendText(text)
     } catch (err) {
       console.error('Failed to paste from clipboard:', err)
     }
-  }, [sendText])
+  }, [sendText, sendImage])
 
   const handleCopy = useCallback(async () => {
     setClipboardMenuOpen(false)
