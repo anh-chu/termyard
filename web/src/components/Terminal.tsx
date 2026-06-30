@@ -271,9 +271,13 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
   useEffect(() => {
     if (!containerRef.current) return
     let fitTimer: number | null = null
+    // ponytail: touch devices slide the URL bar / soft keyboard over ~200-300ms,
+    // firing ResizeObserver every frame. Short debounce refits mid-animation =
+    // visible flash. Wait for the viewport to settle on coarse pointers.
+    const settleMs = window.matchMedia('(pointer: coarse)').matches ? 250 : 50
     const observer = new ResizeObserver(() => {
       if (fitTimer !== null) clearTimeout(fitTimer)
-      fitTimer = window.setTimeout(() => { fitTimer = null; fit() }, 50)
+      fitTimer = window.setTimeout(() => { fitTimer = null; fit() }, settleMs)
     })
     observer.observe(containerRef.current)
     return () => { observer.disconnect(); if (fitTimer !== null) clearTimeout(fitTimer) }
