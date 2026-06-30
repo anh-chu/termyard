@@ -366,3 +366,11 @@
     display: none;
   }
 }
+
+/* Native HTML5 DnD on touch: stop touch-hold selecting label/text before drag claims the gesture */
+[draggable="true"],
+[draggable="true"] * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
