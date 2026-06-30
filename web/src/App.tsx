@@ -1173,9 +1173,9 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
           onDismiss={dismissEvent}
           onDismissAll={dismissAllEvents}
           panesCount={paneTree ? getLeaves(paneTree).length : 0}
-          onSplitPane={() => {
+          onSplitPane={(direction) => {
             if (activeKey !== null) {
-              splitTargetRef.current = { key: activeKey, direction: 'h' }
+              splitTargetRef.current = { key: activeKey, direction }
             }
             openNewSessionModal()
           }}

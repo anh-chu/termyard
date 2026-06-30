@@ -25,7 +25,7 @@ interface TopBarProps {
   onDismiss: (evt: ToolEvent) => void
   onDismissAll: () => void
   panesCount?: number
-  onSplitPane?: () => void
+  onSplitPane?: (direction: 'h' | 'v') => void
   glance: { parked: number; working: number; waiting: number }
 }
 
@@ -198,14 +198,26 @@ export function TopBar({
             </button>
           )}
           {currentView === 'session' && panesCount !== undefined && panesCount < 4 && onSplitPane && (
-            <button
-              type="button"
-              onClick={onSplitPane}
-              title="Split pane"
-              className="p-1.5 rounded-sm hover:bg-surface-elevated text-ink transition-colors"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1" /><rect x="14" y="3" width="7" height="18" rx="1" /></svg>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => onSplitPane('h')}
+                title="Split horizontally"
+                aria-label="Split pane horizontally"
+                className="p-1.5 rounded-sm hover:bg-surface-elevated text-ink transition-colors"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1" /><rect x="14" y="3" width="7" height="18" rx="1" /></svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSplitPane('v')}
+                title="Split vertically"
+                aria-label="Split pane vertically"
+                className="p-1.5 rounded-sm hover:bg-surface-elevated text-ink transition-colors"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="7" rx="1" /><rect x="3" y="14" width="18" height="7" rx="1" /></svg>
+              </button>
+            </>
           )}
         </div>
 
