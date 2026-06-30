@@ -47,6 +47,10 @@ type SessionAttrsSink interface {
 	ApplyRemoteSnapshot(attrs map[string]SessionAttr) (changed []string, err error)
 	// SnapshotAttrs returns the full local attribute map to seed a fresh peer.
 	SnapshotAttrs() map[string]SessionAttr
+	// SetScheduleID records the owning schedule for a session this node spawned
+	// locally on behalf of a remote peer's scheduler, keyed by the local session
+	// key, so the run groups in this node's own UI.
+	SetScheduleID(key, scheduleID string) error
 }
 
 // SessionOrderSink is the narrow slice of session-order storage the peer loop
@@ -836,6 +840,7 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 			Path           string `json:"path,omitempty"`
 			Command        string `json:"command,omitempty"`
 			WorktreeBranch string `json:"worktree_branch,omitempty"`
+			ScheduleID     string `json:"schedule_id,omitempty"`
 		}
 		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Name == "" {
 			return
@@ -870,6 +875,15 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		if err := deps.TmuxClient.NewSession(params.Name, params.Path, params.Command); err != nil {
 			log.WithError(err).Warn("new session via peer failed")
 			return
+		}
+		// Tag the locally-spawned session with its owning schedule so it groups in
+		// this node's own UI; the remote scheduler only set the id on its side.
+		if params.ScheduleID != "" && deps.AttrsSink != nil {
+			if err := deps.AttrsSink.SetScheduleID(params.Name, params.ScheduleID); err != nil {
+				log.WithError(err).Warn("failed to store schedule id for peer-spawned session")
+			} else if deps.BrowserHub != nil {
+				deps.BrowserHub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": params.Name})
+			}
 		}
 		sendStateUpdate(pc, deps)
 

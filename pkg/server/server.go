@@ -118,6 +118,11 @@ func (a attrsStoreAdapter) SnapshotAttrs() map[string]peer.SessionAttr {
 	return out
 }
 
+func (a attrsStoreAdapter) SetScheduleID(key, scheduleID string) error {
+	_, err := a.store.SetScheduleID(key, scheduleID)
+	return err
+}
+
 // sessionOrderStoreAdapter bridges sessionorder.Store to the peer narrow sink.
 type sessionOrderStoreAdapter struct {
 	store *sessionorder.Store
