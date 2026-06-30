@@ -1038,8 +1038,12 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
       splitTargetRef.current = splitTarget
     }
     const { host } = key ? parseSessionKey(key) : { host: undefined }
+    // Inherit the target pane's cwd so drop-to-split opens "here", like tmux split-window.
+    const sess = key ? sessionsRef.current.find(s => sessionKey(s) === key) : undefined
+    const panes = sess?.windows.flatMap(w => w.panes) ?? []
+    const cwd = panes.find(p => p.active)?.current_path || sess?.project_path || '~'
     // Pass splitTarget directly — avoids ref race when event fires on both pane and container
-    handleCreateSession('shell', '~', '', host || undefined, undefined, undefined, splitTarget)
+    handleCreateSession('shell', cwd, '', host || undefined, undefined, undefined, splitTarget)
   }, [singleView, activeKey, activeGroupId, paneTree, handleCreateSession])
 
   const toggleFullscreen = useCallback(() => {
