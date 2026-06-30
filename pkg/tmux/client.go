@@ -45,7 +45,7 @@ func (c *Client) Exec(args ...string) (string, error) {
 
 // ListSessions returns all tmux sessions
 func (c *Client) ListSessions() ([]*Session, error) {
-	out, err := c.Exec("list-sessions", "-F", "#{session_id}:#{session_name}:#{session_created}:#{session_attached}:#{session_activity}")
+	out, err := c.Exec("list-sessions", "-F", "#{session_id}:#{session_name}:#{session_created}:#{session_attached}:#{session_activity}:#{@termyard_schedule_id}")
 	if err != nil {
 		if strings.Contains(err.Error(), "no server running") || strings.Contains(err.Error(), "no sessions") {
 			return nil, nil
@@ -58,7 +58,7 @@ func (c *Client) ListSessions() ([]*Session, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, ":", 5)
+		parts := strings.SplitN(line, ":", 6)
 		if len(parts) < 5 {
 			continue
 		}
@@ -67,12 +67,17 @@ func (c *Client) ListSessions() ([]*Session, error) {
 		attached := parts[3] != "0"
 		activity, _ := strconv.ParseInt(parts[4], 10, 64)
 
+		scheduleID := ""
+		if len(parts) >= 6 {
+			scheduleID = parts[5]
+		}
 		sessions = append(sessions, &Session{
 			ID:           parts[0],
 			Name:         parts[1],
 			Created:      time.Unix(created, 0),
 			Attached:     attached,
 			LastActivity: time.Unix(activity, 0),
+			ScheduleID:   scheduleID,
 		})
 	}
 	return sessions, nil
@@ -364,6 +369,17 @@ func (c *Client) NewSession(name, projectPath, command string) error {
 		args = append(args, wrapSessionCommand(command)...)
 	}
 	_, err := c.Exec(args...)
+	return err
+}
+
+// SetScheduleID stamps the owning schedule onto a session as an intrinsic tmux
+// user-option, so it travels with the session (relay, restart, rename) without a
+// separate side-store. Reads back via the @termyard_schedule_id format field.
+func (c *Client) SetScheduleID(name, scheduleID string) error {
+	if name == "" || scheduleID == "" {
+		return nil
+	}
+	_, err := c.Exec("set-option", "-t", name, "@termyard_schedule_id", scheduleID)
 	return err
 }
 

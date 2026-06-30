@@ -39,6 +39,10 @@ func (m *mockRebuildClient) SelectPane(target string) error {
 	m.calls = append(m.calls, "SelectPane:"+target)
 	return nil
 }
+func (m *mockRebuildClient) SetScheduleID(name, scheduleID string) error {
+	m.calls = append(m.calls, "SetScheduleID:"+name+":"+scheduleID)
+	return nil
+}
 
 func TestBuildStartCommand(t *testing.T) {
 	tests := []struct {

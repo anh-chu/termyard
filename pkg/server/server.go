@@ -425,6 +425,13 @@ func CreateSession(opts *Options, req scheduler.CreateSessionReq) error {
 	if err := opts.Client.NewSession(req.Name, req.Path, req.Command); err != nil {
 		return err
 	}
+	// Intrinsic ownership: stamp the schedule onto the session itself so it groups
+	// everywhere it is relayed, independent of the attr side-store.
+	if req.ScheduleID != "" {
+		if err := opts.Client.SetScheduleID(req.Name, req.ScheduleID); err != nil {
+			logrus.WithError(err).Warn("failed to set schedule id option")
+		}
+	}
 	// Store explicit agent type before refresh so it survives inference.
 	if req.AgentType != "" && opts.StateMgr != nil {
 		opts.StateMgr.SetSessionAgentType(req.Name, req.AgentType)

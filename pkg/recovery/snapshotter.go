@@ -71,7 +71,8 @@ func (s *Snapshotter) snapshotOnce() error {
 			AgentType:      session.AgentType,
 			AgentSessionID: session.AgentSessionID,
 		}
-		if s.attrs != nil {
+		// Prefer the intrinsic id carried on the session; fall back to the side-store.
+		if snap.ScheduleID = session.ScheduleID; snap.ScheduleID == "" && s.attrs != nil {
 			snap.ScheduleID = s.attrs.Get(session.Name).ScheduleID
 		}
 		windows := session.Windows

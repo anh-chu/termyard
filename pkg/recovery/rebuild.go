@@ -22,6 +22,7 @@ type rebuildClient interface {
 	SelectLayout(target, layout string) error
 	SelectWindow(session, index string) error
 	SelectPane(target string) error
+	SetScheduleID(name, scheduleID string) error
 }
 
 // Rebuilder recreates sessions from manifest after tmux loss.
@@ -85,10 +86,16 @@ func (r *Rebuilder) rebuildSession(session SessionSnapshot) error {
 		r.stateMgr.SetSessionAgentType(session.Name, session.AgentType)
 	}
 	// Restore schedule ownership so the rebuilt session rejoins its schedule
-	// group and stays subject to the concurrency cap.
-	if r.attrs != nil && session.ScheduleID != "" {
-		if _, err := r.attrs.SetScheduleID(session.Name, session.ScheduleID); err != nil {
-			r.log.WithError(err).WithField("session", session.Name).Warn("failed to restore schedule id")
+	// group and stays subject to the concurrency cap. The tmux user-option is the
+	// durable source of truth; the attr write is the one-release fallback.
+	if session.ScheduleID != "" {
+		if err := r.client.SetScheduleID(session.Name, session.ScheduleID); err != nil {
+			r.log.WithError(err).WithField("session", session.Name).Warn("failed to restore schedule id option")
+		}
+		if r.attrs != nil {
+			if _, err := r.attrs.SetScheduleID(session.Name, session.ScheduleID); err != nil {
+				r.log.WithError(err).WithField("session", session.Name).Warn("failed to restore schedule id")
+			}
 		}
 	}
 

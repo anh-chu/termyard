@@ -877,7 +877,15 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 			return
 		}
 		// Tag the locally-spawned session with its owning schedule so it groups in
-		// this node's own UI; the remote scheduler only set the id on its side.
+		// this node's own UI; the remote scheduler only set the id on its side. The
+		// tmux user-option is the durable source of truth; the attr write is the
+		// one-release fallback for clients still reading the side-store.
+		if params.ScheduleID != "" {
+			if err := deps.TmuxClient.SetScheduleID(params.Name, params.ScheduleID); err != nil {
+				log.WithError(err).Warn("failed to set schedule id option for peer-spawned session")
+			}
+		}
+		// Fallback side-store write (drop next release):
 		if params.ScheduleID != "" && deps.AttrsSink != nil {
 			if err := deps.AttrsSink.SetScheduleID(params.Name, params.ScheduleID); err != nil {
 				log.WithError(err).Warn("failed to store schedule id for peer-spawned session")

@@ -17,6 +17,7 @@ type Session struct {
 	IsWorktree       bool      `json:"is_worktree,omitempty"`
 	WorktreeParent   string    `json:"worktree_parent,omitempty"` // main worktree root path (linked worktrees only)
 	AgentType        string    `json:"agent_type,omitempty"`
+	ScheduleID       string    `json:"schedule_id,omitempty"` // owning schedule (intrinsic: tmux @termyard_schedule_id)
 	PromptPreview    string    `json:"prompt_preview,omitempty"`
 	AgentSessionID   string    `json:"agent_session_id,omitempty"`
 	UserPrompt       string    `json:"user_prompt,omitempty"`
