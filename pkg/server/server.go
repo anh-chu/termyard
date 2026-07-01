@@ -2264,7 +2264,7 @@ func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tra
 		aliveVal := false
 		alive := func() bool {
 			if !aliveChecked {
-				aliveVal = localAgentAlive(session, localHost)
+				aliveVal = shouldResurrectAgentMeta(session, localHost)
 				aliveChecked = true
 			}
 			return aliveVal
@@ -2290,15 +2290,17 @@ func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tra
 	}
 }
 
-// localAgentAlive reports whether a session's persisted agent identity still
-// reflects a running process. Remote sessions are trusted as-is (we cannot
-// inspect a peer's /proc). For local sessions we walk the pane process trees:
-// if no agent process is present the identity is stale (the agent exited and
-// the pane reverted to a shell or another command such as a dev server), so the
-// sticky tracker metadata must not resurrect the agent badge.
-func localAgentAlive(session *tmux.Session, localHost string) bool {
+// shouldResurrectAgentMeta reports whether this host may repopulate a session's
+// agent-derived fields from its own tool-event tracker. It is only allowed for
+// LOCAL sessions whose agent process is still running: if the process is gone
+// the identity is stale (agent exited, pane reverted to a shell or a command
+// like a dev server) and must not be resurrected. REMOTE (peer) sessions are
+// never resurrected here — the origin host is authoritative and relays the
+// correct state; this host's tracker is only a mirror and may hold a stale tool
+// entry that would otherwise revive a tag the origin already cleared.
+func shouldResurrectAgentMeta(session *tmux.Session, localHost string) bool {
 	if session.Host != "" && session.Host != localHost {
-		return true
+		return false
 	}
 	for _, win := range session.Windows {
 		for _, pane := range win.Panes {
