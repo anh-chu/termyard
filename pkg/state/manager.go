@@ -338,6 +338,23 @@ func (m *Manager) loadSessionDetails(session *tmux.Session) error {
 	return nil
 }
 
+// sessionHasLiveAgent reports whether any pane in the session currently has a
+// recognized coding agent process running in its tree. Used to distinguish a
+// live agent (keep its identity) from a session that used to run one but has
+// reverted to a shell or other process (drop the stale identity).
+func sessionHasLiveAgent(windows []*tmux.Window) bool {
+	for _, win := range windows {
+		for _, pane := range win.Panes {
+			if pane.PID <= 0 {
+				continue
+			}
+			if _, ok := toolevents.DetectAgentInProcessTree(pane.PID); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
 func (m *Manager) applyMetadata(session *tmux.Session) {
 	m.mu.RLock()
 	meta := m.meta[session.Name]
@@ -346,8 +363,21 @@ func (m *Manager) applyMetadata(session *tmux.Session) {
 	if meta.ProjectPath != "" && session.ProjectPath == "" {
 		session.ProjectPath = meta.ProjectPath
 	}
-	if session.AgentType == "" {
-		session.AgentType = tmux.NormalizeAgentType(meta.AgentType)
+	if session.AgentType == "" && meta.AgentType != "" {
+		// Only resurrect a persisted agent identity if an agent process is
+		// actually still running in the session. Otherwise the agent has exited
+		// and the pane reverted to a plain shell or another foreground process
+		// (e.g. a `pnpm dev` server, which fronts as `node`), so the old tag is
+		// stale. Clear it so the session stops rendering as the departed agent.
+		if sessionHasLiveAgent(session.Windows) {
+			session.AgentType = tmux.NormalizeAgentType(meta.AgentType)
+		} else {
+			m.mu.Lock()
+			stored := m.meta[session.Name]
+			stored.AgentType = ""
+			m.meta[session.Name] = stored
+			m.mu.Unlock()
+		}
 	}
 	if meta.PromptPreview != "" && session.PromptPreview == "" {
 		session.PromptPreview = meta.PromptPreview

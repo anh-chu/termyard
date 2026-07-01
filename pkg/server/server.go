@@ -958,7 +958,11 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				} else {
 					sessions = opts.StateMgr.GetSessions()
 				}
-				enrichSessionsFromTracker(sessions, opts.Tracker)
+				localHost := ""
+				if opts.PeerMgr != nil {
+					localHost = opts.PeerMgr.LocalID()
+				}
+				enrichSessionsFromTracker(sessions, opts.Tracker, localHost)
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(sessions)
 			})
@@ -2248,13 +2252,13 @@ func serveAndWait(ctx context.Context, opts *Options, logger *logrus.Entry, hand
 	return nil
 }
 
-func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tracker) {
+func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tracker, localHost string) {
 	if tracker == nil {
 		return
 	}
 	for _, session := range sessions {
 		meta := tracker.SessionMetaFor(session.Host, session.Name)
-		if session.AgentType == "" && meta.Tool != "" {
+		if session.AgentType == "" && meta.Tool != "" && localAgentAlive(session, localHost) {
 			session.AgentType = string(meta.Tool)
 		}
 		if session.ProjectPath == "" && meta.CWD != "" {
@@ -2273,6 +2277,29 @@ func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tra
 			session.LastAgentMessage = meta.LastAgentMessage
 		}
 	}
+}
+
+// localAgentAlive reports whether a session's persisted agent identity still
+// reflects a running process. Remote sessions are trusted as-is (we cannot
+// inspect a peer's /proc). For local sessions we walk the pane process trees:
+// if no agent process is present the identity is stale (the agent exited and
+// the pane reverted to a shell or another command such as a dev server), so the
+// sticky tracker metadata must not resurrect the agent badge.
+func localAgentAlive(session *tmux.Session, localHost string) bool {
+	if session.Host != "" && session.Host != localHost {
+		return true
+	}
+	for _, win := range session.Windows {
+		for _, pane := range win.Panes {
+			if pane.PID <= 0 {
+				continue
+			}
+			if _, ok := toolevents.DetectAgentInProcessTree(pane.PID); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func defaultSessionName(command, projectPath string) string {
