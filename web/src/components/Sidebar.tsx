@@ -1018,14 +1018,12 @@ export function Sidebar({
     const collapsedProject = pathLeaf(groupSessions.find(s => s.project_path)?.project_path)
     const isToolSession = (s: Session) => {
       const ev = getSessionEvents(sessionKey(s))
-      const cmd = (() => {
-        for (const w of s.windows ?? []) for (const p of w.panes ?? []) if (p.active) return p.current_command
-        return s.windows?.[0]?.panes?.[0]?.current_command ?? ''
-      })()
+      // Classify by nature (companion pane with no agent), not the live command:
+      // running a process in the pane must not unfold it. A tool pane never gains
+      // agent_type, an auto-detected agent process, or hook history.
       return !s.agent_type
         && !ev.some(e => e.status === 'active' && e.auto_detected)
         && !(s.user_prompt?.trim() || s.last_agent_message?.trim())
-        && SHELL_COMMANDS.has(cmd)
     }
     return (
       <li key={group.id} className="flex items-stretch">
