@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -2103,6 +2106,142 @@ func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 	}
 }
 
+// activePaneCwd returns the CurrentPath of the active pane among panes, or ""
+// if none — no fallback to inactive panes, so a relative file open resolves
+// against exactly the pane shown in the terminal.
+func activePaneCwd(panes []*tmux.Pane) string {
+	for _, pane := range panes {
+		if pane.Active {
+			return strings.TrimSpace(pane.CurrentPath)
+		}
+	}
+	return ""
+}
+
+// fileGrantTTL bounds how long an opened file stays fetchable. A grant is
+// minted per explicit "Open file" click; the browser has this long to fetch
+// (and to reload, e.g. re-render a PDF) before the token dies.
+// ponytail: fixed 5m window; make configurable if reload-after-expiry annoys.
+const fileGrantTTL = 5 * time.Minute
+
+// fileGrants is an in-memory capability store: a token maps to one absolute
+// path with an expiry. It replaces open-ended whole-FS read — the serve
+// endpoint can only return paths that were explicitly granted and not expired.
+// Eviction is lazy (on access); no background goroutine.
+type fileGrants struct {
+	mu    sync.Mutex
+	byTok map[string]fileGrant
+}
+
+type fileGrant struct {
+	path    string
+	expires time.Time
+}
+
+func newFileGrants() *fileGrants { return &fileGrants{byTok: map[string]fileGrant{}} }
+
+func (g *fileGrants) grant(path string) string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	tok := hex.EncodeToString(b[:])
+	now := time.Now()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for k, v := range g.byTok { // lazy eviction
+		if now.After(v.expires) {
+			delete(g.byTok, k)
+		}
+	}
+	g.byTok[tok] = fileGrant{path: path, expires: now.Add(fileGrantTTL)}
+	return tok
+}
+
+func (g *fileGrants) resolve(tok string) (string, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v, ok := g.byTok[tok]
+	if !ok || time.Now().After(v.expires) {
+		delete(g.byTok, tok)
+		return "", false
+	}
+	return v.path, true
+}
+
+// resolveFilePath turns a user-selected path into an absolute, existing file
+// path. Relative paths resolve against the active pane's cwd (see
+// activePaneCwd) — no fallback to other panes. Returns an HTTP status + message
+// on failure.
+func resolveFilePath(p string, opts *Options, r *http.Request) (string, int, string) {
+	if p == "" {
+		return "", http.StatusBadRequest, "path required"
+	}
+	if !filepath.IsAbs(p) {
+		base := ""
+		// ListPanes(session) targets the session's current window; pick its
+		// active pane. ListWindows does not populate panes, so we query panes.
+		if session := r.URL.Query().Get("session"); session != "" && opts.Client != nil {
+			if panes, err := opts.Client.ListPanes(session); err == nil {
+				base = activePaneCwd(panes)
+			}
+		}
+		if base == "" {
+			return "", http.StatusBadRequest, "cannot resolve relative path: no active pane cwd"
+		}
+		p = filepath.Join(base, p)
+	}
+	p = filepath.Clean(p)
+	info, err := os.Stat(p)
+	if err != nil {
+		return "", http.StatusNotFound, "not found"
+	}
+	if info.IsDir() {
+		return "", http.StatusBadRequest, "path is a directory"
+	}
+	return p, 0, ""
+}
+
+// handleFileGrant resolves and validates a user-selected path, then mints a
+// short-lived token the browser exchanges at GET /file?token=... . This is the
+// only place a path enters the capability store.
+//
+// Route: POST /file/grant?path=<abs-or-rel>&session=<name>
+func handleFileGrant(w http.ResponseWriter, r *http.Request, opts *Options, grants *fileGrants) {
+	p, status, msg := resolveFilePath(r.URL.Query().Get("path"), opts, r)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"token": grants.grant(p)})
+}
+
+// handleFile serves a previously granted, non-expired file to the browser,
+// which renders it by content-type. It can ONLY serve paths minted by
+// handleFileGrant — there is no arbitrary-path read.
+//
+// Route: GET /file?token=<token>
+func handleFile(w http.ResponseWriter, r *http.Request, grants *fileGrants) {
+	p, ok := grants.resolve(r.URL.Query().Get("token"))
+	if !ok {
+		http.Error(w, "invalid or expired file token", http.StatusForbidden)
+		return
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		http.Error(w, "cannot open", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+	// Inline so the browser renders instead of downloading. ServeContent does
+	// content-type sniffing, range requests and caching for free.
+	w.Header().Set("Content-Disposition", "inline; filename=\""+filepath.Base(p)+"\"")
+	http.ServeContent(w, r, filepath.Base(p), info.ModTime(), f)
+}
 func registerProxyRoutes(r chi.Router, opts *Options) {
 	// Port-forward proxy — exposes localhost-bound services through termyard's URL.
 	// Requires auth (same rule as other protected routes) so remote users can't
@@ -2119,6 +2258,20 @@ func registerProxyRoutes(r chi.Router, opts *Options) {
 			r.Get("/proxy/{port}", proxyHandler)
 			r.Get("/proxy/{port}/*", proxyHandler)
 		}
+	}
+	// File open — capability-based: POST /file/grant mints a short-lived token
+	// for one explicitly-opened path; GET /file?token=... serves it. Same auth as
+	// the proxy above; not gated on PortForwardStore since it needs no port config.
+	grants := newFileGrants()
+	grantHandler := func(w http.ResponseWriter, r *http.Request) { handleFileGrant(w, r, opts, grants) }
+	fileHandler := func(w http.ResponseWriter, r *http.Request) { handleFile(w, r, grants) }
+	if opts.AuthEnabled {
+		authMw := auth.Middleware(opts.SessionMgr)
+		r.With(authMw).Post("/file/grant", grantHandler)
+		r.With(authMw).Get("/file", fileHandler)
+	} else {
+		r.Post("/file/grant", grantHandler)
+		r.Get("/file", fileHandler)
 	}
 }
 

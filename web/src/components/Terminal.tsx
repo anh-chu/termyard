@@ -735,6 +735,30 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
             >
               Copy
             </button>
+            {/^\S+$/.test(selectionMenu.text.trim()) && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  const path = selectionMenu.text.trim()
+                  // Open the tab synchronously (popup blockers), then point it
+                  // at the token URL once the grant is minted.
+                  const tab = window.open('', '_blank')
+                  const qs = `path=${encodeURIComponent(path)}&session=${encodeURIComponent(sessionName)}`
+                  fetch(`/file/grant?${qs}`, { method: 'POST' })
+                    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+                    .then(({ token }) => {
+                      if (tab) tab.location.href = `/file?token=${encodeURIComponent(token)}`
+                    })
+                    .catch(() => tab?.close())
+                  termRef.current?.clearSelection()
+                  setSelectionMenu(null)
+                }}
+                className="px-4 py-2.5 text-left text-xs font-medium hover:bg-surface transition-colors border-t border-hairline"
+              >
+                Open file
+              </button>
+            )}
           </div>
         </>
       )}
