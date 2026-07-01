@@ -612,6 +612,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
         if (containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
           neutralizeXtermScrollbarFallback(term)
           fitAddonRef.current.fit()
+          // ponytail: repaint from buffer clears ghost rows left by the
+          // CSS-stretched canvas during a debounced/no-net-change resize
+          // (tmux only redraws on a net SIGWINCH, so xterm must self-clear).
+          term.refresh(0, term.rows - 1)
         }
       } catch {}
     }
