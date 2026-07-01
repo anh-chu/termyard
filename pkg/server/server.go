@@ -2258,7 +2258,18 @@ func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tra
 	}
 	for _, session := range sessions {
 		meta := tracker.SessionMetaFor(session.Host, session.Name)
-		if session.AgentType == "" && meta.Tool != "" && localAgentAlive(session, localHost) {
+		// Agent-derived fields (tool, prompt, last message) are only valid while
+		// the agent still runs; suppress them once it exits. Checked lazily/once.
+		aliveChecked := false
+		aliveVal := false
+		alive := func() bool {
+			if !aliveChecked {
+				aliveVal = localAgentAlive(session, localHost)
+				aliveChecked = true
+			}
+			return aliveVal
+		}
+		if session.AgentType == "" && meta.Tool != "" && alive() {
 			session.AgentType = string(meta.Tool)
 		}
 		if session.ProjectPath == "" && meta.CWD != "" {
@@ -2270,10 +2281,10 @@ func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tra
 		if session.AgentSessionID == "" && meta.AgentSessionID != "" {
 			session.AgentSessionID = meta.AgentSessionID
 		}
-		if session.UserPrompt == "" && meta.UserPrompt != "" {
+		if session.UserPrompt == "" && meta.UserPrompt != "" && alive() {
 			session.UserPrompt = meta.UserPrompt
 		}
-		if session.LastAgentMessage == "" && meta.LastAgentMessage != "" {
+		if session.LastAgentMessage == "" && meta.LastAgentMessage != "" && alive() {
 			session.LastAgentMessage = meta.LastAgentMessage
 		}
 	}

@@ -363,13 +363,24 @@ func (m *Manager) applyMetadata(session *tmux.Session) {
 	if meta.ProjectPath != "" && session.ProjectPath == "" {
 		session.ProjectPath = meta.ProjectPath
 	}
+	// Agent-derived metadata (identity, prompt, last message, AI-generated name)
+	// is only valid while the agent still runs in the session. Once it exits and
+	// the pane reverts to a shell or another command (e.g. a `pnpm dev` server
+	// that fronts as `node`), those values are stale and must not render. The
+	// process-tree check is done lazily and cached so sessions without agent
+	// metadata never pay for it.
+	agentChecked := false
+	agentPresent := false
+	agentAlive := func() bool {
+		if !agentChecked {
+			agentPresent = sessionHasLiveAgent(session.Windows)
+			agentChecked = true
+		}
+		return agentPresent
+	}
+
 	if session.AgentType == "" && meta.AgentType != "" {
-		// Only resurrect a persisted agent identity if an agent process is
-		// actually still running in the session. Otherwise the agent has exited
-		// and the pane reverted to a plain shell or another foreground process
-		// (e.g. a `pnpm dev` server, which fronts as `node`), so the old tag is
-		// stale. Clear it so the session stops rendering as the departed agent.
-		if sessionHasLiveAgent(session.Windows) {
+		if agentAlive() {
 			session.AgentType = tmux.NormalizeAgentType(meta.AgentType)
 		} else {
 			m.mu.Lock()
@@ -385,13 +396,15 @@ func (m *Manager) applyMetadata(session *tmux.Session) {
 	if meta.AgentSessionID != "" {
 		session.AgentSessionID = meta.AgentSessionID
 	}
-	if meta.UserPrompt != "" && session.UserPrompt == "" {
+	if meta.UserPrompt != "" && session.UserPrompt == "" && agentAlive() {
 		session.UserPrompt = meta.UserPrompt
 	}
-	if meta.LastAgentMessage != "" {
+	if meta.LastAgentMessage != "" && agentAlive() {
 		session.LastAgentMessage = meta.LastAgentMessage
 	}
-	if meta.DisplayName != "" {
+	// A user-set name is kept always; an AI-generated name is suppressed once
+	// the agent that produced it is gone, so the session reverts to its tmux name.
+	if meta.DisplayName != "" && (meta.UserSetName || agentAlive()) {
 		session.DisplayName = meta.DisplayName
 	}
 	session.UserSetName = meta.UserSetName
