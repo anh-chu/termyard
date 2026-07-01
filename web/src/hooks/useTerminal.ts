@@ -144,6 +144,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const altModifierRef = useRef(false)
   const suppressedInputRef = useRef<string | null>(null)
   const { prefs } = usePreferences()
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null)
 
   const sendRawBytes = useCallback((bytes: Uint8Array) => {
     const currentWs = wsRef.current
@@ -355,7 +356,17 @@ export function useTerminal(sessionName: string, hostId?: string) {
 
     // Flush deferred clipboard writes on mouse interaction (capture phase
     // to intercept before xterm.js can stopPropagation)
-    const onMouseDown = () => flushPendingClipboard()
+    const onMouseDown = (e: MouseEvent) => {
+      flushPendingClipboard()
+      // Right-click on an existing xterm selection: keep it local (our menu),
+      // don't let xterm forward the button-2 mouse report to tmux. Capture
+      // phase runs before xterm's own .xterm-screen listener.
+      if (e.button === 2 && term.getSelection()) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+      }
+    }
     const onKeyDown = () => flushPendingClipboard()
     const onWindowKeyDownCapture = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'b') return
@@ -386,6 +397,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
     }
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
+      // With tmux mouse mode on, plain drag goes to tmux; only a Shift+drag
+      // leaves an xterm-owned selection here. No selection -> pass through.
+      const sel = term.getSelection()
+      if (sel) setSelectionMenu({ x: e.clientX, y: e.clientY, text: sel })
     }
 
     container.addEventListener('mousedown', onMouseDown, true)
@@ -657,5 +672,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
     altModifierActive,
     toggleAltModifier,
     clearAltModifier,
+    selectionMenu,
+    setSelectionMenu,
   }
 }

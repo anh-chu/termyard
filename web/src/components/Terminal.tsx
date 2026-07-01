@@ -163,6 +163,8 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     altModifierActive,
     toggleAltModifier,
     clearAltModifier,
+    selectionMenu,
+    setSelectionMenu,
   } = useTerminal(sessionName, hostId)
   const [showMobileKeyBar, setShowMobileKeyBar] = useState(false)
   // The mobile key bar renders into a single shared slot at the bottom of the
@@ -217,6 +219,13 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     if (showMobileKeyBar) return
     setClipboardMenuOpen(false)
   }, [showMobileKeyBar])
+
+  useEffect(() => {
+    if (!selectionMenu) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectionMenu(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectionMenu, setSelectionMenu])
 
   useEffect(() => {
     if (containerRef.current) {
@@ -701,6 +710,33 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
             />
           </div>
         </div>
+      )}
+      {selectionMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onMouseDown={() => setSelectionMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setSelectionMenu(null) }}
+          />
+          {/* ponytail: no edge-clamp; add if menus near viewport edge get clipped */}
+          <div
+            className="fixed z-50 min-w-[140px] bg-surface-elevated border border-hairline rounded-md flex flex-col overflow-hidden shadow-lg"
+            style={{ left: selectionMenu.x, top: selectionMenu.y }}
+          >
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                navigator.clipboard?.writeText(selectionMenu.text)
+                termRef.current?.clearSelection()
+                setSelectionMenu(null)
+              }}
+              className="px-4 py-2.5 text-left text-xs font-medium hover:bg-surface transition-colors"
+            >
+              Copy
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
