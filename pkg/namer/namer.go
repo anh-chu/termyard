@@ -170,7 +170,7 @@ type chatResponse struct {
 
 const systemPrompt = `You name terminal sessions. Think briefly if you need to, but your reply's FINAL LINE must be ONLY the label: 2-4 words, kebab-case, lowercase, ASCII letters/digits/hyphens only, no quotes or trailing punctuation. Example final lines: fix-auth-token, db-migration, docker-logs-debug, rebase-feature-branch.
 
-Capture this session's specific purpose, not a single transient command. When several sessions share a project, branch, or agent, do NOT name by that shared context — name by what makes THIS session's task different from the others.
+Capture this session's specific purpose, not a single transient command. When several sessions share a project, branch, or agent, do NOT name by that shared context — name by what makes THIS session's task different from the others. When both a user request and an agent reply are given, weight the user's request most heavily: the name should describe what the user asked for; treat the agent's reply as secondary supporting context only.
 
 If existing session names are listed, your label MUST be distinct from every one of them: use different words, never just a numeric suffix.
 
@@ -308,10 +308,10 @@ func buildUserPrompt(nc Context) string {
 			fmt.Fprintf(&b, "Coding agent: %s\n", nc.Agent)
 		}
 		if nc.UserPrompt != "" {
-			fmt.Fprintf(&b, "User asked: %s\n", truncate(nc.UserPrompt, 600))
+			fmt.Fprintf(&b, "User asked (PRIMARY signal — base the name on this): %s\n", truncate(nc.UserPrompt, 900))
 		}
 		if nc.AgentMsg != "" {
-			fmt.Fprintf(&b, "Agent replied: %s\n", truncate(nc.AgentMsg, 400))
+			fmt.Fprintf(&b, "Agent replied (secondary context only): %s\n", truncate(nc.AgentMsg, 300))
 		}
 	case KindShell:
 		if len(nc.Commands) > 0 {
