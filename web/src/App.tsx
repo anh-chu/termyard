@@ -1343,6 +1343,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
               hosts={hosts}
               hiddenSet={sessionAttrs.hidden}
               backgroundSet={sessionAttrs.background}
+              scheduleIDs={sessionAttrs.scheduleIDs}
               onSessionSelect={handleSessionSelect}
               getSessionEvents={getSessionEvents}
               getSessionActivity={getSessionActivity}

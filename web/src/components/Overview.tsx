@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type DOMAttributes } from 'react'
-import { Session, sessionKey } from '../hooks/useSessions'
+import { Session, sessionKey, sessionScheduleID } from '../hooks/useSessions'
 import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
@@ -11,12 +11,14 @@ import { SessionActionsMenu, SessionMenuTarget } from './SessionActionsMenu'
 import { Terminal } from './Terminal'
 import { useGlance, GlanceTarget } from './GlancePopover'
 import { pathLeaf } from '../lib/path'
+import { useSchedules } from '../hooks/useSchedules'
 
 interface OverviewProps {
   sessions: Session[]
   hosts: Host[]
   hiddenSet: Set<string>
   backgroundSet: Set<string>
+  scheduleIDs: Map<string, string>
   onSessionSelect: (session: Session) => void
   getSessionEvents: (session: string) => ToolEvent[]
   getSessionActivity: (session: string) => ActivitySnapshot | undefined
@@ -126,6 +128,7 @@ type CardItem = {
   event: ToolEvent | undefined
   events: ToolEvent[]
   activity: ActivitySnapshot | undefined
+  scheduleRunCount?: number
 }
 
 const COLUMN_ORDER: SessionState[] = ['needs_you', 'working', 'idle', 'offline']
@@ -159,7 +162,7 @@ function SessionCard({
   glanceTrigger: (t: GlanceTarget) => DOMAttributes<HTMLElement>
   mates?: CardItem[]
 }) {
-  const { session, key, signal, event, events, activity } = item
+  const { session, key, signal, event, events, activity, scheduleRunCount } = item
   const isWaiting = signal.state === 'needs_you'
   const loudEvent = event || getSessionEvents(key).find(e => e.status === 'waiting' || e.status === 'stuck' || e.status === 'error')
   // Mirror the sidebar: the user prompt is the task (the "what"), the live
@@ -187,6 +190,7 @@ function SessionCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
             <span className={`font-display text-[13px] font-bold truncate ${signal.state === 'idle' ? 'text-mute' : 'text-ink'}`}>{session.display_name || session.name}</span>
+            {scheduleRunCount && scheduleRunCount > 1 && <span className="text-[10px] font-bold text-mute/50 shrink-0" title={`${scheduleRunCount} runs`}>×{scheduleRunCount}</span>}
           </div>
           <div className="text-[10px] text-mute/60">
             {hasMultipleHosts && <span className="text-mute/50">{session.host_name || 'Local'} · </span>}
@@ -249,7 +253,12 @@ function SessionCard({
   )
 }
 
-export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert, setSessionAttr, onSessionKilled, layoutGroups }: OverviewProps) {
+export function Overview({ sessions, hosts, hiddenSet, backgroundSet, scheduleIDs, onSessionSelect, getSessionEvents, getSessionActivity, isSessionInActiveTurn, onJumpToSession, onDismissAlert, setSessionAttr, onSessionKilled, layoutGroups }: OverviewProps) {
+  const { schedules } = useSchedules()
+  const scheduleById = useMemo(() => new Map(schedules.map(s => [s.id, s])), [schedules])
+  const scheduleIdFor = useCallback((session: Session) => (
+    scheduleIDs.get(sessionKey(session)) || scheduleIDs.get(session.name) || sessionScheduleID(session)
+  ), [scheduleIDs])
   const [stats, setStats] = useState<Stats | null>(null)
   const [menu, setMenu] = useState<{ target: SessionMenuTarget; x: number; y: number } | null>(null)
   const openMenu = useCallback((e: ReactMouseEvent, item: CardItem) => {
@@ -309,11 +318,24 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
   useEffect(() => { localStorage.setItem('overview_layout', layout) }, [layout])
   const [hiddenRailOpen, setHiddenRailOpen] = useState(() => localStorage.getItem('overview_rail_hidden') === 'open')
   const [bgRailOpen, setBgRailOpen] = useState(() => localStorage.getItem('overview_rail_bg') === 'open')
+  const [scheduledRailOpen, setScheduledRailOpen] = useState(() => localStorage.getItem('overview_rail_scheduled') === 'open')
   useEffect(() => { localStorage.setItem('overview_rail_hidden', hiddenRailOpen ? 'open' : 'closed') }, [hiddenRailOpen])
   useEffect(() => { localStorage.setItem('overview_rail_bg', bgRailOpen ? 'open' : 'closed') }, [bgRailOpen])
+  useEffect(() => { localStorage.setItem('overview_rail_scheduled', scheduledRailOpen ? 'open' : 'closed') }, [scheduledRailOpen])
 
-  const foregroundSessions = useMemo(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && !backgroundSet.has(sessionKey(s))), [sessions, hiddenSet, backgroundSet])
-  const hiddenCount = sessions.length - foregroundSessions.length
+  // Sessions spawned by a schedule are recurring/background noise: they pile
+  // up run after run and would otherwise flood the board columns. Pull them
+  // out into their own collapsed rail (newest run per schedule, badge = total).
+  const scheduledSet = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of sessions) {
+      if (scheduleIdFor(s)) set.add(sessionKey(s))
+    }
+    return set
+  }, [sessions, scheduleIdFor])
+
+  const foregroundSessions = useMemo(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && !backgroundSet.has(sessionKey(s)) && !scheduledSet.has(sessionKey(s))), [sessions, hiddenSet, backgroundSet, scheduledSet])
+  const hiddenCount = sessions.length - foregroundSessions.length - scheduledSet.size
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -357,8 +379,28 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
     }
     return { matesByCard, hiddenMateKeys }
   }, [items, layoutGroups])
-  const hiddenItems = useMemo<CardItem[]>(() => sessions.filter(s => hiddenSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, buildItem])
-  const bgItems = useMemo<CardItem[]>(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && backgroundSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, backgroundSet, buildItem])
+  const hiddenItems = useMemo<CardItem[]>(() => sessions.filter(s => hiddenSet.has(sessionKey(s)) && !scheduledSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, scheduledSet, buildItem])
+  const bgItems = useMemo<CardItem[]>(() => sessions.filter(s => !hiddenSet.has(sessionKey(s)) && backgroundSet.has(sessionKey(s)) && !scheduledSet.has(sessionKey(s))).map(buildItem), [sessions, hiddenSet, backgroundSet, scheduledSet, buildItem])
+
+  // Collapse every run of a schedule down to its newest session, with a badge
+  // for the total run count, so repeated fires don't multiply cards in the rail.
+  const scheduledItems = useMemo<CardItem[]>(() => {
+    const groups = new Map<string, Session[]>()
+    for (const s of sessions) {
+      const sid = scheduleIdFor(s)
+      if (!sid) continue
+      if (!groups.has(sid)) groups.set(sid, [])
+      groups.get(sid)!.push(s)
+    }
+    const out: CardItem[] = []
+    for (const [sid, group] of groups) {
+      const newest = group.slice().sort((a, b) => (b.created || '').localeCompare(a.created || ''))[0]
+      if (!newest) continue
+      const item = buildItem(newest)
+      out.push({ ...item, scheduleRunCount: group.length })
+    }
+    return out
+  }, [sessions, scheduleIdFor, buildItem])
 
   const grouped = useMemo(() => {
     const groups = new Map<string, CardItem[]>()
@@ -459,6 +501,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, onSessionS
               </div>
             </div>
           ))}
+          {renderRail('scheduled', 'Scheduled', scheduledItems, scheduledRailOpen, setScheduledRailOpen)}
           {renderRail('hidden', 'Hidden', hiddenItems, hiddenRailOpen, setHiddenRailOpen)}
           {renderRail('backgrounded', 'Backgrounded', bgItems, bgRailOpen, setBgRailOpen)}
         </div>
