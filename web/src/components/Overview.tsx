@@ -271,6 +271,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, scheduleID
     })
   }, [])
   const hasMultipleHosts = hosts.length > 1
+  const localHostId = useMemo(() => hosts.find(h => h.local)?.id, [hosts])
   const glance = useGlance(hasMultipleHosts)
   // Docked live-terminal split. Engages only on wide, fine-pointer viewports;
   // otherwise a card click falls back to full-view nav.
@@ -422,11 +423,15 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, scheduleID
     items: items
       .filter(i => i.signal.state === state && !hiddenMateKeys.has(i.key))
       .sort((a, b) => {
-        // needs_you: longest-blocked first (oldest loud event); else by name
+        // needs_you: longest-blocked first (oldest loud event); else group by host, then name
         if (state === 'needs_you') return (a.event?.timestamp || '').localeCompare(b.event?.timestamp || '')
-        return a.session.name.localeCompare(b.session.name)
+        const aLocal = !a.session.host || a.session.host === localHostId
+        const bLocal = !b.session.host || b.session.host === localHostId
+        const ah = a.session.host_name || ''
+        const bh = b.session.host_name || ''
+        return (aLocal && !bLocal ? -1 : bLocal && !aLocal ? 1 : ah.localeCompare(bh)) || a.session.name.localeCompare(b.session.name)
       }),
-  })), [items, hiddenMateKeys])
+  })), [items, hiddenMateKeys, localHostId])
 
   const activeHostSections = hosts.filter(h => h.stats)
 
