@@ -2,8 +2,11 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
+import { useArtifacts } from '../hooks/useArtifacts'
 import { cn } from '../lib/utils'
 import { popOut, pipUnavailableReason } from '../lib/pip'
+import { grantArtifactToken, getArtifactKind } from '../lib/artifactPreview'
+import { ArtifactPreview } from './ArtifactPreview'
 
 interface TerminalProps {
   sessionName: string
@@ -167,6 +170,20 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     setSelectionMenu,
   } = useTerminal(sessionName, hostId)
   const [showMobileKeyBar, setShowMobileKeyBar] = useState(false)
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
+  const [expandedPreviewPath, setExpandedPreviewPath] = useState<string | null>(null)
+  const { artifacts: serverArtifacts, refresh: refreshArtifacts } = useArtifacts(sessionName, hostId)
+
+  // Shared by the selection-menu "Open file" button and the artifacts sidebar.
+  const openFilePath = useCallback((path: string) => {
+    // Open tab synchronously (popup blockers), then point it at token URL once grant minted.
+    const tab = window.open('', '_blank')
+    grantArtifactToken(path, sessionName)
+      .then((token) => {
+        if (tab) tab.location.href = `/file?token=${encodeURIComponent(token)}`
+      })
+      .catch(() => tab?.close())
+  }, [sessionName])
   // The mobile key bar renders into a single shared slot at the bottom of the
   // app so split views show one full-width bar (active pane only), not one per pane.
   const [keyBarSlot, setKeyBarSlot] = useState<HTMLElement | null>(null)
@@ -553,6 +570,95 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
               )}
             </button>
           )}
+          {serverArtifacts.length > 0 && (
+            <button
+              onClick={() => {
+                setArtifactsOpen((v) => !v)
+              }}
+              title="Detected files"
+              className="absolute top-2.5 right-[74px] z-20 flex items-center gap-1 px-1.5 py-1 rounded-sm bg-surface border border-hairline text-mute hover:text-primary transition-all"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><polyline points="13 2 13 9 20 9" />
+              </svg>
+              <span className="text-[10px] font-bold">{serverArtifacts.length}</span>
+            </button>
+          )}
+          {artifactsOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onMouseDown={() => setArtifactsOpen(false)} />
+              <div className="absolute top-10 right-2.5 z-50 w-96 max-h-[70vh] overflow-y-auto bg-surface-elevated border border-hairline rounded-md shadow-lg flex flex-col">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-hairline">
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-mute">Detected Files</span>
+                  <button onClick={() => void refreshArtifacts()} className="text-[10px] font-bold uppercase text-mute hover:text-ink">Refresh</button>
+                </div>
+                {[...serverArtifacts].reverse().map((art) => {
+                  const kind = getArtifactKind(art.path, art.name)
+                  const displayPath = art.display_path || art.path
+                  const isExpanded = expandedPreviewPath === art.path
+                  const canPreview = kind !== 'other' && !art.stale
+                  return (
+                    <div key={art.path} className="border-b border-hairline/40 last:border-b-0">
+                      <div
+                        className={cn(
+                          'flex items-start gap-2 px-3 py-2 hover:bg-surface transition-colors',
+                          art.stale && 'opacity-70'
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            openFilePath(art.path)
+                            setArtifactsOpen(false)
+                          }}
+                          className="min-w-0 flex-1 text-left text-xs font-mono"
+                          title={art.path}
+                        >
+                          <div className={cn('flex min-w-0 items-center gap-2', art.stale && 'text-mute/70 italic')}>
+                            <span className="min-w-0 truncate">{displayPath}</span>
+                            {art.stale && (
+                              <span className="flex-none rounded border border-hairline px-1 py-0.5 text-[9px] font-bold uppercase tracking-widest text-mute/70 not-italic">
+                                deleted
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-2 text-[10px] uppercase tracking-widest text-mute/60">
+                            <span>{art.source}</span>
+                            {art.tool && <span>{art.tool}</span>}
+                            {kind !== 'other' && <span>{kind}</span>}
+                          </div>
+                        </button>
+                        {canPreview && (
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setExpandedPreviewPath(isExpanded ? null : art.path)}
+                            title={isExpanded ? 'Collapse preview' : 'Preview'}
+                            className="flex-none rounded-sm border border-hairline px-1.5 py-1 text-mute hover:text-primary transition-colors"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                      {isExpanded && canPreview && (
+                        <ArtifactPreview
+                          artifact={art}
+                          sessionName={sessionName}
+                          onOpenFull={() => {
+                            openFilePath(art.path)
+                            setArtifactsOpen(false)
+                          }}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
           {!termConnected && (
             <div className="absolute inset-0 flex items-center justify-center bg-canvas/90 z-10 pointer-events-none rounded-lg">
               <div className="py-4 px-6 rounded-md bg-surface border border-hairline text-ink text-[13px] font-sans font-bold uppercase tracking-widest flex items-center gap-3">
@@ -740,17 +846,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
-                  const path = selectionMenu.text.trim()
-                  // Open the tab synchronously (popup blockers), then point it
-                  // at the token URL once the grant is minted.
-                  const tab = window.open('', '_blank')
-                  const qs = `path=${encodeURIComponent(path)}&session=${encodeURIComponent(sessionName)}`
-                  fetch(`/file/grant?${qs}`, { method: 'POST' })
-                    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-                    .then(({ token }) => {
-                      if (tab) tab.location.href = `/file?token=${encodeURIComponent(token)}`
-                    })
-                    .catch(() => tab?.close())
+                  openFilePath(selectionMenu.text.trim())
                   termRef.current?.clearSelection()
                   setSelectionMenu(null)
                 }}

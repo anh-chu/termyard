@@ -58,8 +58,16 @@ export default {
       'tool.execute.before': async ({ tool }) => {
         fireStdin(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: tool }));
       },
-      'tool.execute.after': async ({ tool }) => {
-        fireStdin(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: tool }));
+      'tool.execute.after': async (input, output) => {
+        const tool = input?.tool;
+        const args = input?.args || {};
+        const payload = { hook_event_name: 'PostToolUse', tool_name: tool };
+        if (tool === 'apply_patch') {
+          if (args.patchText) payload.tool_input = { command: args.patchText };
+        } else if (args.filePath) {
+          payload.tool_input = { path: args.filePath };
+        }
+        fireStdin(JSON.stringify(payload));
       },
       event: async ({ event }) => {
         if (!event || !event.type) return;

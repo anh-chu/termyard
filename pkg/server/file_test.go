@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 func TestActivePaneCwd(t *testing.T) {
@@ -16,11 +17,11 @@ func TestActivePaneCwd(t *testing.T) {
 		{Active: false, CurrentPath: "/other"},
 		{Active: true, CurrentPath: "/right"},
 	}
-	if got := activePaneCwd(panes); got != "/right" {
+	if got := toolevents.ActivePaneCwd(panes); got != "/right" {
 		t.Fatalf("got %q want /right", got)
 	}
 	// No active pane -> empty, no fallback to inactive panes.
-	if got := activePaneCwd([]*tmux.Pane{{Active: false, CurrentPath: "/x"}}); got != "" {
+	if got := toolevents.ActivePaneCwd([]*tmux.Pane{{Active: false, CurrentPath: "/x"}}); got != "" {
 		t.Fatalf("got %q want empty", got)
 	}
 }

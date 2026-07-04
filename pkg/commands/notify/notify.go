@@ -29,7 +29,8 @@ import (
 type stdinEvent struct {
 	HookEventName string `json:"hook_event_name"`
 	// Tool name for activity labels
-	ToolName string `json:"tool_name,omitempty"`
+	ToolName  string          `json:"tool_name,omitempty"`
+	ToolInput json.RawMessage `json:"tool_input,omitempty"`
 	// Claude Stop / Codex agent-turn-complete
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
 	// Claude Code Stop hook transcript path
@@ -45,6 +46,7 @@ type stdinEvent struct {
 // stdinResult holds the parsed fields from a stdin hook event.
 type stdinResult struct {
 	Tool, Status, Message, UserPrompt, AgentMessage, AgentSessionID string
+	Files                                                           []string
 }
 
 // toolNameToActivity maps an agent tool name to a human-readable activity label.
@@ -107,6 +109,69 @@ func toolNameIsInteractiveWait(toolName string) bool {
 	}
 }
 
+// parsePatchFiles extracts file paths from an apply_patch envelope's marker
+// lines (used by Codex and OpenCode, which both use apply_patch-style patches
+// for file edits). Only exact "*** " prefixed lines at column 0 are treated
+// as markers, so diff hunk/content lines (which start with @@, +, -, or space)
+// are never matched.
+func parsePatchFiles(patch string) []string {
+	var out []string
+	for _, line := range strings.Split(patch, "\n") {
+		if !strings.HasPrefix(line, "*** ") {
+			continue
+		}
+		rest := line[len("*** "):]
+		var path string
+		switch {
+		case strings.HasPrefix(rest, "Add File:"):
+			path = strings.TrimSpace(rest[len("Add File:"):])
+		case strings.HasPrefix(rest, "Update File:"):
+			path = strings.TrimSpace(rest[len("Update File:"):])
+		case strings.HasPrefix(rest, "Move to:"):
+			path = strings.TrimSpace(rest[len("Move to:"):])
+		default:
+			continue
+		}
+		if path != "" {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+// extractToolInputPaths pulls file path(s) out of a PostToolUse hook's
+// tool_input payload. Handles Claude/Pi/OpenCode's single-file "file_path"/
+// "path" field, and Codex/OpenCode's apply_patch "command"/patch-text field
+// (multi-file capable).
+func extractToolInputPaths(toolName string, raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	if strings.ToLower(toolName) == "apply_patch" {
+		var in struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(raw, &in) != nil || in.Command == "" {
+			return nil
+		}
+		return parsePatchFiles(in.Command)
+	}
+	var in struct {
+		FilePath string `json:"file_path"`
+		Path     string `json:"path"`
+	}
+	if json.Unmarshal(raw, &in) != nil {
+		return nil
+	}
+	if in.FilePath != "" {
+		return []string{in.FilePath}
+	}
+	if in.Path != "" {
+		return []string{in.Path}
+	}
+	return nil
+}
+
 // chooseAgentSessionID applies precedence: flag > event-data > stdin.
 func chooseAgentSessionID(flagValue, eventValue, stdinValue string) string {
 	if strings.TrimSpace(flagValue) != "" {
@@ -139,6 +204,7 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 		userPrompt     string
 		agentMessage   string
 		agentSessionID string
+		files          []string
 	)
 
 	switch evt.HookEventName {
@@ -169,6 +235,7 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 		} else {
 			message = "Working"
 		}
+		files = extractToolInputPaths(evt.ToolName, evt.ToolInput)
 	case "Stop":
 		status = "completed"
 		message = "Task complete"
@@ -215,6 +282,7 @@ func parseStdinEvent(tool string) (stdinResult, error) {
 		UserPrompt:     userPrompt,
 		AgentMessage:   agentMessage,
 		AgentSessionID: agentSessionID,
+		Files:          files,
 	}, nil
 }
 
@@ -424,6 +492,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	serverURL := c.String("server")
 	cwd := ""
 	agentSessionID := c.String("agent-session-id")
+	var stdinFiles []string
 
 	log := logrus.WithField("component", "notify")
 
@@ -480,6 +549,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		}).Trace("stdin event parsed")
 
 		tool = res.Tool
+		stdinFiles = res.Files
 		if !c.IsSet("status") {
 			status = res.Status
 		}
@@ -533,6 +603,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		AgentSessionID: agentSessionID,
 		UserPrompt:     userPrompt,
 		AgentMessage:   agentMessage,
+		Files:          stdinFiles,
 	}
 
 	body, err := json.Marshal(evt)

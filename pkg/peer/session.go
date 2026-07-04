@@ -524,7 +524,7 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 		conn = c
 	}
 	defer conn.Close()
-	_ = ws.BridgePTY(conn, deps.TmuxClient.TmuxPath(), p.Session, p.Cols, p.Rows, deps.ActTracker, log)
+	_ = ws.BridgePTY(conn, deps.TmuxClient.TmuxPath(), p.Session, p.Cols, p.Rows, deps.ActTracker, deps.TmuxClient, deps.ToolTracker, log)
 }
 
 // handleCapturePane resolves this peer's own primary pane for the requested

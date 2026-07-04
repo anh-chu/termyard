@@ -601,6 +601,11 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     if (evt.type === 'tool-event') {
       handleToolEvent(evt)
       processToolEvent(evt)
+      window.dispatchEvent(new CustomEvent('termyard:artifacts', { detail: evt }))
+      return
+    }
+    if (evt.type === 'artifacts') {
+      window.dispatchEvent(new CustomEvent('termyard:artifacts', { detail: evt }))
       return
     }
     if (evt.type === 'activity') {

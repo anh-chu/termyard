@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/activity"
 	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 // pongFrame is the canonical reply to a browser heartbeat ping.
@@ -27,13 +29,17 @@ func isPing(msg []byte) bool {
 type PTYTerminalHandler struct {
 	tmuxPath        string
 	activityTracker *activity.Tracker
+	tmuxClient      *tmux.Client
+	tracker         *toolevents.Tracker
 }
 
 // NewPTYTerminalHandler creates a new PTY-based terminal handler
-func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker) *PTYTerminalHandler {
+func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker, tmuxClient *tmux.Client, tracker *toolevents.Tracker) *PTYTerminalHandler {
 	return &PTYTerminalHandler{
 		tmuxPath:        tmuxPath,
 		activityTracker: activityTracker,
+		tmuxClient:      tmuxClient,
+		tracker:         tracker,
 	}
 }
 
@@ -41,7 +47,7 @@ func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker) *
 // conn: PTY->conn (binary) in a goroutine, conn->PTY (control+binary) in the
 // caller's goroutine, answering browser heartbeat pings locally. It does NOT
 // upgrade and does NOT close conn — the caller owns conn's single Close.
-func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16, act *activity.Tracker, log *logrus.Entry) error {
+func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16, act *activity.Tracker, client *tmux.Client, tracker *toolevents.Tracker, log *logrus.Entry) error {
 	// Spawn tmux attach in a PTY.
 	ptySess, err := tmux.NewPTYSession(tmuxPath, session, cols, rows)
 	if err != nil {
@@ -55,6 +61,10 @@ func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16
 
 	// Read goroutine: PTY → WebSocket (binary messages)
 	done := make(chan struct{})
+	artifactTail := ""
+	lastOSC7CWD := ""
+	seen := make(map[string]bool)
+	const maxArtifactTail = 4096
 	// ponytail: PTY exit or write error nudges conn.ReadMessage out so either side closing unwinds both loops.
 	go func() {
 		defer close(done)
@@ -75,6 +85,63 @@ func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16
 			if err != nil {
 				_ = conn.SetReadDeadline(time.Now())
 				return
+			}
+			if client != nil && tracker != nil {
+				combined := artifactTail + string(buf[:n])
+				lastNewline := strings.LastIndex(combined, "\n")
+				scanText := combined
+				if lastNewline >= 0 {
+					scanText = combined[:lastNewline+1]
+					artifactTail = combined[lastNewline+1:]
+				} else if len(combined) > maxArtifactTail {
+					artifactTail = combined[len(combined)-maxArtifactTail:]
+				} else {
+					artifactTail = combined
+				}
+				if cwd, ok := toolevents.ParseOSC7CWD(scanText); ok {
+					lastOSC7CWD = cwd
+				}
+				paths := toolevents.ScanArtifactPaths(scanText)
+				osc8Paths := toolevents.ParseOSC8FilePaths(scanText)
+				if len(paths) == 0 && len(osc8Paths) == 0 {
+					continue
+				}
+				type artifactCandidate struct {
+					path   string
+					source string
+				}
+				candidates := make([]artifactCandidate, 0, len(paths)+len(osc8Paths))
+				for _, p := range paths {
+					candidates = append(candidates, artifactCandidate{path: p, source: "regex"})
+				}
+				for _, p := range osc8Paths {
+					candidates = append(candidates, artifactCandidate{path: p, source: "osc8"})
+				}
+				batchSeen := make(map[string]struct{}, len(candidates))
+				cwd := lastOSC7CWD
+				if cwd == "" {
+					cwd = toolevents.ResolveSessionCWD(client, session)
+				}
+				arts := make([]*toolevents.FileArtifact, 0, len(candidates))
+				for _, cand := range candidates {
+					if cand.path == "" {
+						continue
+					}
+					if _, ok := batchSeen[cand.path]; ok {
+						continue
+					}
+					batchSeen[cand.path] = struct{}{}
+					if seen[cand.path] {
+						continue
+					}
+					if art := toolevents.EnrichArtifact(cand.path, cwd, "", cand.source); art != nil {
+						arts = append(arts, art)
+						seen[cand.path] = true
+					}
+				}
+				if len(arts) > 0 {
+					tracker.RecordArtifacts(session, arts)
+				}
 			}
 		}
 	}()
@@ -214,7 +281,7 @@ func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Reques
 	log := logrus.WithField("session", sessionName)
 	log.Info("session ws client connected")
 
-	if err := BridgePTY(conn, h.tmuxPath, sessionName, uint16(cols), uint16(rows), h.activityTracker, log); err != nil {
+	if err := BridgePTY(conn, h.tmuxPath, sessionName, uint16(cols), uint16(rows), h.activityTracker, h.tmuxClient, h.tracker, log); err != nil {
 		log.WithError(err).Error("failed to start PTY session")
 		conn.WriteMessage(websocket.TextMessage, []byte("\r\n[termyard: failed to attach to session]\r\n"))
 	}

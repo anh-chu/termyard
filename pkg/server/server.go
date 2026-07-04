@@ -887,7 +887,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 		})
 		// Tool event ingest — no auth required (used by local CLI via unix socket)
 		r.Post("/tool-event", func(w http.ResponseWriter, r *http.Request) {
-			body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+			body, err := io.ReadAll(io.LimitReader(r.Body, 16384))
 			if err != nil {
 				http.Error(w, "bad request", http.StatusBadRequest)
 				return
@@ -914,6 +914,10 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			if opts.PeerMgr != nil && evt.Host == "" {
 				evt.Host = opts.PeerMgr.LocalID()
 				evt.HostName = opts.PeerMgr.LocalName()
+			}
+			if len(evt.Files) > 0 {
+				cwd := toolevents.ResolveSessionCWD(opts.Client, evt.Session)
+				evt.Artifacts = toolevents.EnrichArtifacts(evt.Files, cwd, evt.Tool, "hook")
 			}
 
 			logrus.WithFields(logrus.Fields{
@@ -1471,6 +1475,27 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(events)
+			})
+
+			r.Get("/artifacts", func(w http.ResponseWriter, r *http.Request) {
+				session := r.URL.Query().Get("session")
+				if session == "" {
+					http.Error(w, "session is required", http.StatusBadRequest)
+					return
+				}
+				host := r.URL.Query().Get("host")
+				artifacts := opts.Tracker.GetArtifacts(host, session)
+				for _, art := range artifacts {
+					if art == nil || art.Path == "" {
+						continue
+					}
+					info, err := os.Stat(art.Path)
+					if err != nil || info.IsDir() {
+						art.Stale = true
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{"artifacts": artifacts})
 			})
 
 			// Authoritative set of in-progress hook-based agent turns. The frontend
@@ -2073,7 +2098,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 }
 
 func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
-	ptyHandler := ws.NewPTYTerminalHandler(opts.Client.TmuxPath(), opts.ActivityTracker)
+	ptyHandler := ws.NewPTYTerminalHandler(opts.Client.TmuxPath(), opts.ActivityTracker, opts.Client, opts.Tracker)
 
 	if opts.AuthEnabled {
 		authMw := auth.Middleware(opts.SessionMgr)
@@ -2109,14 +2134,6 @@ func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 // activePaneCwd returns the CurrentPath of the active pane among panes, or ""
 // if none — no fallback to inactive panes, so a relative file open resolves
 // against exactly the pane shown in the terminal.
-func activePaneCwd(panes []*tmux.Pane) string {
-	for _, pane := range panes {
-		if pane.Active {
-			return strings.TrimSpace(pane.CurrentPath)
-		}
-	}
-	return ""
-}
 
 // fileGrantTTL bounds how long an opened file stays fetchable. A grant is
 // minted per explicit "Open file" click; the browser has this long to fetch
@@ -2169,8 +2186,8 @@ func (g *fileGrants) resolve(tok string) (string, bool) {
 
 // resolveFilePath turns a user-selected path into an absolute, existing file
 // path. Relative paths resolve against the active pane's cwd (see
-// activePaneCwd) — no fallback to other panes. Returns an HTTP status + message
-// on failure.
+// toolevents.ResolveSessionCWD) — no fallback to other panes. Returns an HTTP
+// status + message on failure.
 func resolveFilePath(p string, opts *Options, r *http.Request) (string, int, string) {
 	if p == "" {
 		return "", http.StatusBadRequest, "path required"
@@ -2180,16 +2197,15 @@ func resolveFilePath(p string, opts *Options, r *http.Request) (string, int, str
 		// ListPanes(session) targets the session's current window; pick its
 		// active pane. ListWindows does not populate panes, so we query panes.
 		if session := r.URL.Query().Get("session"); session != "" && opts.Client != nil {
-			if panes, err := opts.Client.ListPanes(session); err == nil {
-				base = activePaneCwd(panes)
-			}
+			base = toolevents.ResolveSessionCWD(opts.Client, session)
 		}
 		if base == "" {
 			return "", http.StatusBadRequest, "cannot resolve relative path: no active pane cwd"
 		}
-		p = filepath.Join(base, p)
+		p = filepath.Clean(filepath.Join(base, p))
+	} else {
+		p = filepath.Clean(p)
 	}
-	p = filepath.Clean(p)
 	info, err := os.Stat(p)
 	if err != nil {
 		return "", http.StatusNotFound, "not found"

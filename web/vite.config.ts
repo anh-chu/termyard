@@ -24,6 +24,7 @@ export default defineConfig({
   	allowedHosts: ["devvm"],
     proxy: {
       '/api': 'http://localhost:7654',
+      '/file': 'http://localhost:7654',
       '/ws': {
         target: 'http://localhost:7654',
         ws: true,

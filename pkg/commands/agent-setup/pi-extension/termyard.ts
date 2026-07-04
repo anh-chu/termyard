@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 
 export default function (pi) {
   const termyardBin = process.env.TERMYARD_BIN || "__TERMYARD_BIN__";
+  const pendingPaths = new Map();
 
   const safeString = (value, fallback = "") => {
     if (typeof value === "string") return value;
@@ -23,11 +24,8 @@ export default function (pi) {
     }
   };
 
-  // Pass tool name via stdin JSON so termyard maps it to an activity label
-  // (e.g. "bash" → "running commands", "read" → "reading files")
-  const notifyWithToolName = (toolName) => {
+  const fireStdin = (payload) => {
     try {
-      const payload = JSON.stringify({ hook_event_name: "PreToolUse", tool_name: safeString(toolName) });
       spawnSync(termyardBin, ["notify", "-t", "pi", "--stdin"], {
         input: payload,
         stdio: ["pipe", "ignore", "ignore"],
@@ -36,6 +34,12 @@ export default function (pi) {
     } catch (e) {
       // Never crash Pi
     }
+  };
+
+  // Pass tool name via stdin JSON so termyard maps it to an activity label
+  // (e.g. "bash" → "running commands", "read" → "reading files")
+  const notifyWithToolName = (toolName) => {
+    fireStdin(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: safeString(toolName) }));
   };
 
   // Capture current git branch as a short task label
@@ -101,6 +105,22 @@ export default function (pi) {
     // popups, so there is no separate confirmation event to hook.
     const data = getEvent(event);
     notifyWithToolName(getToolName(data));
+    const toolName = safeString(data.toolName || data.tool_name).toLowerCase();
+    if (toolName === "write" || toolName === "edit" || toolName === "multiedit") {
+      const path = safeString(data.args?.path || data.input?.path).trim();
+      const toolCallId = safeString(data.toolCallId).trim();
+      if (path && toolCallId) pendingPaths.set(toolCallId, path);
+    }
+  });
+
+  pi.on("tool_execution_end", async (event, _ctx) => {
+    const data = getEvent(event);
+    const toolCallId = safeString(data.toolCallId).trim();
+    if (!toolCallId) return;
+    const path = pendingPaths.get(toolCallId);
+    pendingPaths.delete(toolCallId);
+    if (!path || data.isError) return;
+    fireStdin(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "write", tool_input: { path } }));
   });
 
   pi.on("agent_end", async (event, _ctx) => {

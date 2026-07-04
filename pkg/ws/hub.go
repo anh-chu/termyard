@@ -125,6 +125,10 @@ func (h *Hub) Run() {
 			if !ok {
 				return
 			}
+			if evt.Kind == "artifact" {
+				h.broadcastArtifactEvent(evt)
+				continue
+			}
 			// Wrap tool event with a type prefix so frontend can distinguish
 			wrapped := map[string]interface{}{
 				"type":          "tool-event",
@@ -138,6 +142,7 @@ func (h *Hub) Run() {
 				"message":       evt.Message,
 				"timestamp":     evt.Timestamp,
 				"auto_detected": evt.AutoDetected,
+				"artifacts":     evt.Artifacts,
 			}
 			data, err := json.Marshal(wrapped)
 			if err != nil {
@@ -154,6 +159,33 @@ func (h *Hub) Run() {
 			h.broadcastActivity()
 		}
 	}
+}
+
+func (h *Hub) broadcastArtifactEvent(evt *toolevents.Event) {
+	if evt == nil {
+		return
+	}
+	broadcastEvt := *evt
+	if broadcastEvt.Host == "" && h.localHostID != "" {
+		broadcastEvt.Host = h.localHostID
+	}
+	wrapped := map[string]interface{}{
+		"type":      "artifacts",
+		"host":      broadcastEvt.Host,
+		"session":   broadcastEvt.Session,
+		"artifacts": broadcastEvt.Artifacts,
+	}
+	data, err := json.Marshal(wrapped)
+	if err != nil {
+		logrus.WithError(err).Warn("failed to marshal artifact event")
+		return
+	}
+	logrus.WithFields(logrus.Fields{
+		"session": broadcastEvt.Session,
+		"count":   len(broadcastEvt.Artifacts),
+		"host":    broadcastEvt.Host,
+	}).Trace("hub: broadcasting artifact event to WebSocket clients")
+	h.broadcastMessage(data)
 }
 
 // broadcastActivity sends activity snapshots to all connected clients

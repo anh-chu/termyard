@@ -82,7 +82,7 @@ func mustBridgeServer(t *testing.T, tmuxPath, session string) (string, <-chan er
 		defer conn.Close()
 		logger := logrus.New()
 		logger.SetOutput(io.Discard)
-		done <- BridgePTY(conn, tmuxPath, session, 80, 24, nil, logrus.NewEntry(logger))
+		done <- BridgePTY(conn, tmuxPath, session, 80, 24, nil, nil, nil, logrus.NewEntry(logger))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

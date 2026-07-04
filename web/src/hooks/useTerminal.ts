@@ -143,9 +143,8 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const [altModifierActive, setAltModifierActive] = useState(false)
   const altModifierRef = useRef(false)
   const suppressedInputRef = useRef<string | null>(null)
-  const { prefs } = usePreferences()
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null)
-
+  const { prefs } = usePreferences()
   const sendRawBytes = useCallback((bytes: Uint8Array) => {
     const currentWs = wsRef.current
     if (currentWs && currentWs.readyState === WebSocket.OPEN) {

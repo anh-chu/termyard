@@ -24,6 +24,8 @@ const (
 	ToolPi       Tool = "pi"
 )
 
+const maxArtifactsPerSession = 100
+
 // Status represents the current state of an agent
 type Status string
 
@@ -35,22 +37,38 @@ const (
 	StatusStuck     Status = "stuck"     // agent claims active but made no observable progress
 )
 
+// FileArtifact is a file an agent produced, with server-local stat metadata.
+type FileArtifact struct {
+	Path        string    `json:"path"`
+	DisplayPath string    `json:"display_path,omitempty"`
+	Name        string    `json:"name"`
+	Size        int64     `json:"size,omitempty"`
+	ModTime     time.Time `json:"mod_time,omitempty"`
+	Tool        Tool      `json:"tool,omitempty"`
+	Source      string    `json:"source"`
+	FirstSeen   time.Time `json:"first_seen"`
+	Stale       bool      `json:"stale,omitempty"`
+}
+
 // Event is a single notification from an agent hook
 type Event struct {
-	Tool           Tool      `json:"tool"`
-	Status         Status    `json:"status"`
-	Host           string    `json:"host,omitempty"`             // peer fingerprint (empty = local)
-	HostName       string    `json:"host_name,omitempty"`        // peer display name
-	Session        string    `json:"session"`                    // tmux session name
-	Window         int       `json:"window"`                     // tmux window index
-	Pane           string    `json:"pane,omitempty"`             // tmux pane ID (optional)
-	Message        string    `json:"message,omitempty"`          // human-readable detail
-	CWD            string    `json:"cwd,omitempty"`              // current working directory when provided by the agent hook
-	AgentSessionID string    `json:"agent_session_id,omitempty"` // upstream agent session/thread id when available
-	Timestamp      time.Time `json:"timestamp"`
-	AutoDetected   bool      `json:"auto_detected,omitempty"` // true if detected via process tree (not hooks)
-	UserPrompt     string    `json:"user_prompt,omitempty"`   // first user message for this session (set once)
-	AgentMessage   string    `json:"agent_message,omitempty"` // last agent response message (updates each turn)
+	Tool           Tool            `json:"tool"`
+	Status         Status          `json:"status"`
+	Kind           string          `json:"kind,omitempty"`
+	Host           string          `json:"host,omitempty"`             // peer fingerprint (empty = local)
+	HostName       string          `json:"host_name,omitempty"`        // peer display name
+	Session        string          `json:"session"`                    // tmux session name
+	Window         int             `json:"window"`                     // tmux window index
+	Pane           string          `json:"pane,omitempty"`             // tmux pane ID (optional)
+	Message        string          `json:"message,omitempty"`          // human-readable detail
+	CWD            string          `json:"cwd,omitempty"`              // current working directory when provided by the agent hook
+	AgentSessionID string          `json:"agent_session_id,omitempty"` // upstream agent session/thread id when available
+	Timestamp      time.Time       `json:"timestamp"`
+	AutoDetected   bool            `json:"auto_detected,omitempty"` // true if detected via process tree (not hooks)
+	UserPrompt     string          `json:"user_prompt,omitempty"`   // first user message for this session (set once)
+	AgentMessage   string          `json:"agent_message,omitempty"` // last agent response message (updates each turn)
+	Files          []string        `json:"files,omitempty"`
+	Artifacts      []*FileArtifact `json:"artifacts,omitempty"`
 }
 
 // PaneKey uniquely identifies a tmux pane
@@ -81,8 +99,9 @@ var nativeWaitingTools = map[Tool]bool{
 
 // Tracker tracks the latest status of AI tools per tmux pane
 type Tracker struct {
-	mu     sync.RWMutex
-	events map[PaneKey]*Event
+	mu        sync.RWMutex
+	events    map[PaneKey]*Event
+	artifacts map[string][]*FileArtifact
 
 	// lastActive tracks the most recent "active" event per pane for tools
 	// that lack native waiting detection. Used by the inactivity promoter.
@@ -127,6 +146,7 @@ type activeState struct {
 func NewTracker() *Tracker {
 	return &Tracker{
 		events:      make(map[PaneKey]*Event),
+		artifacts:   make(map[string][]*FileArtifact),
 		lastActive:  make(map[PaneKey]*Event),
 		activePanes: make(map[string]*activeState),
 		activeTurns: make(map[PaneKey]*Event),
@@ -138,8 +158,9 @@ func NewTracker() *Tracker {
 // are stored as a slice (PaneKey is a struct and can't be a JSON map key);
 // the key is reconstructed from each event's host/session/window/pane on load.
 type persistedState struct {
-	Events      []*Event               `json:"events"`
-	SessionMeta map[string]SessionMeta `json:"session_meta"`
+	Events      []*Event                   `json:"events"`
+	Artifacts   map[string][]*FileArtifact `json:"artifacts"`
+	SessionMeta map[string]SessionMeta     `json:"session_meta"`
 }
 
 // EnablePersistence loads any previously persisted retained state (waiting/
@@ -176,6 +197,21 @@ func (t *Tracker) load() {
 		}
 		t.events[PaneKey{Host: evt.Host, Session: evt.Session, Window: evt.Window, Pane: evt.Pane}] = evt
 	}
+	for k, arts := range st.Artifacts {
+		if len(arts) == 0 {
+			continue
+		}
+		dup := make([]*FileArtifact, 0, len(arts))
+		for _, art := range arts {
+			if art == nil {
+				continue
+			}
+			dup = append(dup, art)
+		}
+		if len(dup) > 0 {
+			t.artifacts[k] = dup
+		}
+	}
 	for k, v := range st.SessionMeta {
 		t.sessionMeta[k] = v
 	}
@@ -193,10 +229,27 @@ func (t *Tracker) persist() {
 	}
 	st := persistedState{
 		Events:      make([]*Event, 0, len(t.events)),
+		Artifacts:   make(map[string][]*FileArtifact, len(t.artifacts)),
 		SessionMeta: make(map[string]SessionMeta, len(t.sessionMeta)),
 	}
 	for _, evt := range t.events {
 		st.Events = append(st.Events, evt)
+	}
+	for k, arts := range t.artifacts {
+		if len(arts) == 0 {
+			continue
+		}
+		dup := make([]*FileArtifact, 0, len(arts))
+		for _, art := range arts {
+			if art == nil {
+				continue
+			}
+			dupArt := *art
+			dup = append(dup, &dupArt)
+		}
+		if len(dup) > 0 {
+			st.Artifacts[k] = dup
+		}
 	}
 	for k, v := range t.sessionMeta {
 		st.SessionMeta[k] = v
@@ -326,6 +379,9 @@ func (t *Tracker) Record(evt *Event) {
 		t.sessionMeta[sessionKey] = meta
 	}
 	t.mu.Unlock()
+	if len(evt.Artifacts) > 0 {
+		t.storeArtifacts(evt.Host, evt.Session, evt.Artifacts)
+	}
 
 	// Broadcast to subscribers
 	t.subMu.RLock()
@@ -341,6 +397,33 @@ func (t *Tracker) Record(evt *Event) {
 	}
 	log.WithField("subscribers", sent).Trace("tool event broadcast complete")
 
+	t.persist()
+}
+
+// RecordArtifacts stores server-detected file artifacts for a session (the
+// tier-2 regex-scanner path, as opposed to Record's tier-1 hook path) and
+// broadcasts them to subscribers as a Kind:"artifact" event. Unlike Record,
+// this never touches t.events/t.lastActive/t.activePanes — there is no real
+// tool-call lifecycle here, just "some files were seen and verified to exist".
+func (t *Tracker) RecordArtifacts(session string, arts []*FileArtifact) {
+	if len(arts) == 0 {
+		return
+	}
+	t.storeArtifacts("", session, arts)
+
+	evt := &Event{Kind: "artifact", Session: session, Artifacts: arts, Timestamp: time.Now()}
+	t.subMu.RLock()
+	sent := 0
+	for _, ch := range t.subscribers {
+		select {
+		case ch <- evt:
+			sent++
+		default:
+			logrus.Debug("tool event subscriber channel full, dropping")
+		}
+	}
+	t.subMu.RUnlock()
+	logrus.WithField("subscribers", sent).Trace("artifact broadcast complete")
 	t.persist()
 }
 
@@ -430,6 +513,87 @@ func (t *Tracker) ClearAll() {
 	t.events = make(map[PaneKey]*Event)
 	t.activeTurns = make(map[PaneKey]*Event)
 	t.mu.Unlock()
+}
+
+// artifactSessionKey intentionally ignores host, matching GetForSession's
+// precedent: callers (the frontend, notify clients) key off session name
+// alone, and requiring an exact host match caused artifacts to silently
+// vanish whenever the caller didn't know the internal host fingerprint
+// (e.g. a plain GET /api/artifacts?session=... with no host param).
+func artifactSessionKey(_, session string) string {
+	return session
+}
+
+func (t *Tracker) storeArtifacts(host, session string, arts []*FileArtifact) {
+	if len(arts) == 0 {
+		return
+	}
+	key := artifactSessionKey(host, session)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	cur := t.artifacts[key]
+	for _, art := range arts {
+		if art == nil || art.Path == "" {
+			continue
+		}
+		updated := false
+		for i := range cur {
+			existing := cur[i]
+			if existing == nil || existing.Path != art.Path {
+				continue
+			}
+			existing.Size = art.Size
+			existing.ModTime = art.ModTime
+			if art.DisplayPath != "" {
+				existing.DisplayPath = art.DisplayPath
+			}
+			if art.Name != "" {
+				existing.Name = art.Name
+			}
+			if art.Tool != "" {
+				existing.Tool = art.Tool
+			}
+			if art.Source != "" {
+				existing.Source = art.Source
+			}
+			cur = append(cur[:i], cur[i+1:]...)
+			cur = append(cur, existing)
+			updated = true
+			break
+		}
+		if updated {
+			continue
+		}
+		dup := *art
+		cur = append(cur, &dup)
+		if len(cur) > maxArtifactsPerSession {
+			cur = cur[len(cur)-maxArtifactsPerSession:]
+		}
+	}
+	if len(cur) == 0 {
+		delete(t.artifacts, key)
+		return
+	}
+	t.artifacts[key] = cur
+}
+
+func (t *Tracker) GetArtifacts(host, session string) []*FileArtifact {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	arts := t.artifacts[artifactSessionKey(host, session)]
+	if len(arts) == 0 {
+		return nil
+	}
+	out := make([]*FileArtifact, 0, len(arts))
+	for _, art := range arts {
+		if art == nil {
+			continue
+		}
+		dup := *art
+		out = append(out, &dup)
+	}
+	return out
 }
 
 func (t *Tracker) SessionMetaFor(host, session string) SessionMeta {
