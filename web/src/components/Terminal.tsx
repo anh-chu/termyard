@@ -494,18 +494,18 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
         for (const item of items) {
           if (item.types.includes('text/plain')) {
             const blob = await item.getType('text/plain')
-            sendText(await blob.text())
+            termRef.current?.paste(await blob.text())
             return
           }
         }
         return
       }
       const text = await navigator.clipboard?.readText?.()
-      if (text) sendText(text)
+      if (text) termRef.current?.paste(text)
     } catch (err) {
       console.error('Failed to paste from clipboard:', err)
     }
-  }, [sendText, sendImage])
+  }, [termRef, sendImage])
 
   const handleCopy = useCallback(async () => {
     setClipboardMenuOpen(false)
