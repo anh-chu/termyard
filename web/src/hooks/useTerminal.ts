@@ -224,7 +224,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
     containerRef.current = container
 
     const xtermTheme = getXtermTheme(prefs.theme)
-    const fontFamily = `'${prefs.terminal.font_family}', 'JetBrains Mono', 'Fira Code', Menlo, Monaco, 'Symbols Nerd Font', monospace`
+    const fontFamily = `'${prefs.terminal.font_family}', 'JetBrains Mono', 'Fira Code', Menlo, Monaco, 'Inconsolata LGC Nerd Font Mono', 'DejaVu Sans Mono Symbols', monospace`
 
     // Create terminal with theme from preferences
     const term = new Terminal({
@@ -448,7 +448,8 @@ export function useTerminal(sessionName: string, hostId?: string) {
       const fontSpec = `${prefs.terminal.font_size}px ${fontFamily}`
       document.fonts.load(fontSpec).then(remeasureAndFit).catch(() => {})
       document.fonts.load(`bold ${fontSpec}`).catch(() => {})
-      document.fonts.load(`${prefs.terminal.font_size}px 'Symbols Nerd Font'`).then(remeasureAndFit).catch(() => {})
+      document.fonts.load(`${prefs.terminal.font_size}px 'Inconsolata LGC Nerd Font Mono'`).then(remeasureAndFit).catch(() => {})
+      document.fonts.load(`${prefs.terminal.font_size}px 'DejaVu Sans Mono Symbols'`).catch(() => {})
       document.fonts.ready.then(remeasureAndFit).catch(() => {})
     }
 

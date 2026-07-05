@@ -3,11 +3,20 @@
 @import url("https://fonts.googleapis.com/css2?family=VT323&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Fira+Code:wght@400;700&family=Inter:wght@400;500;600;700&display=swap");
 
 @font-face {
-  font-family: "Symbols Nerd Font";
-  src: url("/fonts/SymbolsNerdFont-Regular.woff2") format("woff2");
+  font-family: "Inconsolata LGC Nerd Font Mono";
+  src: url("/fonts/InconsolataLGCNerdFontMono-Regular.woff2") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: swap;
+}
+
+@font-face {
+  font-family: "DejaVu Sans Mono Symbols";
+  src: url("/fonts/DejaVuSansMono-MiscSymbols.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2600-26FF;
 }
 
 :root {
