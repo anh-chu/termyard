@@ -3,6 +3,7 @@ package tmux
 import (
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/creack/pty/v2"
 	"github.com/sirupsen/logrus"
@@ -26,7 +27,8 @@ func NewPTYSession(tmuxPath, sessionName string, cols, rows uint16) (*PTYSession
 		sessionName = id
 	}
 	cmd := exec.Command(tmuxPath, "attach-session", "-t", sessionName)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = localeEnv()
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Cols: cols,
@@ -78,4 +80,21 @@ func (p *PTYSession) Close() {
 	_ = p.cmd.Wait()
 
 	logrus.Debug("PTY session closed")
+}
+
+// localeEnv returns os.Environ() with LANG, LC_ALL, and LC_CTYPE stripped
+// so that the caller can set a known-good UTF-8 locale without a pre-existing
+// stale entry shadowing it (getenv returns the first match on Linux/glibc).
+func localeEnv() []string {
+	var out []string
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "LANG=") ||
+			strings.HasPrefix(e, "LC_ALL=") ||
+			strings.HasPrefix(e, "LC_CTYPE=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	out = append(out, "LC_ALL=C.UTF-8", "LANG=C.UTF-8")
+	return out
 }
