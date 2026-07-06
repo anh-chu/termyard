@@ -35,6 +35,7 @@ const terminalFontFamilies = [
   'Monaco',
   'Consolas',
   'Courier New',
+  'Inconsolata LGC Nerd Font Mono',
   'monospace',
 ]
 
