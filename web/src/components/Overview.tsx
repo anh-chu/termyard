@@ -4,7 +4,7 @@ import { Host } from '../hooks/useHosts'
 import { ToolEvent } from '../hooks/useToolEvents'
 import { ActivitySnapshot } from '../hooks/useActivity'
 import { toolColors, statusConfig, signalTreatment } from '../theme'
-import { stateRank, sessionSignal, isSessionActive, SessionState } from '../lib/sessionState'
+import { stateRank, sessionSignal, isSessionActive, isToolSession, SessionState } from '../lib/sessionState'
 import { formatSessionUptime, formatSystemUptime } from '../lib/time'
 import { sessionLabel } from '../hooks/useSessions'
 import { SessionActionsMenu, SessionMenuTarget } from './SessionActionsMenu'
@@ -371,8 +371,8 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, scheduleID
     for (const g of layoutGroups ?? []) {
       if (g.leaves.length < 2) continue
       const leaf = g.leaves.map(k => itemByKey.get(k)).filter((x): x is CardItem => !!x)
-      const agents = leaf.filter(i => i.signal.agentCount > 0)
-      const tools = leaf.filter(i => i.signal.agentCount === 0)
+      const tools = leaf.filter(i => isToolSession(i.session, i.events))
+      const agents = leaf.filter(i => !tools.includes(i))
       if (agents.length === 0 || tools.length === 0) continue
       const primary = agents.find(i => i.key === g.activeKey) ?? agents[0]
       matesByCard.set(primary.key, [...(matesByCard.get(primary.key) ?? []), ...tools])

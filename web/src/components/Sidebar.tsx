@@ -11,6 +11,7 @@ import { renameSession, aiNameSession as aiNameSessionApi, killSession as killSe
 import { describeCron } from '../lib/cron'
 import { formatRelativeTime, formatUptime } from '../lib/time'
 import { pathLeaf } from '../lib/path'
+import { isToolSession } from '../lib/sessionState'
 import { hostColor } from '../lib/hostColor'
 import { AgentMark } from './AgentMark'
 import { useGlance } from './GlancePopover'
@@ -1016,15 +1017,6 @@ export function Sidebar({
       (a.created || '') > (b.created || '') ? a : b
     , groupSessions[0])
     const collapsedProject = pathLeaf(groupSessions.find(s => s.project_path)?.project_path)
-    const isToolSession = (s: Session) => {
-      const ev = getSessionEvents(sessionKey(s))
-      // Classify by nature (companion pane with no agent), not the live command:
-      // running a process in the pane must not unfold it. A tool pane never gains
-      // agent_type, an auto-detected agent process, or hook history.
-      return !s.agent_type
-        && !ev.some(e => e.status === 'active' && e.auto_detected)
-        && !(s.user_prompt?.trim() || s.last_agent_message?.trim())
-    }
     return (
       <li key={group.id} className="flex items-stretch">
         {/* Bracket: drag to reorder, click to collapse/expand */}
@@ -1234,7 +1226,7 @@ export function Sidebar({
                 </div>
               )}
               {(() => {
-                const tools = groupSessions.filter(isToolSession)
+                const tools = groupSessions.filter(s => isToolSession(s, getSessionEvents(sessionKey(s))))
                 const agents = groupSessions.filter(s => !tools.includes(s))
                 const fold = agents.length > 0 && tools.length > 0
                 const primaryKey = fold

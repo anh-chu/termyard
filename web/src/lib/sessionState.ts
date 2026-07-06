@@ -30,6 +30,16 @@ export function isSessionActive(session: Session): boolean {
   )
 }
 
+// Classify by nature (companion pane with no agent), not the live command or
+// stale event history: running a process in the pane, or a pane id that once
+// carried a tool event, must not unfold it. A true tool pane never gains
+// agent_type, an auto-detected agent process, or hook history.
+export function isToolSession(session: Session, events: ToolEvent[]): boolean {
+  return !session.agent_type
+    && !events.some(e => e.status === 'active' && e.auto_detected)
+    && !(session.user_prompt?.trim() || session.last_agent_message?.trim())
+}
+
 export function sessionSignal(
   session: Session,
   events: ToolEvent[],
