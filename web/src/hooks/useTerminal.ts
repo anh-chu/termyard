@@ -49,9 +49,19 @@ function execCommandCopy(text: string): boolean {
   return ok
 }
 
+// xterm.js includes trailing pad spaces up to the selection column on rows
+// shorter than the terminal width (e.g. triple-click line select), and hard
+// line breaks that tmux baked into the scrollback during a pane reflow can
+// leave short trailing-space runs at wrap points. Strip trailing whitespace
+// from each line before it hits the clipboard.
+export function normalizeSelection(text: string): string {
+  return text.replace(/[ \t]+$/gm, '')
+}
+
 // Try to write to clipboard immediately; on failure, use execCommand fallback;
 // if that also fails, stash for deferred write on next user gesture.
 function copyToClipboard(text: string): Promise<void> {
+  text = normalizeSelection(text)
   if (navigator.clipboard) {
     return navigator.clipboard.writeText(text).catch(() => {
       if (!execCommandCopy(text)) {
@@ -329,7 +339,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
         const selection = term.getSelection()
         if (selection) {
           // Direct user gesture — clipboard write succeeds without stashing
-          navigator.clipboard?.writeText(selection)
+          navigator.clipboard?.writeText(normalizeSelection(selection))
           term.clearSelection()
           return false // prevent sending to terminal
         }
@@ -399,7 +409,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
       // With tmux mouse mode on, plain drag goes to tmux; only a Shift+drag
       // leaves an xterm-owned selection here. No selection -> pass through.
       const sel = term.getSelection()
-      if (sel) setSelectionMenu({ x: e.clientX, y: e.clientY, text: sel })
+      if (sel) setSelectionMenu({ x: e.clientX, y: e.clientY, text: normalizeSelection(sel) })
     }
 
     container.addEventListener('mousedown', onMouseDown, true)
