@@ -1,10 +1,7 @@
 package toolevents
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -100,15 +97,26 @@ func matchNodeScript(args []string, name string) bool {
 	return false
 }
 
+// procTable answers process-tree questions (cmdline args, direct children)
+// for a single detection pass. Platform-specific: pkg/toolevents/detect_linux.go
+// reads /proc live; pkg/toolevents/detect_darwin.go snapshots via `ps` since
+// macOS has no /proc.
+type procTable interface {
+	Cmdline(pid int) []string
+	Children(pid int) []int
+}
+
 // DetectAgentInProcessTree walks the process tree rooted at pid and returns
 // the first recognized agent tool found. Returns ("", false) if no agent
 // is detected. Checks the pid itself (the agent may run as the pane's own
 // process, e.g. after exec or when launched as the session command) plus its
 // direct children and grandchildren.
 func DetectAgentInProcessTree(pid int) (Tool, bool) {
+	pt := newProcTable()
+
 	// Check the root pid itself first — covers panes where the agent is the
 	// foreground process (pane_pid == agent), not a shell child.
-	if args := readCmdline(pid); len(args) > 0 {
+	if args := pt.Cmdline(pid); len(args) > 0 {
 		for _, pat := range agentPatterns {
 			if pat.match(args) {
 				return pat.tool, true
@@ -116,9 +124,9 @@ func DetectAgentInProcessTree(pid int) (Tool, bool) {
 		}
 	}
 
-	children := getChildPIDs(pid)
+	children := pt.Children(pid)
 	for _, cpid := range children {
-		args := readCmdline(cpid)
+		args := pt.Cmdline(cpid)
 		if len(args) == 0 {
 			continue
 		}
@@ -128,9 +136,9 @@ func DetectAgentInProcessTree(pid int) (Tool, bool) {
 			}
 		}
 		// Also check grandchildren (shell → node → copilot)
-		grandchildren := getChildPIDs(cpid)
+		grandchildren := pt.Children(cpid)
 		for _, gpid := range grandchildren {
-			gargs := readCmdline(gpid)
+			gargs := pt.Cmdline(gpid)
 			if len(gargs) == 0 {
 				continue
 			}
@@ -142,76 +150,4 @@ func DetectAgentInProcessTree(pid int) (Tool, bool) {
 		}
 	}
 	return "", false
-}
-
-// getChildPIDs returns the PIDs of all direct children of the given PID.
-// Uses /proc on Linux.
-func getChildPIDs(pid int) []int {
-	taskDir := fmt.Sprintf("/proc/%d/task/%d/children", pid, pid)
-	data, err := os.ReadFile(taskDir)
-	if err != nil {
-		// Fallback: scan /proc for processes whose PPid matches
-		return getChildPIDsFallback(pid)
-	}
-	return parsePIDList(string(data))
-}
-
-// getChildPIDsFallback scans /proc/*/status for processes with matching PPid.
-// Works on Linux when /proc/<pid>/task/<pid>/children is unavailable.
-func getChildPIDsFallback(ppid int) []int {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return nil
-	}
-	ppidStr := strconv.Itoa(ppid)
-	var children []int
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil {
-			continue
-		}
-		statusPath := fmt.Sprintf("/proc/%d/status", pid)
-		data, err := os.ReadFile(statusPath)
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "PPid:\t") {
-				if strings.TrimPrefix(line, "PPid:\t") == ppidStr {
-					children = append(children, pid)
-				}
-				break
-			}
-		}
-	}
-	return children
-}
-
-// readCmdline reads /proc/<pid>/cmdline and splits by null bytes.
-func readCmdline(pid int) []string {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil || len(data) == 0 {
-		return nil
-	}
-	// cmdline is null-delimited, trim trailing null
-	s := strings.TrimRight(string(data), "\x00")
-	if s == "" {
-		return nil
-	}
-	return strings.Split(s, "\x00")
-}
-
-// parsePIDList parses a space-separated list of PIDs
-func parsePIDList(s string) []int {
-	var pids []int
-	for _, field := range strings.Fields(s) {
-		pid, err := strconv.Atoi(field)
-		if err == nil {
-			pids = append(pids, pid)
-		}
-	}
-	return pids
 }
