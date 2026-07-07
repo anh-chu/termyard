@@ -28,8 +28,9 @@ export function isPreviewableArtifact(path: string, name?: string): boolean {
   return getArtifactKind(path, name) !== 'other'
 }
 
-export async function grantArtifactToken(path: string, session: string, signal?: AbortSignal): Promise<string> {
-  const qs = `path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
+export async function grantArtifactToken(path: string, session: string, signal?: AbortSignal, host?: string): Promise<string> {
+  let qs = `path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
+  if (host) qs += `&host=${encodeURIComponent(host)}`
   const res = await fetch(`/file/grant?${qs}`, { method: 'POST', signal })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`)

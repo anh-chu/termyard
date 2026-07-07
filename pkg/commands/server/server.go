@@ -245,6 +245,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	streamReg := peer.NewStreamRegistry()
 	captureReg := peer.NewCaptureRegistry()
+	fileReadReg := peer.NewFileReadRegistry()
 
 	deps := peer.SessionDeps{
 		Manager:     peerMgr,
@@ -256,6 +257,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		TmuxClient:  client,
 		StreamReg:   streamReg,
 		CaptureReg:  captureReg,
+		FileReadReg: fileReadReg,
 	}
 
 	peerHandler := peer.NewHandler(deps, streamReg)
@@ -288,6 +290,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PeerHandler:      peerHandler,
 		StreamReg:        streamReg,
 		CaptureReg:       captureReg,
+		FileReadReg:      fileReadReg,
 		LinkSupervisor:   supervisor,
 		Detector:         detector,
 		PortForwardStore: portforward.NewStore(),

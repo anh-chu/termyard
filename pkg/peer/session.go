@@ -2,8 +2,12 @@ package peer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +90,7 @@ type SessionDeps struct {
 	TmuxClient  *tmux.Client
 	StreamReg   *StreamRegistry
 	CaptureReg  *CaptureRegistry
+	FileReadReg *FileReadRegistry
 	AttrsSink   SessionAttrsSink
 	OrderSink   SessionOrderSink
 	GroupSink   GroupSink
@@ -549,6 +554,93 @@ func handleCapturePane(p CapturePanePayload, pc *PeerConnection, deps SessionDep
 	pc.Enqueue(msg)
 }
 
+// maxFileReadSize caps the file content sent over peer relay (10 MB).
+const maxFileReadSize = 10 << 20
+
+// handleFileRead reads a local file and sends its content back over the
+// control link. Relative paths resolve against the session's active pane CWD.
+func handleFileRead(p FileReadPayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
+	res := FileReadResultPayload{Token: p.Token}
+
+	path := p.Path
+	if !filepath.IsAbs(path) {
+		base := ""
+		if p.Session != "" && deps.TmuxClient != nil {
+			base = toolevents.ResolveSessionCWD(deps.TmuxClient, p.Session)
+		}
+		if base == "" {
+			res.Error = "cannot resolve relative path: no active pane cwd"
+			if msg, err := NewMessage(MsgFileReadResult, res); err == nil {
+				pc.Enqueue(msg)
+			}
+			return
+		}
+		path = filepath.Clean(filepath.Join(base, path))
+	} else {
+		path = filepath.Clean(path)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		res.Error = "not found"
+		if msg, err := NewMessage(MsgFileReadResult, res); err == nil {
+			pc.Enqueue(msg)
+		}
+		return
+	}
+	if info.IsDir() {
+		res.Error = "path is a directory"
+		if msg, err := NewMessage(MsgFileReadResult, res); err == nil {
+			pc.Enqueue(msg)
+		}
+		return
+	}
+	if info.Size() > maxFileReadSize {
+		res.Error = "file too large"
+		if msg, err := NewMessage(MsgFileReadResult, res); err == nil {
+			pc.Enqueue(msg)
+		}
+		return
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		res.Error = err.Error()
+		if msg, err := NewMessage(MsgFileReadResult, res); err == nil {
+			pc.Enqueue(msg)
+		}
+		return
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		res.Error = err.Error()
+		if msg, err := NewMessage(MsgFileReadResult, res); err == nil {
+			pc.Enqueue(msg)
+		}
+		return
+	}
+
+	res.Data = base64.StdEncoding.EncodeToString(data)
+	res.FileName = filepath.Base(path)
+
+	// Detect content type.
+	ext := filepath.Ext(path)
+	ct := mime.TypeByExtension(ext)
+	if ct == "" {
+		ct = http.DetectContentType(data)
+	}
+	res.ContentType = ct
+
+	msg, err := NewMessage(MsgFileReadResult, res)
+	if err != nil {
+		log.WithError(err).Debug("file-read result marshal failed")
+		return
+	}
+	pc.Enqueue(msg)
+}
+
 // handleSessionMessage dispatches messages received from the remote peer.
 func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
 	switch msg.Type {
@@ -681,6 +773,26 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 		}
 		if deps.CaptureReg != nil {
 			deps.CaptureReg.Deliver(p.Token, CaptureResult{Text: p.Text, Error: p.Error})
+		}
+
+	case MsgFileRead:
+		var p FileReadPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid file-read")
+			return
+		}
+		go handleFileRead(p, pc, deps, log)
+
+	case MsgFileReadResult:
+		var p FileReadResultPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if deps.FileReadReg != nil {
+			deps.FileReadReg.Deliver(p.Token, FileReadResult{
+				Data: p.Data, ContentType: p.ContentType,
+				FileName: p.FileName, Error: p.Error,
+			})
 		}
 
 	case MsgSessionAttrsSnapshot:

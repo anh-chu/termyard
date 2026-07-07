@@ -81,6 +81,14 @@ const (
 	MsgStreamToken = "stream-token"
 )
 
+// Message types for remote file access.
+const (
+	// MsgFileRead asks a peer to read a file and return its content.
+	MsgFileRead = "file-read"
+	// MsgFileReadResult returns file content (or error) to the requester.
+	MsgFileReadResult = "file-read-result"
+)
+
 // CapPerStream advertises dedicated /ws/peer-stream PTY data connections.
 const CapPerStream = "per-stream"
 
@@ -176,6 +184,22 @@ type OpenTerminalPayload struct {
 // StreamTokenPayload carries the correlation token on /ws/peer-stream.
 type StreamTokenPayload struct {
 	Token string `json:"token"`
+}
+
+// FileReadPayload asks a peer to read a file at the given path.
+type FileReadPayload struct {
+	Token   string `json:"token"`
+	Path    string `json:"path"`
+	Session string `json:"session"` // for resolving relative paths
+}
+
+// FileReadResultPayload returns file content (base64-encoded) or error.
+type FileReadResultPayload struct {
+	Token       string `json:"token"`
+	Data        string `json:"data,omitempty"`         // base64-encoded file content
+	ContentType string `json:"content_type,omitempty"` // MIME type
+	FileName    string `json:"file_name,omitempty"`    // basename
+	Error       string `json:"error,omitempty"`
 }
 
 // SessionAttr is the shared attribute set for one global session key. Mirrors

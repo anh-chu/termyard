@@ -178,12 +178,12 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
   const openFilePath = useCallback((path: string) => {
     // Open tab synchronously (popup blockers), then point it at token URL once grant minted.
     const tab = window.open('', '_blank')
-    grantArtifactToken(path, sessionName)
+    grantArtifactToken(path, sessionName, undefined, hostId)
       .then((token) => {
         if (tab) tab.location.href = `/file?token=${encodeURIComponent(token)}`
       })
       .catch(() => tab?.close())
-  }, [sessionName])
+  }, [sessionName, hostId])
   // The mobile key bar renders into a single shared slot at the bottom of the
   // app so split views show one full-width bar (active pane only), not one per pane.
   const [keyBarSlot, setKeyBarSlot] = useState<HTMLElement | null>(null)
@@ -647,6 +647,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
                         <ArtifactPreview
                           artifact={art}
                           sessionName={sessionName}
+                          hostId={hostId}
                           onOpenFull={() => {
                             openFilePath(art.path)
                             setArtifactsOpen(false)

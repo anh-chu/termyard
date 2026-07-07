@@ -9,12 +9,13 @@ import {
 interface ArtifactPreviewProps {
   artifact: FileArtifact
   sessionName: string
+  hostId?: string
   onOpenFull: () => void
 }
 
 type PreviewStatus = 'loading' | 'loaded' | 'error'
 
-export function ArtifactPreview({ artifact, sessionName, onOpenFull }: ArtifactPreviewProps) {
+export function ArtifactPreview({ artifact, sessionName, hostId, onOpenFull }: ArtifactPreviewProps) {
   const kind = useMemo(() => getArtifactKind(artifact.path, artifact.name), [artifact.name, artifact.path])
   const [status, setStatus] = useState<PreviewStatus>('loading')
   const [imageUrl, setImageUrl] = useState('')
@@ -32,7 +33,7 @@ export function ArtifactPreview({ artifact, sessionName, onOpenFull }: ArtifactP
 
     void (async () => {
       try {
-        const token = await grantArtifactToken(artifact.path, sessionName, ac.signal)
+        const token = await grantArtifactToken(artifact.path, sessionName, ac.signal, hostId)
         if (!alive || ac.signal.aborted) return
         const url = `/file?token=${encodeURIComponent(token)}`
 
@@ -60,7 +61,7 @@ export function ArtifactPreview({ artifact, sessionName, onOpenFull }: ArtifactP
       alive = false
       ac.abort()
     }
-  }, [artifact.path, kind, sessionName])
+  }, [artifact.path, kind, sessionName, hostId])
 
   return (
     <div className="border-t border-hairline bg-canvas/45 px-3 py-2.5">

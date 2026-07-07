@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -83,6 +84,7 @@ type Options struct {
 	PeerHandler      *peer.Handler
 	StreamReg        *peer.StreamRegistry
 	CaptureReg       *peer.CaptureRegistry
+	FileReadReg      *peer.FileReadRegistry
 	LinkSupervisor   *peer.LinkSupervisor
 	Detector         *toolevents.Detector
 	PortForwardStore *portforward.Store
@@ -2220,8 +2222,16 @@ func resolveFilePath(p string, opts *Options, r *http.Request) (string, int, str
 // short-lived token the browser exchanges at GET /file?token=... . This is the
 // only place a path enters the capability store.
 //
-// Route: POST /file/grant?path=<abs-or-rel>&session=<name>
+// Route: POST /file/grant?path=<abs-or-rel>&session=<name>[&host=<id>]
 func handleFileGrant(w http.ResponseWriter, r *http.Request, opts *Options, grants *fileGrants) {
+	hostID := r.URL.Query().Get("host")
+
+	// Remote peer — relay file read through the control link.
+	if hostID != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(hostID) {
+		handleRemoteFileGrant(w, r, opts, grants, hostID)
+		return
+	}
+
 	p, status, msg := resolveFilePath(r.URL.Query().Get("path"), opts, r)
 	if status != 0 {
 		http.Error(w, msg, status)
@@ -2229,6 +2239,80 @@ func handleFileGrant(w http.ResponseWriter, r *http.Request, opts *Options, gran
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": grants.grant(p)})
+}
+
+// handleRemoteFileGrant fetches a file from a remote peer, writes it to a
+// local temp file, and grants a token for it.
+func handleRemoteFileGrant(w http.ResponseWriter, r *http.Request, opts *Options, grants *fileGrants, hostID string) {
+	if opts.FileReadReg == nil {
+		http.Error(w, "file read unavailable", http.StatusInternalServerError)
+		return
+	}
+	peerConn := opts.PeerMgr.GetPeerConnection(hostID)
+	if peerConn == nil {
+		http.Error(w, "peer not connected", http.StatusBadGateway)
+		return
+	}
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		http.Error(w, "path required", http.StatusBadRequest)
+		return
+	}
+
+	token := peer.NewToken()
+	msg, err := peer.NewMessage(peer.MsgFileRead, peer.FileReadPayload{
+		Token:   token,
+		Path:    filePath,
+		Session: r.URL.Query().Get("session"),
+	})
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	ch, cancel := opts.FileReadReg.Register(token)
+	defer cancel()
+	if !peerConn.Enqueue(msg) {
+		http.Error(w, "peer send queue full", http.StatusBadGateway)
+		return
+	}
+
+	select {
+	case res := <-ch:
+		if res.Error != "" {
+			http.Error(w, "remote file: "+res.Error, http.StatusNotFound)
+			return
+		}
+		data, err := base64.StdEncoding.DecodeString(res.Data)
+		if err != nil {
+			http.Error(w, "decode error", http.StatusInternalServerError)
+			return
+		}
+		// Write to temp file so handleFile can serve it.
+		ext := filepath.Ext(res.FileName)
+		tmp, err := os.CreateTemp("", "guppi-remote-*"+ext)
+		if err != nil {
+			http.Error(w, "temp file error", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tmp.Write(data); err != nil {
+			tmp.Close()
+			os.Remove(tmp.Name())
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
+		tmp.Close()
+		// Schedule cleanup after grant TTL.
+		go func() {
+			time.Sleep(fileGrantTTL + time.Minute)
+			os.Remove(tmp.Name())
+		}()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": grants.grant(tmp.Name())})
+	case <-time.After(10 * time.Second):
+		http.Error(w, "peer file read timed out", http.StatusGatewayTimeout)
+	}
 }
 
 // handleFile serves a previously granted, non-expired file to the browser,
