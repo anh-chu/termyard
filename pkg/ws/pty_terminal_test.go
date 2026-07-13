@@ -2,10 +2,13 @@ package ws
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +18,67 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/tmux"
 )
+
+func TestIsPing(t *testing.T) {
+	if !isPing([]byte(`{"type":"ping"}`)) {
+		t.Fatal("expected ping control message")
+	}
+	if isPing([]byte(`{"type":"paste-file","filename":"ping"}`)) {
+		t.Fatal("paste-file message misidentified as ping")
+	}
+}
+
+func TestBridgePTYPasteFile(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	client := mustTmuxClient(t)
+	session := mustNewSession(t, client)
+
+	wsURL, done := mustBridgeServer(t, client.TmuxPath(), session)
+	conn := mustDialBridge(t, wsURL)
+	defer func() {
+		_ = conn.Close()
+		mustBridgeDone(t, done)
+	}()
+
+	data := base64.StdEncoding.EncodeToString([]byte("file bytes"))
+	control := fmt.Sprintf(`{"type":"paste-file","data":"%s","filename":"notes.$(id)"}`, data)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(control)); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, []byte("\nprintf PASTE_FILE_OK\n")); err != nil {
+		t.Fatal(err)
+	}
+	mustReadBridgeOutput(t, conn, []byte("PASTE_FILE_OK"))
+
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "termyard-paste-") {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(os.TempDir(), entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range files {
+			if !strings.HasPrefix(file.Name(), "pasted-") {
+				continue
+			}
+			path := filepath.Join(os.TempDir(), entry.Name(), file.Name())
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(contents) != "file bytes" || filepath.Ext(path) != "" {
+				t.Fatalf("unexpected pasted file %q: %q", path, contents)
+			}
+			return
+		}
+	}
+	t.Fatal("paste-file control did not create a stored file")
+}
 
 func TestBridgePTYRoundTripAndClose(t *testing.T) {
 	client := mustTmuxClient(t)

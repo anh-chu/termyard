@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import type { ReactNode } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
 import { useArtifacts } from '../hooks/useArtifacts'
 import { cn } from '../lib/utils'
@@ -160,6 +160,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     sendRawBytes,
     sendText,
     sendImage,
+    sendFile,
     ctrlModifierActive,
     toggleCtrlModifier,
     clearCtrlModifier,
@@ -190,6 +191,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
   const [capturedText, setCapturedText] = useState<string | null>(null)
   const [clipboardMenuOpen, setClipboardMenuOpen] = useState(false)
   const captureTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const popHomeRef = useRef<HTMLDivElement>(null)
   const popNodeRef = useRef<HTMLDivElement>(null)
   const [poppedOut, setPoppedOut] = useState(false)
@@ -507,6 +509,24 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     }
   }, [termRef, sendImage])
 
+  const restoreTerminalFocus = useCallback(() => {
+    setTimeout(() => focus(), 0)
+  }, [focus])
+
+  const handleChooseFile = useCallback(() => {
+    setClipboardMenuOpen(false)
+    window.addEventListener('focus', restoreTerminalFocus, { once: true })
+    fileInputRef.current?.click()
+  }, [restoreTerminalFocus])
+
+  const handleFileSelection = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    restoreTerminalFocus()
+    if (!file) return
+    sendFile(file, file.type || 'application/octet-stream')
+  }, [restoreTerminalFocus, sendFile])
+
   const handleCopy = useCallback(async () => {
     setClipboardMenuOpen(false)
     const term = termRef.current
@@ -689,6 +709,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
                 {clipboardMenuOpen && (
                   <div className="absolute bottom-full left-0 mb-2 min-w-[120px] bg-surface-elevated border border-hairline rounded-md flex flex-col overflow-hidden z-50">
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { handlePaste(); setClipboardMenuOpen(false) }} className="px-4 py-2.5 text-left text-xs font-medium hover:bg-surface transition-colors border-b border-hairline/40">Paste</button>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={handleChooseFile} className="px-4 py-2.5 text-left text-xs font-medium hover:bg-surface transition-colors border-b border-hairline/40">Paste file…</button>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { handleCopy(); setClipboardMenuOpen(false) }} className="px-4 py-2.5 text-left text-xs font-medium hover:bg-surface transition-colors">Copy</button>
                   </div>
                 )}
@@ -786,6 +807,14 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
           keyBarSlot
         )}
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        tabIndex={-1}
+        aria-hidden="true"
+        className="sr-only"
+        onChange={handleFileSelection}
+      />
       {capturedText && (
         <div
           className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-4"

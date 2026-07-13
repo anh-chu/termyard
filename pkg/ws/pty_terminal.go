@@ -1,7 +1,7 @@
 package ws
 
 import (
-	"bytes"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,10 +19,12 @@ import (
 // pongFrame is the canonical reply to a browser heartbeat ping.
 var pongFrame = []byte(`{"type":"pong"}`)
 
-// isPing reports whether a text control frame is a heartbeat ping. Cheap
-// substring check avoids a JSON unmarshal on every frame.
+// isPing reports whether a text control frame is a heartbeat ping.
 func isPing(msg []byte) bool {
-	return bytes.Contains(msg, []byte(`"ping"`))
+	var control struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(msg, &control) == nil && control.Type == "ping"
 }
 
 // PTYTerminalHandler handles WebSocket connections backed by a PTY running tmux attach
@@ -48,6 +50,8 @@ func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker, t
 // caller's goroutine, answering browser heartbeat pings locally. It does NOT
 // upgrade and does NOT close conn — the caller owns conn's single Close.
 func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16, act *activity.Tracker, client *tmux.Client, tracker *toolevents.Tracker, log *logrus.Entry) error {
+	conn.SetReadLimit(tmux.MaxPTYControlMessageBytes)
+
 	// Spawn tmux attach in a PTY.
 	ptySess, err := tmux.NewPTYSession(tmuxPath, session, cols, rows)
 	if err != nil {
@@ -192,6 +196,9 @@ outer:
 // SpliceConns pumps bytes between an upgraded browser WS and a peer data conn.
 // Teardown nudges both read deadlines and callers own Close.
 func SpliceConns(browser, data *websocket.Conn, log *logrus.Entry) {
+	browser.SetReadLimit(tmux.MaxPTYControlMessageBytes)
+	data.SetReadLimit(tmux.MaxPTYControlMessageBytes)
+
 	var browserMu sync.Mutex
 	var once sync.Once
 	done := make(chan struct{})
