@@ -1,10 +1,10 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -52,106 +52,53 @@ func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker, t
 func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16, act *activity.Tracker, client *tmux.Client, tracker *toolevents.Tracker, log *logrus.Entry) error {
 	conn.SetReadLimit(tmux.MaxPTYControlMessageBytes)
 
-	// Spawn tmux attach in a PTY.
 	ptySess, err := tmux.NewPTYSession(tmuxPath, session, cols, rows)
 	if err != nil {
 		return err
 	}
 	defer ptySess.Close()
 
-	// writeMu serializes WS writes between the PTY reader goroutine and the
-	// heartbeat pong reply path below.
-	var writeMu sync.Mutex
+	scanContext, cancelScan := context.WithCancel(context.Background())
+	scanner := newArtifactScanner(scanContext, client, tracker, session)
+	output := newOutputCoalescer(func(mt int, payload []byte) error {
+		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		err := conn.WriteMessage(mt, payload)
+		_ = conn.SetWriteDeadline(time.Time{})
+		return err
+	}, func(error) {
+		_ = conn.SetReadDeadline(time.Now())
+	}, newResettableOutputTimer())
+	ptyDone := make(chan struct{})
+	var ptyReads int64
 
-	// Read goroutine: PTY → WebSocket (binary messages)
-	done := make(chan struct{})
-	artifactTail := ""
-	lastOSC7CWD := ""
-	seen := make(map[string]bool)
-	const maxArtifactTail = 4096
-	// ponytail: PTY exit or write error nudges conn.ReadMessage out so either side closing unwinds both loops.
 	go func() {
-		defer close(done)
-		buf := make([]byte, 32*1024)
+		defer close(ptyDone)
+		defer output.CloseAndFlush()
+		if scanner != nil {
+			defer scanner.Close()
+		}
+
+		buffer := make([]byte, 32*1024)
 		for {
-			n, err := ptySess.Read(buf)
-			if err != nil {
+			n, readErr := ptySess.Read(buffer)
+			if n > 0 {
+				ptyReads++
+				if act != nil {
+					act.Record(session, n)
+				}
+				chunk := append([]byte(nil), buffer[:n]...)
+				output.Submit(chunk)
+				if scanner != nil {
+					scanner.Submit(chunk)
+				}
+			}
+			if readErr != nil {
 				_ = conn.SetReadDeadline(time.Now())
 				return
-			}
-			// Track activity
-			if act != nil {
-				act.Record(session, n)
-			}
-			writeMu.Lock()
-			err = conn.WriteMessage(websocket.BinaryMessage, buf[:n])
-			writeMu.Unlock()
-			if err != nil {
-				_ = conn.SetReadDeadline(time.Now())
-				return
-			}
-			if client != nil && tracker != nil {
-				combined := artifactTail + string(buf[:n])
-				lastNewline := strings.LastIndex(combined, "\n")
-				scanText := combined
-				if lastNewline >= 0 {
-					scanText = combined[:lastNewline+1]
-					artifactTail = combined[lastNewline+1:]
-				} else if len(combined) > maxArtifactTail {
-					artifactTail = combined[len(combined)-maxArtifactTail:]
-				} else {
-					artifactTail = combined
-				}
-				if cwd, ok := toolevents.ParseOSC7CWD(scanText); ok {
-					lastOSC7CWD = cwd
-				}
-				paths := toolevents.ScanArtifactPaths(scanText)
-				osc8Paths := toolevents.ParseOSC8FilePaths(scanText)
-				if len(paths) == 0 && len(osc8Paths) == 0 {
-					continue
-				}
-				type artifactCandidate struct {
-					path   string
-					source string
-				}
-				candidates := make([]artifactCandidate, 0, len(paths)+len(osc8Paths))
-				for _, p := range paths {
-					candidates = append(candidates, artifactCandidate{path: p, source: "regex"})
-				}
-				for _, p := range osc8Paths {
-					candidates = append(candidates, artifactCandidate{path: p, source: "osc8"})
-				}
-				batchSeen := make(map[string]struct{}, len(candidates))
-				cwd := lastOSC7CWD
-				if cwd == "" {
-					cwd = toolevents.ResolveSessionCWD(client, session)
-				}
-				arts := make([]*toolevents.FileArtifact, 0, len(candidates))
-				for _, cand := range candidates {
-					if cand.path == "" {
-						continue
-					}
-					if _, ok := batchSeen[cand.path]; ok {
-						continue
-					}
-					batchSeen[cand.path] = struct{}{}
-					if seen[cand.path] {
-						continue
-					}
-					if art := toolevents.EnrichArtifact(cand.path, cwd, "", cand.source); art != nil {
-						arts = append(arts, art)
-						seen[cand.path] = true
-					}
-				}
-				if len(arts) > 0 {
-					tracker.RecordArtifacts(session, arts)
-				}
 			}
 		}
 	}()
 
-	// Write goroutine: WebSocket → PTY
-	// Text messages = JSON control, Binary messages = terminal I/O
 outer:
 	for {
 		msgType, message, err := conn.ReadMessage()
@@ -164,13 +111,8 @@ outer:
 
 		switch msgType {
 		case websocket.TextMessage:
-			// Heartbeat from the browser liveness watchdog. Reply so the client
-			// can detect a half-open socket and reconnect.
 			if isPing(message) {
-				writeMu.Lock()
-				err := conn.WriteMessage(websocket.TextMessage, pongFrame)
-				writeMu.Unlock()
-				if err != nil {
+				if !output.RequestPong() {
 					break outer
 				}
 				continue
@@ -187,9 +129,22 @@ outer:
 		}
 	}
 
+	cancelScan()
 	ptySess.Close()
-	<-done
-	log.Info("session ws client disconnected")
+	<-ptyDone
+	stats := output.Stats()
+	fields := logrus.Fields{
+		"pty_reads":           ptyReads,
+		"output_bytes":        stats.bytes,
+		"output_frames":       stats.frames,
+		"max_output_frame":    stats.maxFrame,
+		"slow_writes":         stats.slowWrites,
+		"dropped_scan_chunks": int64(0),
+	}
+	if scanner != nil {
+		fields["dropped_scan_chunks"] = scanner.DroppedChunks()
+	}
+	log.WithFields(fields).Info("session ws client disconnected")
 	return nil
 }
 
