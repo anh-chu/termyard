@@ -99,12 +99,12 @@ func (r *Rebuilder) rebuildSession(session SessionSnapshot) error {
 		}
 	}
 
-	for _, win := range windows {
+	for i, win := range windows {
 		if len(win.Panes) == 0 {
 			continue
 		}
 		winTarget := windowTarget(session.Name, win.Index)
-		if win.Index > 0 {
+		if i > 0 {
 			if err := r.client.NewWindow(winTarget, win.Name, win.Panes[0].CWD, paneStartCommand(session, win.Panes[0])); err != nil {
 				return err
 			}

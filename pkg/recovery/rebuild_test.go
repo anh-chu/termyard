@@ -128,3 +128,49 @@ func TestRebuildOrdersWindowsPanes(t *testing.T) {
 		t.Fatalf("calls mismatch\n got=%#v\nwant=%#v", h.calls, want)
 	}
 }
+
+func TestRebuildSkipsNewWindowForFirstSortedWindow(t *testing.T) {
+	// Regression: when tmux uses base-index 1, the first sorted window has
+	// Index=1. rebuildSession must skip NewWindow for the first window by
+	// loop position, not by win.Index>0, or it will try to create window 1
+	// that already exists from NewSession.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	m := &Manifest{
+		Version: CurrentVersion,
+		Sessions: []SessionSnapshot{{
+			Name: "s1",
+			Windows: []WindowSnapshot{
+				{Index: 1, Name: "editor", Panes: []PaneSnapshot{{Index: 0, CWD: "/tmp/a"}}},
+				{Index: 2, Name: "logs", Panes: []PaneSnapshot{{Index: 0, CWD: "/tmp/b"}}},
+			},
+		}},
+	}
+	if err := m.Save(); err != nil {
+		t.Fatalf("Save() failed: %v", err)
+	}
+
+	h := &mockRebuildClient{}
+	r := NewRebuilder(h, nil, nil)
+	if err := r.Rebuild(context.Background()); err != nil {
+		t.Fatalf("Rebuild() failed: %v", err)
+	}
+
+	// NewSession creates the first window. NewWindow must only be called
+	// for the second window (i=1), not the first (i=0).
+	for _, call := range h.calls {
+		if call == "NewWindow:s1:1:editor:/tmp/a:" {
+			t.Fatalf("unexpected NewWindow for first-window index 1 (should be skipped by loop position)\ncalls=%#v", h.calls)
+		}
+	}
+	found := false
+	for _, call := range h.calls {
+		if call == "NewWindow:s1:2:logs:/tmp/b:" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected NewWindow for second window index 2, not found\ncalls=%#v", h.calls)
+	}
+}

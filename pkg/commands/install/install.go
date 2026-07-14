@@ -41,6 +41,7 @@ RemainAfterExit=yes
 ExecStart=/bin/sh -c '{{.TmuxPath}} new-session -d -s _yardkeep; {{.TmuxPath}} set-option -g exit-empty off; {{.TmuxPath}} kill-session -t _yardkeep'
 KillMode=process
 OOMScoreAdjust=-800
+OOMPolicy=continue
 
 [Install]
 WantedBy=default.target
