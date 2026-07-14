@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import type { ChangeEvent, ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
+import { usePreferences } from '../hooks/usePreferences'
 import { useArtifacts } from '../hooks/useArtifacts'
 import { cn } from '../lib/utils'
 import { popOut, pipUnavailableReason } from '../lib/pip'
@@ -169,7 +170,9 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     clearAltModifier,
     selectionMenu,
     setSelectionMenu,
+    reconfigure,
   } = useTerminal(sessionName, hostId)
+  const { prefs } = usePreferences()
   const [showMobileKeyBar, setShowMobileKeyBar] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
   const [expandedPreviewPath, setExpandedPreviewPath] = useState<string | null>(null)
@@ -252,6 +255,13 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     }
     return () => disconnect()
   }, [sessionName])
+
+  // Reconfigure the live terminal when renderer or grapheme prefs change,
+  // without tearing down the WebSocket connection.
+  useEffect(() => {
+    if (!prefs) return
+    reconfigure(prefs.terminal.renderer, prefs.terminal.unicode_graphemes)
+  }, [prefs.terminal.renderer, prefs.terminal.unicode_graphemes, reconfigure])
 
   // Auto-focus on mount only for the active pane — the inactive pane's
   // auto-focus would steal focus from the intended target.

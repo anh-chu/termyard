@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ClipboardAddon, type IClipboardProvider, type ClipboardSelectionType } from '@xterm/addon-clipboard'
+import { WebglAddon } from '@xterm/addon-webgl'
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { usePreferences } from './usePreferences'
 import { getXtermTheme } from '../theme'
 // xterm CSS is imported in main.tsx (before index.css) so our overrides win.
@@ -153,6 +155,8 @@ function sendPastedFile(ws: WebSocket, file: File, fallbackType: string): Promis
 export function useTerminal(sessionName: string, hostId?: string) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
+  const graphemesAddonRef = useRef<UnicodeGraphemesAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const containerRef = useRef<HTMLElement | null>(null)
   const listenerCleanupRef = useRef<(() => void) | null>(null)
@@ -168,6 +172,12 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const suppressedInputRef = useRef<string | null>(null)
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string } | null>(null)
   const { prefs } = usePreferences()
+  const rendererRef = useRef(prefs.terminal.renderer)
+  const graphemesPrefRef = useRef(prefs.terminal.unicode_graphemes)
+  const graphemesLoadedRef = useRef(false)
+  // Keep refs in sync with latest prefs so stable callbacks never use stale values.
+  rendererRef.current = prefs.terminal.renderer
+  graphemesPrefRef.current = prefs.terminal.unicode_graphemes
   const sendRawBytes = useCallback((bytes: Uint8Array) => {
     const currentWs = wsRef.current
     if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -246,6 +256,15 @@ export function useTerminal(sessionName: string, hostId?: string) {
       watchdogTimer.current = undefined
     }
     cleanupWs()
+    if (webglAddonRef.current) {
+      webglAddonRef.current.dispose()
+      webglAddonRef.current = null
+    }
+    if (graphemesAddonRef.current) {
+      graphemesAddonRef.current.dispose()
+      graphemesAddonRef.current = null
+      graphemesLoadedRef.current = false
+    }
     if (termRef.current) {
       listenerCleanupRef.current?.()
       listenerCleanupRef.current = null
@@ -285,6 +304,33 @@ export function useTerminal(sessionName: string, hostId?: string) {
 
     term.open(container)
     neutralizeXtermScrollbarFallback(term)
+
+    // Conditionally load WebGL addon for GPU-accelerated rendering
+    if (rendererRef.current === 'webgl') {
+      try {
+        const webglAddon = new WebglAddon()
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose()
+          webglAddonRef.current = null
+        })
+        term.loadAddon(webglAddon)
+        webglAddonRef.current = webglAddon
+      } catch (e) {
+        console.warn('WebGL addon failed to load, falling back to DOM renderer:', e)
+      }
+    }
+
+    // Conditionally load Unicode graphemes addon (experimental)
+    if (graphemesPrefRef.current) {
+      try {
+        const graphemesAddon = new UnicodeGraphemesAddon()
+        term.loadAddon(graphemesAddon)
+        graphemesAddonRef.current = graphemesAddon
+        graphemesLoadedRef.current = true
+      } catch (e) {
+        console.warn('Unicode graphemes addon failed to load:', e)
+      }
+    }
 
     const helperTextarea = container.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null
 
@@ -645,6 +691,15 @@ export function useTerminal(sessionName: string, hostId?: string) {
       watchdogTimer.current = undefined
     }
     cleanupWs()
+    if (webglAddonRef.current) {
+      webglAddonRef.current.dispose()
+      webglAddonRef.current = null
+    }
+    if (graphemesAddonRef.current) {
+      graphemesAddonRef.current.dispose()
+      graphemesAddonRef.current = null
+      graphemesLoadedRef.current = false
+    }
     if (termRef.current) {
       listenerCleanupRef.current?.()
       listenerCleanupRef.current = null
@@ -653,6 +708,45 @@ export function useTerminal(sessionName: string, hostId?: string) {
     }
     containerRef.current = null
   }, [cleanupWs])
+
+  const reconfigure = useCallback((renderer: string, graphemes: boolean) => {
+    const term = termRef.current
+    if (!term) return
+
+    // Handle renderer change on the live terminal
+    if (renderer === 'webgl' && !webglAddonRef.current) {
+      try {
+        const webglAddon = new WebglAddon()
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose()
+          webglAddonRef.current = null
+        })
+        term.loadAddon(webglAddon)
+        webglAddonRef.current = webglAddon
+      } catch (e) {
+        console.warn('WebGL addon failed to load, falling back to DOM renderer:', e)
+      }
+    } else if (renderer === 'dom' && webglAddonRef.current) {
+      webglAddonRef.current.dispose()
+      webglAddonRef.current = null
+    }
+
+    // Handle graphemes change — dispose on disable, load on enable
+    if (graphemes && !graphemesLoadedRef.current) {
+      try {
+        const graphemesAddon = new UnicodeGraphemesAddon()
+        term.loadAddon(graphemesAddon)
+        graphemesAddonRef.current = graphemesAddon
+        graphemesLoadedRef.current = true
+      } catch (e) {
+        console.warn('Unicode graphemes addon failed to load:', e)
+      }
+    } else if (!graphemes && graphemesAddonRef.current) {
+      graphemesAddonRef.current.dispose()
+      graphemesAddonRef.current = null
+      graphemesLoadedRef.current = false
+    }
+  }, [])
 
   const fit = useCallback(() => {
     const term = termRef.current
@@ -692,6 +786,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
   return {
     termRef,
     connect,
+    reconfigure,
     disconnect,
     fit,
     rebind,

@@ -90,6 +90,17 @@ func (pc *PeerConnection) Done() <-chan struct{} {
 	return pc.done
 }
 
+// HasCapability reports whether the peer advertised a specific capability
+// during the hello handshake.
+func (pc *PeerConnection) HasCapability(cap string) bool {
+	for _, c := range pc.Caps {
+		if c == cap {
+			return true
+		}
+	}
+	return false
+}
+
 // HiLane / LoLane expose the lanes to the writer goroutine for priority drain.
 func (pc *PeerConnection) HiLane() <-chan wireFrame { return pc.hi }
 func (pc *PeerConnection) LoLane() <-chan wireFrame { return pc.lo }

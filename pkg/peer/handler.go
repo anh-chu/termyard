@@ -22,6 +22,18 @@ var wsUpgrader = websocket.Upgrader{
 	WriteBufferSize: 1024 * 32,
 }
 
+// wsStreamUpgrader is the dedicated upgrader for /ws/peer-stream.
+// It negotiates permessage-deflate so the host can compress PTY output,
+// while the shared-control /ws/peer upgrader remains uncompressed.
+var wsStreamUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+	ReadBufferSize:    1024 * 32,
+	WriteBufferSize:   1024 * 32,
+	EnableCompression: true,
+}
+
 // Handler handles incoming peer WebSocket connections on /ws/peer.
 type Handler struct {
 	deps      SessionDeps
@@ -101,7 +113,7 @@ func (h *Handler) HandlePeer(w http.ResponseWriter, r *http.Request) {
 
 // HandlePeerStream handles /ws/peer-stream for dedicated PTY data connections.
 func (h *Handler) HandlePeerStream(w http.ResponseWriter, r *http.Request) {
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	conn, err := wsStreamUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logrus.WithError(err).Warn("peer stream ws upgrade failed")
 		return
@@ -121,6 +133,9 @@ func (h *Handler) HandlePeerStream(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 		return
 	}
+
+	// Default writes uncompressed — host role re-enables in BridgePTY path.
+	conn.EnableWriteCompression(false)
 
 	conn.SetReadDeadline(streamDeadline(ctx, streamSetupTimeout))
 	var msg Message

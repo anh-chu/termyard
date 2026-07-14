@@ -25,10 +25,11 @@ func DialPeerStream(ctx context.Context, addr string, id *identity.Identity, tok
 
 	u := &url.URL{Scheme: "ws", Host: addr, Path: "/ws/peer-stream"}
 	dialer := &websocket.Dialer{
-		Proxy:            websocket.DefaultDialer.Proxy,
-		HandshakeTimeout: streamSetupTimeout,
-		ReadBufferSize:   1024 * 32,
-		WriteBufferSize:  1024 * 32,
+		Proxy:             websocket.DefaultDialer.Proxy,
+		HandshakeTimeout:  streamSetupTimeout,
+		ReadBufferSize:    1024 * 32,
+		WriteBufferSize:   1024 * 32,
+		EnableCompression: true,
 	}
 	conn, _, err := dialer.DialContext(ctx, u.String(), nil)
 	if err != nil {
@@ -94,6 +95,9 @@ func DialPeerStream(ctx context.Context, addr string, id *identity.Identity, tok
 		conn.Close()
 		return nil, fmt.Errorf("send stream token: %w", err)
 	}
+
+	// Default writes uncompressed — host role re-enables in BridgePTY path.
+	conn.EnableWriteCompression(false)
 
 	return conn, nil
 }

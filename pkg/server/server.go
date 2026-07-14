@@ -483,9 +483,18 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		}
 	}
 
+	if opts.PeerMgr == nil {
+		http.Error(w, "peer not connected", http.StatusBadGateway)
+		return
+	}
 	peerConn := opts.PeerMgr.GetPeerConnection(hostID)
 	if peerConn == nil {
 		http.Error(w, "peer not connected", http.StatusBadGateway)
+		return
+	}
+
+	if !peerConn.HasCapability(peer.CapPerStream) {
+		http.Error(w, "peer does not support per-stream terminal connections — upgrade the peer first", http.StatusUpgradeRequired)
 		return
 	}
 
@@ -498,7 +507,13 @@ func handleRemoteSession(w http.ResponseWriter, r *http.Request, opts *Options, 
 		return
 	}
 	defer browserWS.Close()
-	_ = serveViewerPerStream(browserWS, peerConn, opts, hostID, sessionName, cols, rows)
+	ok := serveViewerPerStream(browserWS, peerConn, opts, hostID, sessionName, cols, rows)
+	if !ok {
+		// Write a close frame so the browser knows this is a terminal failure,
+		// not a normal closure. Use application-level close code 4000 + reason.
+		_ = browserWS.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(4000, "per-stream setup failed"))
+	}
 
 }
 
@@ -545,6 +560,8 @@ func serveViewerPerStream(browserWS *websocket.Conn, peerConn *peer.PeerConnecti
 		conn = c
 	}
 	defer conn.Close()
+	// Viewer writes (browser input) stay uncompressed for role clarity.
+	conn.EnableWriteCompression(false)
 	ws.SpliceConns(browserWS, conn, log)
 	return true
 }

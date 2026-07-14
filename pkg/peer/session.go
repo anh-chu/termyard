@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"compress/flate"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -529,6 +530,12 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 		conn = c
 	}
 	defer conn.Close()
+	// Enable write compression with fastest level so PTY host→viewer output
+	// (the bulk direction) is compressed on the wire.
+	conn.EnableWriteCompression(true)
+	if err := conn.SetCompressionLevel(flate.BestSpeed); err != nil {
+		log.WithError(err).Debug("set compression level ignored")
+	}
 	_ = ws.BridgePTY(conn, deps.TmuxClient.TmuxPath(), p.Session, p.Cols, p.Rows, deps.ActTracker, deps.TmuxClient, deps.ToolTracker, log)
 }
 
