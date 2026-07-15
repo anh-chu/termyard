@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import type { ChangeEvent, ReactNode } from 'react'
+import type { ChangeEvent, DragEvent, ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
 import { usePreferences } from '../hooks/usePreferences'
 import { useArtifacts } from '../hooks/useArtifacts'
@@ -529,13 +529,34 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     fileInputRef.current?.click()
   }, [restoreTerminalFocus])
 
+  const uploadFiles = useCallback(async (files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      await sendFile(file, file.type || 'application/octet-stream')
+    }
+  }, [sendFile])
+
   const handleFileSelection = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ''
     restoreTerminalFocus()
-    if (!file) return
-    sendFile(file, file.type || 'application/octet-stream')
-  }, [restoreTerminalFocus, sendFile])
+    if (!files.length) return
+    void uploadFiles(files)
+  }, [restoreTerminalFocus, uploadFiles])
+
+  const handleTerminalDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const handleTerminalDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    event.stopPropagation()
+    void uploadFiles(event.dataTransfer.files)
+    focus()
+  }, [focus, uploadFiles])
 
   const handleCopy = useCallback(async () => {
     setClipboardMenuOpen(false)
@@ -567,6 +588,8 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
         <div
           ref={popNodeRef}
           className="absolute inset-0"
+          onDragOver={handleTerminalDragOver}
+          onDrop={handleTerminalDrop}
         >
           <div
             ref={containerRef}

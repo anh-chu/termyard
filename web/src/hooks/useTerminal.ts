@@ -203,12 +203,14 @@ export function useTerminal(sessionName: string, hostId?: string) {
     })
   }, [])
 
-  const sendFile = useCallback((file: File, fallbackType: string) => {
+  const sendFile = useCallback(async (file: File, fallbackType: string) => {
     const currentWs = wsRef.current
     if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return
-    sendPastedFile(currentWs, file, fallbackType).catch((err) => {
+    try {
+      await sendPastedFile(currentWs, file, fallbackType)
+    } catch (err) {
       console.error('Failed to send pasted file:', err)
-    })
+    }
   }, [])
 
   const clearCtrlModifier = useCallback(() => {
