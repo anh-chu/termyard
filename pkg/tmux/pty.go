@@ -26,7 +26,7 @@ func NewPTYSession(tmuxPath, sessionName string, cols, rows uint16) (*PTYSession
 	if id := client.SessionIDByName(sessionName); id != "" {
 		sessionName = id
 	}
-	cmd := exec.Command(tmuxPath, "attach-session", "-t", sessionName)
+	cmd := exec.Command(tmuxPath, attachArgs(tmuxPath, sessionName)...)
 	cmd.Env = localeEnv()
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 
@@ -85,6 +85,49 @@ func (p *PTYSession) Close() {
 // localeEnv returns os.Environ() with LANG, LC_ALL, and LC_CTYPE stripped
 // so that the caller can set a known-good UTF-8 locale without a pre-existing
 // stale entry shadowing it (getenv returns the first match on Linux/glibc).
+func attachArgs(tmuxPath, sessionName string) []string {
+	return attachArgsWithSixel(sessionName, tmuxSupportsSixel(tmuxPath))
+}
+
+func attachArgsWithSixel(sessionName string, sixel bool) []string {
+	args := []string{"attach-session", "-t", sessionName}
+	if sixel {
+		return append([]string{"-T", "sixel"}, args...)
+	}
+	return args
+}
+
+func tmuxSupportsSixel(tmuxPath string) bool {
+	output, err := exec.Command(tmuxPath, "-V").Output()
+	return err == nil && supportsSixelVersion(string(output))
+}
+
+func supportsSixelVersion(version string) bool {
+	for i := 0; i < len(version); i++ {
+		if version[i] < '0' || version[i] > '9' {
+			continue
+		}
+		major := 0
+		for i < len(version) && version[i] >= '0' && version[i] <= '9' {
+			major = major*10 + int(version[i]-'0')
+			i++
+		}
+		if i == len(version) || version[i] != '.' {
+			continue
+		}
+		i++
+		minor := 0
+		minorDigits := 0
+		for i < len(version) && version[i] >= '0' && version[i] <= '9' {
+			minor = minor*10 + int(version[i]-'0')
+			minorDigits++
+			i++
+		}
+		return minorDigits > 0 && (major > 3 || major == 3 && minor >= 4)
+	}
+	return false
+}
+
 func localeEnv() []string {
 	var out []string
 	for _, e := range os.Environ() {

@@ -5,6 +5,38 @@ import (
 	"testing"
 )
 
+func TestSupportsSixelVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{"tmux 2.9", false},
+		{"tmux 3", false},
+		{"tmux 3.3a", false},
+		{"tmux 3.4", true},
+		{"tmux 3.5a", true},
+		{"tmux next-3.5", true},
+		{"tmux 4.0", true},
+		{"tmux unknown", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := supportsSixelVersion(tt.version); got != tt.want {
+				t.Errorf("supportsSixelVersion(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAttachArgsWithSixel(t *testing.T) {
+	if got, want := attachArgsWithSixel("$1", true), []string{"-T", "sixel", "attach-session", "-t", "$1"}; !equalStrings(got, want) {
+		t.Errorf("attachArgsWithSixel(true) = %q, want %q", got, want)
+	}
+	if got, want := attachArgsWithSixel("$1", false), []string{"attach-session", "-t", "$1"}; !equalStrings(got, want) {
+		t.Errorf("attachArgsWithSixel(false) = %q, want %q", got, want)
+	}
+}
+
 func TestLocaleEnvStripsExistingLocaleAndPreservesLanguage(t *testing.T) {
 	// Save and restore original environment.
 	orig := os.Environ()
@@ -106,6 +138,18 @@ func TestLocaleEnvStripsExistingLocaleAndPreservesLanguage(t *testing.T) {
 			t.Errorf("unexpected env key %q in localeEnv output", k)
 		}
 	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // splitEnv splits "KEY=VALUE" into [key, value].

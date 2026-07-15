@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ClipboardAddon, type IClipboardProvider, type ClipboardSelectionType } from '@xterm/addon-clipboard'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { ImageAddon } from '@xterm/addon-image'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { usePreferences } from './usePreferences'
 import { getXtermTheme } from '../theme'
@@ -157,6 +158,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
+  const imageAddonRef = useRef<ImageAddon | null>(null)
   const graphemesAddonRef = useRef<UnicodeGraphemesAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const containerRef = useRef<HTMLElement | null>(null)
@@ -271,6 +273,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
       webglAddonRef.current.dispose()
       webglAddonRef.current = null
     }
+    if (imageAddonRef.current) {
+      imageAddonRef.current.dispose()
+      imageAddonRef.current = null
+    }
     if (graphemesAddonRef.current) {
       graphemesAddonRef.current.dispose()
       graphemesAddonRef.current = null
@@ -334,6 +340,19 @@ export function useTerminal(sessionName: string, hostId?: string) {
         console.warn('WebGL addon failed to load, falling back to DOM renderer:', e)
       }
     }
+
+    // Keep Sixel images in xterm's buffer so they follow terminal scrollback,
+    // reflow, and screen-clearing semantics rather than a separate overlay.
+    const imageAddon = new ImageAddon({
+      pixelLimit: 4_000_000,
+      sixelSupport: true,
+      sixelSizeLimit: 8_000_000,
+      storageLimit: 24,
+      showPlaceholder: true,
+      iipSupport: false,
+    })
+    term.loadAddon(imageAddon)
+    imageAddonRef.current = imageAddon
 
     // Conditionally load Unicode graphemes addon (experimental)
     if (graphemesPrefRef.current) {
@@ -825,6 +844,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
     if (predictiveEchoRef.current) {
       predictiveEchoRef.current.dispose()
       predictiveEchoRef.current = null
+    }
+    if (imageAddonRef.current) {
+      imageAddonRef.current.dispose()
+      imageAddonRef.current = null
     }
     if (termRef.current) {
       listenerCleanupRef.current?.()
