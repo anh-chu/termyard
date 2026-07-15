@@ -263,12 +263,12 @@ func extractTermyardBinary(archivePath, outPath string) error {
 
 // restartAfterUpdate restarts the managed service so the new binary takes
 // effect, or prints manual advice when no service manager owns termyard.
-func restartAfterUpdate(log *logrus.Entry) {
+func restartAfterUpdate(log *logrus.Entry, binPath string) {
 	if !ServiceManaged() {
 		log.Info("if termyard is currently running, restart it for the update to take effect")
 		return
 	}
-	if err := RestartManaged(); err != nil {
+	if err := RestartManaged(binPath); err != nil {
 		log.WithError(err).Warn("auto-restart failed; restart the service manually")
 		return
 	}
@@ -400,7 +400,7 @@ func run(ctx context.Context, repo string, ch Channel, pinnedTag string, dryRun,
 		"dir":    binDir,
 	}).Info("update installed")
 
-	restartAfterUpdate(log)
+	restartAfterUpdate(log, binPath)
 	return nil
 }
 

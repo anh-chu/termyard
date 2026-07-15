@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/anh-chu/termyard/pkg/commands/install"
 	"github.com/anh-chu/termyard/pkg/common"
 )
 
@@ -46,20 +47,21 @@ func CheckLatest(ctx context.Context) (Status, error) {
 	}, nil
 }
 
-func Apply(ctx context.Context) (string, error) {
+func Apply(ctx context.Context) (newVersion, binPath string, err error) {
 	current, _, rel, err := currentChannelRelease(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if current != "" && matches(current, rel.TagName) {
-		return rel.TagName, nil
+		binPath, err := resolveBinaryPath()
+		return rel.TagName, binPath, err
 	}
 	archiveURL, checksumURL, archiveName, _, err := findAsset(rel, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	newVersion, _, _, _, err := applyRelease(ctx, rel, archiveURL, checksumURL, archiveName)
-	return newVersion, err
+	newVersion, binPath, _, _, err = applyRelease(ctx, rel, archiveURL, checksumURL, archiveName)
+	return newVersion, binPath, err
 }
 
 func ServiceManaged() bool {
@@ -76,7 +78,14 @@ func ServiceManaged() bool {
 	return false
 }
 
-func RestartManaged() error {
+func RestartManaged(binPath string) error {
+	// Refresh systemd units before scheduling a restart so the new
+	// binary starts with the current unit definitions (including
+	// KillMode=process to prevent cgroup reaping of tmux).
+	if err := install.RefreshUnits(context.Background(), binPath); err != nil {
+		return fmt.Errorf("refresh units before restart: %w", err)
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "linux":

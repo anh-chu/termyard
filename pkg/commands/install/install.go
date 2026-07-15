@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -16,7 +17,7 @@ import (
 
 const systemdUnit = `[Unit]
 Description=Termyard - Web dashboard for tmux sessions
-Wants=termyard-tmux.service
+Requires=termyard-tmux.service
 After=default.target termyard-tmux.service
 
 [Service]
@@ -24,6 +25,7 @@ Type=simple
 ExecStart={{.ExecStart}}
 Restart=on-failure
 RestartSec=5
+KillMode=process
 OOMScoreAdjust=-600
 Environment=PATH={{.Path}}
 
@@ -95,22 +97,69 @@ func getBinaryPath() (string, error) {
 	return exe, nil
 }
 
-func installLinux(ctx context.Context, c *cli.Command) error {
-	binPath, err := getBinaryPath()
+// resolveUnitDir returns the systemd user unit directory.
+func resolveUnitDir() (string, error) {
+	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return err
+		return "", err
+	}
+	return filepath.Join(configDir, "systemd", "user"), nil
+}
+
+// buildServiceConfig creates a serviceConfig from the current environment.
+func buildServiceConfig(binPath string) (serviceConfig, error) {
+	if binPath == "" {
+		var err error
+		binPath, err = getBinaryPath()
+		if err != nil {
+			return serviceConfig{}, err
+		}
 	}
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
-		return fmt.Errorf("could not find tmux: %w", err)
+		return serviceConfig{}, fmt.Errorf("could not find tmux: %w", err)
+	}
+	return serviceConfig{
+		BinaryPath: binPath,
+		ExecStart:  binPath + " server",
+		Path:       os.Getenv("PATH"),
+		TmuxPath:   tmuxPath,
+	}, nil
+}
+
+// renderUnit renders a systemd unit template with the given config.
+func renderUnit(tmplSrc string, cfg serviceConfig) (string, error) {
+	tmpl, err := template.New("unit").Parse(tmplSrc)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, cfg); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// writeRenderedUnit renders a template and writes it to path.
+func writeRenderedUnit(path, tmplSrc string, cfg serviceConfig) error {
+	content, err := renderUnit(tmplSrc, cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func installLinux(ctx context.Context, c *cli.Command) error {
+	cfg, err := buildServiceConfig("")
+	if err != nil {
+		return err
 	}
 
-	configDir, err := os.UserConfigDir()
+	unitDir, err := resolveUnitDir()
 	if err != nil {
 		return fmt.Errorf("could not determine config directory: %w", err)
 	}
 
-	unitDir := filepath.Join(configDir, "systemd", "user")
 	unitPath := filepath.Join(unitDir, "termyard.service")
 	tmuxUnitPath := filepath.Join(unitDir, "termyard-tmux.service")
 
@@ -118,32 +167,12 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("could not create systemd user directory: %w", err)
 	}
 
-	cfg := serviceConfig{
-		BinaryPath: binPath,
-		ExecStart:  binPath + " server",
-		Path:       os.Getenv("PATH"),
-		TmuxPath:   tmuxPath,
-	}
-
-	writeUnit := func(path, tmplSrc string) error {
-		tmpl, err := template.New(filepath.Base(path)).Parse(tmplSrc)
-		if err != nil {
-			return err
-		}
-		f, err := os.Create(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		return tmpl.Execute(f, cfg)
-	}
-
-	if err := writeUnit(tmuxUnitPath, tmuxServerUnit); err != nil {
+	if err := writeRenderedUnit(tmuxUnitPath, tmuxServerUnit, cfg); err != nil {
 		return fmt.Errorf("could not write tmux unit: %w", err)
 	}
 	fmt.Printf("Wrote %s\n", tmuxUnitPath)
 
-	if err := writeUnit(unitPath, systemdUnit); err != nil {
+	if err := writeRenderedUnit(unitPath, systemdUnit, cfg); err != nil {
 		return fmt.Errorf("could not write unit file: %w", err)
 	}
 	fmt.Printf("Wrote %s\n", unitPath)
@@ -167,6 +196,37 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 	fmt.Println("  Restart:  systemctl --user restart termyard")
 	fmt.Println("  Web UI:   https://localhost:7654")
 	return nil
+}
+
+// RefreshUnits rewrites both systemd user units and daemon-reloads,
+// but does NOT restart any services. Returns nil (not an error) when
+// termyard.service is not installed or on non-Linux platforms.
+func RefreshUnits(ctx context.Context, binPath string) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	unitDir, err := resolveUnitDir()
+	if err != nil {
+		return err
+	}
+	unitPath := filepath.Join(unitDir, "termyard.service")
+	if _, err := os.Stat(unitPath); os.IsNotExist(err) {
+		return nil // not installed
+	}
+	cfg, err := buildServiceConfig(binPath)
+	if err != nil {
+		return fmt.Errorf("refresh: %w", err)
+	}
+	tmuxUnitPath := filepath.Join(unitDir, "termyard-tmux.service")
+
+	if err := writeRenderedUnit(tmuxUnitPath, tmuxServerUnit, cfg); err != nil {
+		return fmt.Errorf("refresh: write tmux unit: %w", err)
+	}
+	if err := writeRenderedUnit(unitPath, systemdUnit, cfg); err != nil {
+		return fmt.Errorf("refresh: write main unit: %w", err)
+	}
+
+	return exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").Run()
 }
 
 func installDarwin(ctx context.Context, c *cli.Command) error {

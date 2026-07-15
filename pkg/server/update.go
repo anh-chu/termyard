@@ -26,7 +26,7 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleUpdateApply(w http.ResponseWriter, r *http.Request, opts *Options) {
-	newVersion, err := update.Apply(r.Context())
+	newVersion, binPath, err := update.Apply(r.Context())
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -63,7 +63,7 @@ func handleUpdateApply(w http.ResponseWriter, r *http.Request, opts *Options) {
 	}
 	if managed {
 		go func() {
-			if err := update.RestartManaged(); err != nil {
+			if err := update.RestartManaged(binPath); err != nil {
 				logrus.WithError(err).Warn("update restart failed")
 			}
 		}()
