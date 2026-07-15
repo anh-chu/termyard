@@ -297,7 +297,9 @@ export const themePresets: Record<string, ThemePreset> = {
             '--chart-secondary': 'oklch(0.65 0.1 310)',
         },
         xterm: {
-            background: '#1a1a1a',
+            // WebGL resolves transparent terminal colors against this value.
+            // Keep it black so its opaque fallback matches the terminal surface.
+            background: '#000000',
             foreground: '#d4d4d4',
             cursor: '#d4d4d4',
             cursorAccent: '#1a1a1a',
