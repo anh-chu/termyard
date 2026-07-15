@@ -492,7 +492,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, scheduleID
 
       {layout === 'board' ? (
         <div className="flex gap-3 mb-10 items-start overflow-x-auto tex-yardgrid rounded-sm p-3">
-          {byState.filter(({ state, items: colItems }) => state === 'needs_you' || colItems.length > 0).map(({ state, items: colItems }) => (
+          {byState.filter(({ items: colItems }) => colItems.length > 0).map(({ state, items: colItems }) => (
             <div key={state} className={`flex flex-col gap-2 ${colItems.length === 0 ? 'min-w-[160px]' : split ? 'min-w-[220px]' : 'min-w-[260px]'}`} style={{ flexGrow: Math.max(colItems.length, 0.5), flexBasis: 0 }}>
               <h3 className="font-display text-[13px] font-bold text-ink mb-1 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLUMN_META[state].color }} />
