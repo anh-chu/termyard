@@ -7,6 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { usePreferences } from './usePreferences'
 import { getXtermTheme } from '../theme'
+import { PredictiveEcho } from '../lib/predictive-echo'
 // xterm CSS is imported in main.tsx (before index.css) so our overrides win.
 
 // Monotonically increasing ID to track which connection is "current"
@@ -164,6 +165,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const heartbeatTimer = useRef<number | undefined>(undefined)
   const watchdogTimer = useRef<number | undefined>(undefined)
   const activeConnId = useRef(0)
+  const telemetryIntervalRef = useRef<number | undefined>(undefined)
   const [termConnected, setTermConnected] = useState(false)
   const [ctrlModifierActive, setCtrlModifierActive] = useState(false)
   const ctrlModifierRef = useRef(false)
@@ -174,10 +176,13 @@ export function useTerminal(sessionName: string, hostId?: string) {
   const { prefs } = usePreferences()
   const rendererRef = useRef(prefs.terminal.renderer)
   const graphemesPrefRef = useRef(prefs.terminal.unicode_graphemes)
+  const predictiveEchoPrefRef = useRef(prefs.terminal.predictive_echo)
   const graphemesLoadedRef = useRef(false)
+  const predictiveEchoRef = useRef<PredictiveEcho | null>(null)
   // Keep refs in sync with latest prefs so stable callbacks never use stale values.
   rendererRef.current = prefs.terminal.renderer
   graphemesPrefRef.current = prefs.terminal.unicode_graphemes
+  predictiveEchoPrefRef.current = prefs.terminal.predictive_echo
   const sendRawBytes = useCallback((bytes: Uint8Array) => {
     const currentWs = wsRef.current
     if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -255,6 +260,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
       clearTimeout(watchdogTimer.current)
       watchdogTimer.current = undefined
     }
+    if (telemetryIntervalRef.current) {
+      clearInterval(telemetryIntervalRef.current)
+      telemetryIntervalRef.current = undefined
+    }
     cleanupWs()
     if (webglAddonRef.current) {
       webglAddonRef.current.dispose()
@@ -264,6 +273,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
       graphemesAddonRef.current.dispose()
       graphemesAddonRef.current = null
       graphemesLoadedRef.current = false
+    }
+    if (predictiveEchoRef.current) {
+      predictiveEchoRef.current.dispose()
+      predictiveEchoRef.current = null
     }
     if (termRef.current) {
       listenerCleanupRef.current?.()
@@ -329,6 +342,15 @@ export function useTerminal(sessionName: string, hostId?: string) {
         graphemesLoadedRef.current = true
       } catch (e) {
         console.warn('Unicode graphemes addon failed to load:', e)
+      }
+    }
+
+    // Conditionally create predictive echo overlay (experimental)
+    if (predictiveEchoPrefRef.current) {
+      try {
+        predictiveEchoRef.current = new PredictiveEcho(term)
+      } catch (e) {
+        console.warn('Predictive echo failed to initialize:', e)
       }
     }
 
@@ -550,6 +572,40 @@ export function useTerminal(sessionName: string, hostId?: string) {
     let lastSummary = 0
     const tConnect = performance.now()
 
+    // --- Phase 0 latency telemetry ---
+    // inputToFrameMs: time from keypress to first inbound binary WebSocket
+    // frame. This is a proxy for output round-trip, not proven per-key
+    // authoritative echo. inputToWriteCompleteMs: time from keypress to the
+    // xterm.write() callback, which indicates xterm completed its internal
+    // write (not screen paint).
+    const MAX_TELEMETRY_SAMPLES = 1000
+    const TELEMETRY_INTERVAL_MS = 60000
+    interface LatencySample {
+      inputToFrameMs: number
+      inputToWriteCompleteMs: number
+    }
+    const latencySamples: LatencySample[] = []
+    let pendingInputTs: number | null = null
+    let writePending = false
+    let discardedInputs = 0
+
+    function emitTelemetry(reason: string): void {
+      if (activeConnId.current !== connId) return
+      if (latencySamples.length === 0) return
+      const sortedFrame = latencySamples.map(s => s.inputToFrameMs).sort((a, b) => a - b)
+      const sortedWrite = latencySamples.map(s => s.inputToWriteCompleteMs).sort((a, b) => a - b)
+      const p = (arr: number[], q: number) => arr[Math.floor(arr.length * q)] ?? 0
+      console.debug('[termyard-telemetry]', reason, {
+        samples: latencySamples.length,
+        discarded: discardedInputs,
+        inputToFrameMs: { p50: p(sortedFrame, 0.5), p90: p(sortedFrame, 0.9), p99: p(sortedFrame, 0.99) },
+        inputToWriteCompleteMs: { p50: p(sortedWrite, 0.5), p90: p(sortedWrite, 0.9), p99: p(sortedWrite, 0.99) },
+      })
+    }
+
+    telemetryIntervalRef.current = window.setInterval(() => emitTelemetry('periodic'), TELEMETRY_INTERVAL_MS)
+    // --- end telemetry ---
+
     // Liveness watchdog. A half-open TCP (laptop sleep, wifi handoff, NAT
     // idle timeout) leaves ws.readyState === OPEN: output silently stops and
     // keystrokes vanish with no error and no onclose, so the disconnect
@@ -593,8 +649,31 @@ export function useTerminal(sessionName: string, hostId?: string) {
         if (!sawFirstByte) {
           sawFirstByte = true
         }
+        const data = new Uint8Array(evt.data)
         const before = term.buffer.active.length
-        term.write(new Uint8Array(evt.data))
+
+        // Clear prediction synchronously on any inbound authoritative
+        // binary frame, before term.write.  An older async callback must
+        // never erase a prediction created by a newer keystroke.
+        predictiveEchoRef.current?.clear()
+
+        // Phase 0 telemetry: measure input-to-output and input-to-paint
+        if (pendingInputTs !== null) {
+          const inputToFrameMs = performance.now() - pendingInputTs
+          const capturedTs = pendingInputTs
+          pendingInputTs = null
+          writePending = true
+          term.write(data, () => {
+            const inputToWriteCompleteMs = performance.now() - capturedTs
+            latencySamples.push({ inputToFrameMs, inputToWriteCompleteMs })
+            if (latencySamples.length > MAX_TELEMETRY_SAMPLES) {
+              latencySamples.shift()
+            }
+            writePending = false
+          })
+        } else {
+          term.write(data)
+        }
         const now = Date.now()
         if (now - lastSummary > 500) {
           lastSummary = now
@@ -625,6 +704,11 @@ export function useTerminal(sessionName: string, hostId?: string) {
         clearTimeout(watchdogTimer.current)
         watchdogTimer.current = undefined
       }
+      if (telemetryIntervalRef.current) {
+        clearInterval(telemetryIntervalRef.current)
+        telemetryIntervalRef.current = undefined
+      }
+      emitTelemetry('disconnect')
       // Don't flash the disconnect overlay if the page is just hidden
       if (!document.hidden) {
         setTermConnected(false)
@@ -663,12 +747,44 @@ export function useTerminal(sessionName: string, hostId?: string) {
       suppressedInputRef.current = null
       if (ws.readyState === WebSocket.OPEN) {
         const encoder = new TextEncoder()
+        // Phase 0 telemetry: arm latency measurement on eligible printable
+        // ASCII input only when the WebSocket is open and no sample is pending.
+        if (data.length === 1) {
+          const code = data.charCodeAt(0)
+          if (code >= 0x20 && code <= 0x7e) {
+            if (pendingInputTs === null && !writePending) {
+              pendingInputTs = performance.now()
+            } else {
+              discardedInputs++
+            }
+          }
+        }
+        // Predictive echo: render unconfirmed keystrokes before sending.
+        // Lazily create the instance if the preference was toggled on after
+        // the terminal was already connected (no reconnect needed).
+        let pe = predictiveEchoRef.current
+        if (!pe && predictiveEchoPrefRef.current && termRef.current) {
+          try {
+            pe = new PredictiveEcho(termRef.current)
+            predictiveEchoRef.current = pe
+          } catch (e) {
+            console.warn('Predictive echo failed to initialize:', e)
+          }
+        }
+        if (pe && predictiveEchoPrefRef.current) {
+          if (pe.canPredict(data)) {
+            pe.predict(data)
+          } else {
+            pe.clear()
+          }
+        }
         ws.send(encoder.encode(data))
       }
     })
 
     // Send resize events as JSON text messages
     term.onResize(({ cols, rows }) => {
+      predictiveEchoRef.current?.clear()
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
@@ -690,6 +806,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
       clearTimeout(watchdogTimer.current)
       watchdogTimer.current = undefined
     }
+    if (telemetryIntervalRef.current) {
+      clearInterval(telemetryIntervalRef.current)
+      telemetryIntervalRef.current = undefined
+    }
     cleanupWs()
     if (webglAddonRef.current) {
       webglAddonRef.current.dispose()
@@ -700,6 +820,10 @@ export function useTerminal(sessionName: string, hostId?: string) {
       graphemesAddonRef.current = null
       graphemesLoadedRef.current = false
     }
+    if (predictiveEchoRef.current) {
+      predictiveEchoRef.current.dispose()
+      predictiveEchoRef.current = null
+    }
     if (termRef.current) {
       listenerCleanupRef.current?.()
       listenerCleanupRef.current = null
@@ -709,7 +833,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
     containerRef.current = null
   }, [cleanupWs])
 
-  const reconfigure = useCallback((renderer: string, graphemes: boolean) => {
+  const reconfigure = useCallback((renderer: string, graphemes: boolean, predictiveEcho: boolean) => {
     const term = termRef.current
     if (!term) return
 
@@ -745,6 +869,18 @@ export function useTerminal(sessionName: string, hostId?: string) {
       graphemesAddonRef.current.dispose()
       graphemesAddonRef.current = null
       graphemesLoadedRef.current = false
+    }
+
+    // Handle predictive echo change — dispose on disable, lazy-create on enable.
+    if (predictiveEcho && !predictiveEchoRef.current) {
+      try {
+        predictiveEchoRef.current = new PredictiveEcho(term)
+      } catch (e) {
+        console.warn('Predictive echo failed to initialize:', e)
+      }
+    } else if (!predictiveEcho && predictiveEchoRef.current) {
+      predictiveEchoRef.current.dispose()
+      predictiveEchoRef.current = null
     }
   }, [])
 

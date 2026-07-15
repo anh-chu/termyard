@@ -15,6 +15,7 @@ type Terminal struct {
 	Scrollback       int    `json:"scrollback"`
 	Renderer         string `json:"renderer"`
 	UnicodeGraphemes bool   `json:"unicode_graphemes"`
+	PredictiveEcho   bool   `json:"predictive_echo"`
 }
 
 type Sidebar struct {
@@ -66,6 +67,7 @@ func Default() *Preferences {
 			Scrollback:       5000,
 			Renderer:         "dom",
 			UnicodeGraphemes: false,
+			PredictiveEcho:   false,
 		},
 		Theme: "dark",
 		Sidebar: Sidebar{

@@ -256,12 +256,12 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     return () => disconnect()
   }, [sessionName])
 
-  // Reconfigure the live terminal when renderer or grapheme prefs change,
-  // without tearing down the WebSocket connection.
+  // Reconfigure the live terminal when renderer, grapheme, or predictive-echo
+  // prefs change, without tearing down the WebSocket connection.
   useEffect(() => {
     if (!prefs) return
-    reconfigure(prefs.terminal.renderer, prefs.terminal.unicode_graphemes)
-  }, [prefs.terminal.renderer, prefs.terminal.unicode_graphemes, reconfigure])
+    reconfigure(prefs.terminal.renderer, prefs.terminal.unicode_graphemes, prefs.terminal.predictive_echo)
+  }, [prefs.terminal.renderer, prefs.terminal.unicode_graphemes, prefs.terminal.predictive_echo, reconfigure])
 
   // Auto-focus on mount only for the active pane — the inactive pane's
   // auto-focus would steal focus from the intended target.

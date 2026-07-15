@@ -515,6 +515,13 @@ export function Settings({ pushState, onPushSubscribe, onPushUnsubscribe, onLogo
                 label={prefs.terminal.unicode_graphemes ? 'EXPERIMENTAL · ON' : 'EXPERIMENTAL · OFF'}
               />
             </Row>
+            <Row label="Predictive Echo" description="Experimental: show keystrokes immediately while awaiting server confirmation. Only safe printable ASCII in normal mode.">
+              <Toggle
+                checked={prefs.terminal.predictive_echo}
+                onChange={(v) => updateNested('terminal', { predictive_echo: v })}
+                label={prefs.terminal.predictive_echo ? 'EXPERIMENTAL · ON' : 'EXPERIMENTAL · OFF'}
+              />
+            </Row>
             <Divider />
             <Row label="Hide Alerts in Fullscreen" description="Hide the agent alert banner when terminal is fullscreen">
               <Toggle

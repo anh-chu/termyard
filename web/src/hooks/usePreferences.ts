@@ -7,6 +7,7 @@ export interface Preferences {
     scrollback: number
     renderer: string
     unicode_graphemes: boolean
+    predictive_echo: boolean
   }
   theme: string
   sidebar: {
@@ -38,6 +39,7 @@ export const defaultPreferences: Preferences = {
     scrollback: 5000,
     renderer: 'dom',
     unicode_graphemes: false,
+    predictive_echo: false,
   },
   theme: 'dark',
   sidebar: {
