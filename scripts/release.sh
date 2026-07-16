@@ -42,7 +42,12 @@ if [ -f web/package.json ]; then
   sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/" web/package.json
 fi
 
-# 3. .release-please-manifest.json
+# 3. web/package-lock.json
+if [ -f web/package-lock.json ]; then
+  sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" web/package-lock.json
+fi
+
+# 4. .release-please-manifest.json
 if [ -f .release-please-manifest.json ]; then
   echo "{\".\":\"${NEW_VERSION}\"}" > .release-please-manifest.json
 fi
@@ -69,6 +74,16 @@ if [ -f web/package.json ]; then
   fi
 fi
 
+if [ -f web/package-lock.json ]; then
+  LOCK_VER=$(grep -m1 -oP '"version": "\K[^"]+' web/package-lock.json)
+  if [ "$LOCK_VER" != "$NEW_VERSION" ]; then
+    echo "  FAIL: web/package-lock.json still has $LOCK_VER (expected $NEW_VERSION)" >&2
+    ERRORS=$((ERRORS + 1))
+  else
+    echo "  OK: web/package-lock.json = $NEW_VERSION"
+  fi
+fi
+
 if [ "$ERRORS" -gt 0 ]; then
   echo "ABORT: $ERRORS file(s) failed verification. Nothing committed." >&2
   exit 1
@@ -81,7 +96,7 @@ if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
 fi
 
 # Stage, commit, push
-git add pkg/common/version.go web/package.json .release-please-manifest.json
+git add pkg/common/version.go web/package.json web/package-lock.json .release-please-manifest.json
 git commit -m "chore(release): ${NEW_VERSION}"
 git push origin master
 
