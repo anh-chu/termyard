@@ -4,6 +4,8 @@ import type { ChangeEvent, DragEvent, ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
 import { usePreferences } from '../hooks/usePreferences'
 import { useArtifacts } from '../hooks/useArtifacts'
+import { useFileUpload } from '../hooks/useFileUpload'
+import { UploadStatus } from './UploadStatus'
 import { cn } from '../lib/utils'
 import { popOut, pipUnavailableReason } from '../lib/pip'
 import { grantArtifactToken, getArtifactKind } from '../lib/artifactPreview'
@@ -161,7 +163,6 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     sendRawBytes,
     sendText,
     sendImage,
-    sendFile,
     ctrlModifierActive,
     toggleCtrlModifier,
     clearCtrlModifier,
@@ -468,6 +469,8 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [fullscreen, onToggleFullscreen])
 
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+
   const sendSequence = useCallback((sequence: string | Uint8Array) => {
     if (typeof sequence === 'string') {
       sendText(sequence)
@@ -529,11 +532,20 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     fileInputRef.current?.click()
   }, [restoreTerminalFocus])
 
+  const { uploads, uploadFile, cancelUpload, dismissUpload, keepVisible } = useFileUpload(sessionName, hostId)
+
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
-      await sendFile(file, file.type || 'application/octet-stream')
+      const result = await uploadFile(file)
+      if (result.quotedPath) {
+        if (termConnected) {
+          sendText(result.quotedPath)
+        } else {
+          keepVisible(result.id)
+        }
+      }
     }
-  }, [sendFile])
+  }, [uploadFile, sendText, termConnected, keepVisible])
 
   const handleFileSelection = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
@@ -543,6 +555,13 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     void uploadFiles(files)
   }, [restoreTerminalFocus, uploadFiles])
 
+  const handleTerminalDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDraggingFiles(true)
+  }, [])
+
   const handleTerminalDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes('Files')) return
     event.preventDefault()
@@ -550,10 +569,17 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     event.dataTransfer.dropEffect = 'copy'
   }, [])
 
+  const handleTerminalDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return
+    setIsDraggingFiles(false)
+  }, [])
+
   const handleTerminalDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes('Files')) return
     event.preventDefault()
     event.stopPropagation()
+    setIsDraggingFiles(false)
     void uploadFiles(event.dataTransfer.files)
     focus()
   }, [focus, uploadFiles])
@@ -587,14 +613,17 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
         <div ref={popHomeRef} className="min-h-0 flex-1 relative">
         <div
           ref={popNodeRef}
-          className="absolute inset-0"
+          className={cn('absolute inset-0', isDraggingFiles && 'ring-2 ring-inset ring-primary')}
+          onDragEnter={handleTerminalDragEnter}
           onDragOver={handleTerminalDragOver}
+          onDragLeave={handleTerminalDragLeave}
           onDrop={handleTerminalDrop}
         >
           <div
             ref={containerRef}
             className="absolute inset-0 overflow-hidden"
           />
+          <UploadStatus uploads={uploads} onCancel={cancelUpload} onDismiss={dismissUpload} />
         {/* Pop-out (PiP) toggle */}
           <button
             onClick={handlePopOut}

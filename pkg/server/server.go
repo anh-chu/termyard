@@ -1517,6 +1517,14 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				json.NewEncoder(w).Encode(map[string]any{"artifacts": artifacts})
 			})
 
+		// Dedicated file upload — streams a browser-supplied file into
+		// private temp storage on the session's host and returns the
+		// shell-quoted path for PTY injection. No product size cap.
+		// Route: POST /api/upload?session=<name>&host=<id>&filename=<name>
+		r.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
+			handleUpload(w, r, opts)
+		})
+
 			// Authoritative set of in-progress hook-based agent turns. The frontend
 			// reconciles its "working" badge against this on each periodic refresh so
 			// a dropped "completed" WebSocket frame self-heals.
@@ -2359,6 +2367,201 @@ func handleFile(w http.ResponseWriter, r *http.Request, grants *fileGrants) {
 	w.Header().Set("Content-Disposition", "inline; filename=\""+filepath.Base(p)+"\"")
 	http.ServeContent(w, r, filepath.Base(p), info.ModTime(), f)
 }
+
+// handleUpload streams a browser-supplied file into private temp storage on
+// the session's host and returns {"path","quotedPath"}. No product size cap.
+// Route: POST /api/upload?session=<name>&host=<id>&filename=<name>
+func handleUpload(w http.ResponseWriter, r *http.Request, opts *Options) {
+	filename := r.URL.Query().Get("filename")
+	if filename == "" {
+		http.Error(w, "filename required", http.StatusBadRequest)
+		return
+	}
+	if r.URL.Query().Get("session") == "" {
+		http.Error(w, "session required", http.StatusBadRequest)
+		return
+	}
+	hostID := r.URL.Query().Get("host")
+	if hostID != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(hostID) {
+		handleRemoteUpload(w, r, opts, hostID, filename)
+		return
+	}
+	path, err := tmux.StoreUploadedFile(r.Body, filename)
+	if err != nil {
+		if r.Context().Err() != nil {
+			return // client gone, nothing to write
+		}
+		if errors.Is(err, tmux.ErrEmptyUpload) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "store upload: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"path": path, "quotedPath": tmux.ShellQuote(path),
+	})
+}
+
+// handleRemoteUpload relays a browser file upload to a peer host over a
+// dedicated /ws/peer-stream data connection.
+func handleRemoteUpload(w http.ResponseWriter, r *http.Request, opts *Options, hostID, filename string) {
+	if opts == nil || opts.PeerMgr == nil {
+		http.Error(w, "peer routing unavailable", http.StatusInternalServerError)
+		return
+	}
+	peerConn := opts.PeerMgr.GetPeerConnection(hostID)
+	if peerConn == nil {
+		http.Error(w, "peer not connected", http.StatusBadGateway)
+		return
+	}
+	if !peerConn.HasCapability(peer.CapUpload) {
+		http.Error(w, "peer does not support uploads — upgrade the peer first", http.StatusUpgradeRequired)
+		return
+	}
+	if opts.Identity == nil || opts.StreamReg == nil {
+		http.Error(w, "peer routing unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	streamID := peer.GenerateStreamID()
+	token := peer.NewToken()
+	log := logrus.WithFields(logrus.Fields{"stream": streamID, "file": filename, "host": hostID})
+	openMsg, _ := peer.NewMessage(peer.MsgOpenUpload, peer.OpenUploadPayload{
+		StreamID:     streamID,
+		Token:        token,
+		Filename:     filename,
+		ViewerHostID: opts.PeerMgr.LocalID(),
+	})
+
+	dial := peerConn.Role == peer.RoleDialer
+	var conn *websocket.Conn
+	if dial {
+		addr := opts.PeerMgr.GetPeerAddress(hostID)
+		c, err := peer.DialPeerStream(context.Background(), addr, opts.Identity, token)
+		if err != nil {
+			log.WithError(err).Debug("upload stream dial failed")
+			http.Error(w, "upload stream setup failed", http.StatusBadGateway)
+			return
+		}
+		conn = c
+		if !peerConn.EnqueueHi(openMsg) {
+			conn.Close()
+			http.Error(w, "peer send queue full", http.StatusBadGateway)
+			return
+		}
+	} else {
+		ps := peer.NewPendingStream(streamID, "", 0, 0, hostID, opts.PeerMgr.LocalID(), hostID)
+		opts.StreamReg.Register(token, ps)
+		if !peerConn.EnqueueHi(openMsg) {
+			http.Error(w, "peer send queue full", http.StatusBadGateway)
+			return
+		}
+		// Context-aware setup wait — honour browser cancellation (xhr.abort).
+		resolvedCh := make(chan struct {
+			conn *websocket.Conn
+			ok   bool
+		}, 1)
+		go func() {
+			c, ok := ps.WaitResolved(peer.StreamSetupTimeout())
+			resolvedCh <- struct {
+				conn *websocket.Conn
+				ok   bool
+			}{c, ok}
+		}()
+		select {
+		case <-r.Context().Done():
+			return
+		case rc := <-resolvedCh:
+			if !rc.ok {
+				http.Error(w, "upload stream setup failed", http.StatusBadGateway)
+				return
+			}
+			conn = rc.conn
+		}
+	}
+	defer conn.Close()
+	conn.EnableWriteCompression(false)
+
+	// Pump body to peer as binary frames (256 KiB chunks).
+	buf := make([]byte, 256*1024)
+	for {
+		n, readErr := r.Body.Read(buf)
+		if n > 0 {
+			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+				log.WithError(err).Debug("upload relay write failed")
+				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"upload-abort"}`))
+				return
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			// Body read error (client disconnected)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"upload-abort"}`))
+			return
+		}
+	}
+	// Send EOF frame.
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"upload-eof"}`)); err != nil {
+		log.WithError(err).Debug("upload relay eof failed")
+		return
+	}
+
+	// Read result from peer with context awareness so browser cancellation
+	// (e.g. xhr.abort) is honoured even after the body has been fully sent.
+	type wsReadResult struct {
+		data []byte
+		err  error
+	}
+	readCh := make(chan wsReadResult, 1)
+	go func() {
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		_, data, err := conn.ReadMessage()
+		readCh <- wsReadResult{data, err}
+	}()
+	var result []byte
+	select {
+	case <-r.Context().Done():
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"upload-abort"}`))
+		conn.Close()
+		return
+	case rr := <-readCh:
+		if rr.err != nil {
+			log.WithError(rr.err).Debug("upload relay result failed")
+			http.Error(w, "peer upload timed out", http.StatusGatewayTimeout)
+			return
+		}
+		result = rr.data
+	}
+
+	var res struct {
+		Path       string `json:"path"`
+		QuotedPath string `json:"quotedPath"`
+		Error      string `json:"error"`
+	}
+	if err := json.Unmarshal(result, &res); err != nil {
+		log.WithError(err).Debug("upload relay bad result")
+		http.Error(w, "invalid peer response", http.StatusBadGateway)
+		return
+	}
+	if res.Error != "" {
+		code := http.StatusInternalServerError
+		if tmux.IsEmptyUploadMessage(res.Error) {
+			code = http.StatusBadRequest
+		}
+		http.Error(w, "remote upload: "+res.Error, code)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"path": res.Path, "quotedPath": res.QuotedPath,
+	})
+}
+
 func registerProxyRoutes(r chi.Router, opts *Options) {
 	// Port-forward proxy — exposes localhost-bound services through termyard's URL.
 	// Requires auth (same rule as other protected routes) so remote users can't

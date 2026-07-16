@@ -117,29 +117,44 @@ func decodePastedBytes(data, kind string) ([]byte, error) {
 	return contents, nil
 }
 
+// createPasteFile makes a private paste directory (0700), writes the marker,
+// and creates a temp file inside it. Caller holds pasteStoreMu.
+func createPasteFile(extension string) (dir string, file *os.File, err error) {
+	dir, err = os.MkdirTemp(os.TempDir(), pasteDirectoryPrefix)
+	if err != nil {
+		return "", nil, fmt.Errorf("create paste directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("secure paste directory: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, pasteMarkerName), []byte(pasteMarkerContents), 0o600); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("mark paste directory: %w", err)
+	}
+
+	f, err := os.CreateTemp(dir, pasteFilePrefix+"*"+extension)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("create pasted file: %w", err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		_ = os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("secure pasted file: %w", err)
+	}
+	return dir, f, nil
+}
+
 func storePastedBytes(contents []byte, extension string) (string, error) {
 	pasteStoreMu.Lock()
 	defer pasteStoreMu.Unlock()
 
 	cleanupStalePastes(time.Now())
 
-	dir, err := os.MkdirTemp(os.TempDir(), pasteDirectoryPrefix)
+	dir, file, err := createPasteFile(extension)
 	if err != nil {
-		return "", fmt.Errorf("create paste directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		_ = os.RemoveAll(dir)
-		return "", fmt.Errorf("secure paste directory: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, pasteMarkerName), []byte(pasteMarkerContents), 0o600); err != nil {
-		_ = os.RemoveAll(dir)
-		return "", fmt.Errorf("mark paste directory: %w", err)
-	}
-
-	file, err := os.CreateTemp(dir, pasteFilePrefix+"*"+extension)
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		return "", fmt.Errorf("create pasted file: %w", err)
+		return "", err
 	}
 	path := file.Name()
 	defer func() {
@@ -147,12 +162,9 @@ func storePastedBytes(contents []byte, extension string) (string, error) {
 			_ = file.Close()
 		}
 	}()
-	if err := file.Chmod(0o600); err != nil {
-		_ = os.Remove(path)
-		_ = os.RemoveAll(dir)
-		return "", fmt.Errorf("secure pasted file: %w", err)
-	}
 	if _, err := file.Write(contents); err != nil {
+		_ = file.Close()
+		file = nil
 		_ = os.Remove(path)
 		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("write pasted file: %w", err)

@@ -89,11 +89,21 @@ const (
 	MsgFileReadResult = "file-read-result"
 )
 
+// Message types for streaming file upload to a peer.
+const (
+	// MsgOpenUpload asks a peer to prepare a dedicated upload data connection,
+	// correlated by one-time token. Sent over the control link.
+	MsgOpenUpload = "open-upload"
+)
+
 // CapPerStream advertises dedicated /ws/peer-stream PTY data connections.
 const CapPerStream = "per-stream"
 
+// CapUpload advertises dedicated /ws/peer-stream file-upload connections.
+const CapUpload = "upload"
+
 // localCapabilities is what this build advertises in the hello.
-var localCapabilities = []string{CapPerStream}
+var localCapabilities = []string{CapPerStream, CapUpload}
 
 // Message is the envelope for all control WebSocket messages
 type Message struct {
@@ -191,6 +201,18 @@ type FileReadPayload struct {
 	Token   string `json:"token"`
 	Path    string `json:"path"`
 	Session string `json:"session"` // for resolving relative paths
+}
+
+// OpenUploadPayload asks a peer to prepare a dedicated upload data connection.
+// The hub streams file content as binary WebSocket frames, then sends a
+// text control frame to signal EOF ({"type":"upload-eof"}) or abort
+// ({"type":"upload-abort"}). The peer replies with one text result frame:
+// {"path":"...","quotedPath":"..."} or {"error":"..."}.
+type OpenUploadPayload struct {
+	StreamID     string `json:"stream_id"`
+	Token        string `json:"token"`
+	Filename     string `json:"filename"`
+	ViewerHostID string `json:"viewer_host_id"`
 }
 
 // FileReadResultPayload returns file content (base64-encoded) or error.

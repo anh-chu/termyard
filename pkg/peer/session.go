@@ -790,6 +790,14 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 		}
 		go handleFileRead(p, pc, deps, log)
 
+	case MsgOpenUpload:
+		var p OpenUploadPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			log.WithError(err).Debug("invalid open-upload")
+			return
+		}
+		go handleOpenUpload(p, pc, deps, log)
+
 	case MsgFileReadResult:
 		var p FileReadResultPayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {

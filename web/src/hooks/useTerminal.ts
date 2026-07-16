@@ -126,32 +126,19 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-async function sendPastedContent(
-  ws: WebSocket,
-  type: 'paste-image' | 'paste-file',
-  file: File,
-  fallbackType: string,
-): Promise<void> {
+async function sendPastedImage(ws: WebSocket, file: File, fallbackType: string): Promise<void> {
   if (file.size > MAX_PASTED_FILE_BYTES) {
-    console.warn(`Pasted file exceeds ${MAX_PASTED_FILE_BYTES} byte limit`)
+    console.warn(`Pasted image exceeds ${MAX_PASTED_FILE_BYTES} byte limit`)
     return
   }
 
   const buffer = await file.arrayBuffer()
   ws.send(JSON.stringify({
-    type,
+    type: 'paste-image',
     data: bytesToBase64(new Uint8Array(buffer)),
     mime: file.type || fallbackType,
     filename: file.name,
   }))
-}
-
-function sendPastedImage(ws: WebSocket, file: File, fallbackType: string): Promise<void> {
-  return sendPastedContent(ws, 'paste-image', file, fallbackType)
-}
-
-function sendPastedFile(ws: WebSocket, file: File, fallbackType: string): Promise<void> {
-  return sendPastedContent(ws, 'paste-file', file, fallbackType)
 }
 
 export function useTerminal(sessionName: string, hostId?: string) {
@@ -203,16 +190,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
     sendPastedImage(currentWs, file, fallbackType).catch((err) => {
       console.error('Failed to send pasted image:', err)
     })
-  }, [])
-
-  const sendFile = useCallback(async (file: File, fallbackType: string) => {
-    const currentWs = wsRef.current
-    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return
-    try {
-      await sendPastedFile(currentWs, file, fallbackType)
-    } catch (err) {
-      console.error('Failed to send pasted file:', err)
-    }
   }, [])
 
   const clearCtrlModifier = useCallback(() => {
@@ -501,20 +478,17 @@ export function useTerminal(sessionName: string, hostId?: string) {
     const onPaste = (e: ClipboardEvent) => {
       const items = Array.from(e.clipboardData?.items ?? [])
       const imageItem = items.find(item => item.type.startsWith('image/'))
-      const fileItem = imageItem ? undefined : items.find(item => item.kind === 'file')
-      const item = imageItem ?? fileItem
-      if (!item) return
+      if (!imageItem) return
 
-      const file = item.getAsFile()
+      const file = imageItem.getAsFile()
       const currentWs = wsRef.current
       if (!file || !currentWs || currentWs.readyState !== WebSocket.OPEN) return
 
       e.preventDefault()
 
-      const send = imageItem ? sendPastedImage : sendPastedFile
-      send(currentWs, file, item.type)
+      sendPastedImage(currentWs, file, imageItem.type)
         .catch((err) => {
-          console.error(`Failed to read pasted ${imageItem ? 'image' : 'file'}:`, err)
+          console.error('Failed to read pasted image:', err)
         })
     }
     const onContextMenu = (e: MouseEvent) => {
@@ -956,7 +930,6 @@ export function useTerminal(sessionName: string, hostId?: string) {
     sendRawBytes,
     sendText,
     sendImage,
-    sendFile,
     ctrlModifierActive,
     toggleCtrlModifier,
     clearCtrlModifier,
