@@ -559,9 +559,8 @@ export function useTerminal(sessionName: string, hostId?: string) {
     const isDirectPty = sessionName.startsWith('direct-pty:')
     let wsUrl: string
     if (isDirectPty) {
-      // Strip prefix to get optional cwd
-      const cwd = sessionName.slice('direct-pty:'.length) || ''
-      const cwdParam = cwd ? `&cwd=${encodeURIComponent(cwd)}` : ''
+      // direct-pty:<timestamp> — no cwd in the key, just connect
+      const cwdParam = ''
       wsUrl = `${protocol}//${window.location.host}/ws/direct-session?cols=${cols}&rows=${rows}${cwdParam}`
     } else {
       const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
