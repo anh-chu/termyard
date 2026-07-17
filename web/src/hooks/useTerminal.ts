@@ -556,8 +556,17 @@ export function useTerminal(sessionName: string, hostId?: string) {
 
     // Connect WebSocket for this session
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
-    const wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
+    const isDirectPty = sessionName.startsWith('direct-pty:')
+    let wsUrl: string
+    if (isDirectPty) {
+      // Strip prefix to get optional cwd
+      const cwd = sessionName.slice('direct-pty:'.length) || ''
+      const cwdParam = cwd ? `&cwd=${encodeURIComponent(cwd)}` : ''
+      wsUrl = `${protocol}//${window.location.host}/ws/direct-session?cols=${cols}&rows=${rows}${cwdParam}`
+    } else {
+      const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
+      wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
+    }
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws

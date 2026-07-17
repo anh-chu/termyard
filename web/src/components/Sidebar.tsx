@@ -64,6 +64,11 @@ interface SidebarProps {
   // Pruning per-device ordering then would delete entries for sessions that
   // simply haven't reappeared yet.
   pruningSuspended?: boolean
+  // Direct PTY session keys currently in the pane tree (not tmux sessions)
+  directPtyKeys?: string[]
+  onDirectPtySelect?: (key: string) => void
+  onDirectPtyClose?: (key: string) => void
+  onQuickShell?: () => void
 }
 
 interface RenameState {
@@ -198,6 +203,10 @@ export function Sidebar({
   sessionAttrs,
   setSessionAttr,
   pruningSuspended,
+  directPtyKeys = [],
+  onDirectPtySelect,
+  onDirectPtyClose,
+  onQuickShell,
 }: SidebarProps) {
   const glancePreview = useGlance(!!hasMultipleHosts)
   const { schedules } = useSchedules()
@@ -1400,6 +1409,19 @@ export function Sidebar({
                 <circle cx="3.5" cy="18" r="1.5" fill="currentColor" stroke="none" />
               </svg>
             </button>
+            {onQuickShell && (
+              <button
+                type="button"
+                onClick={onQuickShell}
+                title="Quick Shell (direct PTY, no tmux)"
+                className="shrink-0 rounded-md border border-hairline bg-surface-elevated px-2 py-2 text-mute hover:text-ink transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+              </button>
+            )}
             {onToggleCollapse && (
               <button
                 type="button"
@@ -1448,7 +1470,63 @@ export function Sidebar({
 
       <nav className="flex-1 overflow-y-auto p-2">
         <ul className="space-y-0.5">
-          {visibleSessions.length === 0 && (
+          {/* Direct PTY (Quick Shell) sessions */}
+          {!collapsed && directPtyKeys.length > 0 && (
+            <li>
+              <div className="flex items-center gap-2 px-1 pt-2 pb-1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-mute/70">Shells</span>
+                <span className="text-[10px] font-mono text-mute/40">{directPtyKeys.length}</span>
+              </div>
+              <ul className="space-y-0.5">
+                {directPtyKeys.map(key => {
+                  const isSelected = selectedSession === key
+                  const ts = key.slice('direct-pty:'.length)
+                  const label = ts ? new Date(parseInt(ts, 10)).toLocaleTimeString() : 'shell'
+                  return (
+                    <li key={key}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onDirectPtySelect?.(key)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onDirectPtySelect?.(key) } }}
+                        className={cn(
+                          'relative flex items-center gap-2 w-full px-2.5 py-2 rounded-sm transition-all duration-200 text-ink',
+                          'hover:bg-white/[0.05]',
+                          isSelected && 'bg-white/[0.08] !text-primary border border-white/20',
+                          !isSelected && 'border border-transparent',
+                        )}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-mute/60">
+                          <polyline points="4 17 10 11 4 5" />
+                          <line x1="12" y1="19" x2="20" y2="19" />
+                        </svg>
+                        <span className="flex-1 text-[12px] font-medium tracking-tight truncate">Shell · {label}</span>
+                        {onDirectPtyClose && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onDirectPtyClose(key) }}
+                            title="Close shell"
+                            className="shrink-0 text-mute/40 hover:text-accent-red transition-colors"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </li>
+          )}
+
+          {visibleSessions.length === 0 && directPtyKeys.length === 0 && (
             <li className="p-3 text-mute text-sm">
               {collapsed ? '—' : 'No sessions'}
             </li>

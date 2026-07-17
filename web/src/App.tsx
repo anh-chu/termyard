@@ -1012,6 +1012,32 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     return null
   }, [selectSession, refresh, refocusTerminal])
 
+  const handleQuickShell = useCallback(() => {
+    const key = `direct-pty:${Date.now()}`
+    selectSession(key)
+  }, [selectSession])
+
+  const handleDirectPtyClose = useCallback((key: string) => {
+    closePane(key)
+    setSingleView(prev => prev === key ? null : prev)
+  }, [closePane])
+
+  // Extract direct PTY keys from pane tree and singleView for sidebar display
+  const directPtyKeys = useMemo(() => {
+    const keys: string[] = []
+    if (singleView && singleView.startsWith('direct-pty:')) {
+      keys.push(singleView)
+    }
+    if (paneTree) {
+      for (const leaf of getLeaves(paneTree)) {
+        if (leaf.startsWith('direct-pty:') && !keys.includes(leaf)) {
+          keys.push(leaf)
+        }
+      }
+    }
+    return keys
+  }, [singleView, paneTree])
+
   const handleDropNewSession = useCallback((targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
     let key = targetKey || activeKey
 
@@ -1220,6 +1246,10 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
             sessionAttrs={sessionAttrs}
             setSessionAttr={setSessionAttr}
             pruningSuspended={pruningSuspended}
+            directPtyKeys={directPtyKeys}
+            onDirectPtySelect={(key) => selectSession(key)}
+            onDirectPtyClose={handleDirectPtyClose}
+            onQuickShell={handleQuickShell}
           />
         )}
         <div
