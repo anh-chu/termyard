@@ -2121,6 +2121,11 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				w.WriteHeader(http.StatusNoContent)
 			})
 		})
+
+		// PTY benchmark: compare direct vs tmux throughput and latency
+		r.Get("/pty-benchmark", func(w http.ResponseWriter, r *http.Request) {
+			handlePTYBenchmark(w, r, opts)
+		})
 	})
 }
 
@@ -2139,6 +2144,7 @@ func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			}
 			ptyHandler.HandleSession(w, req)
 		})
+		r.With(authMw).Get("/ws/direct-session", ptyHandler.HandleDirectSession)
 	} else {
 		r.Get("/ws/events", hub.HandleEvents)
 		r.Get("/ws/session", func(w http.ResponseWriter, req *http.Request) {
@@ -2149,6 +2155,7 @@ func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			}
 			ptyHandler.HandleSession(w, req)
 		})
+		r.Get("/ws/direct-session", ptyHandler.HandleDirectSession)
 	}
 
 	// Peer WebSocket routes (no browser auth — peers use their own challenge-response)

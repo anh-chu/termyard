@@ -12,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/anh-chu/termyard/pkg/activity"
+	"github.com/anh-chu/termyard/pkg/pty"
 	"github.com/anh-chu/termyard/pkg/tmux"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 )
@@ -45,21 +46,11 @@ func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker, t
 	}
 }
 
-// BridgePTY spawns a tmux PTY for session and pumps it over an already-open
-// conn: PTY->conn (binary) in a goroutine, conn->PTY (control+binary) in the
-// caller's goroutine, answering browser heartbeat pings locally. It does NOT
-// upgrade and does NOT close conn — the caller owns conn's single Close.
-func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16, act *activity.Tracker, client *tmux.Client, tracker *toolevents.Tracker, log *logrus.Entry) error {
+// bridgeSession pumps data between a pty.Session and a WebSocket connection.
+// The scanner, if non-nil, receives output chunks for artifact detection.
+func bridgeSession(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, scanner *artifactScanner, log *logrus.Entry) {
 	conn.SetReadLimit(tmux.MaxPTYControlMessageBytes)
 
-	ptySess, err := tmux.NewPTYSession(tmuxPath, session, cols, rows)
-	if err != nil {
-		return err
-	}
-	defer ptySess.Close()
-
-	scanContext, cancelScan := context.WithCancel(context.Background())
-	scanner := newArtifactScanner(scanContext, client, tracker, session)
 	output := newOutputCoalescer(func(mt int, payload []byte) error {
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		err := conn.WriteMessage(mt, payload)
@@ -80,7 +71,7 @@ func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16
 
 		buffer := make([]byte, 32*1024)
 		for {
-			n, readErr := ptySess.Read(buffer)
+			n, readErr := sess.Read(buffer)
 			if n > 0 {
 				ptyReads++
 				if act != nil {
@@ -117,20 +108,19 @@ outer:
 				}
 				continue
 			}
-			if err := tmux.HandlePTYControlMessage(ptySess, message); err != nil {
+			if err := tmux.HandlePTYControlMessage(sess, message); err != nil {
 				log.WithError(err).Debug("control message failed")
 			}
 
 		case websocket.BinaryMessage:
-			if _, err := ptySess.Write(message); err != nil {
+			if _, err := sess.Write(message); err != nil {
 				log.WithError(err).Debug("PTY write failed")
 				break outer
 			}
 		}
 	}
 
-	cancelScan()
-	ptySess.Close()
+	sess.Close()
 	<-ptyDone
 	stats := output.Stats()
 	fields := logrus.Fields{
@@ -145,7 +135,30 @@ outer:
 		fields["dropped_scan_chunks"] = scanner.DroppedChunks()
 	}
 	log.WithFields(fields).Info("session ws client disconnected")
+}
+
+// BridgePTY spawns a tmux PTY for session and pumps it over an already-open
+// conn. It does NOT upgrade and does NOT close conn — the caller owns conn's
+// single Close.
+func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16, act *activity.Tracker, client *tmux.Client, tracker *toolevents.Tracker, log *logrus.Entry) error {
+	ptySess, err := tmux.NewPTYSession(tmuxPath, session, cols, rows)
+	if err != nil {
+		return err
+	}
+
+	scanContext, cancelScan := context.WithCancel(context.Background())
+	defer cancelScan()
+	scanner := newArtifactScanner(scanContext, client, tracker, session)
+
+	bridgeSession(conn, ptySess, session, act, scanner, log)
 	return nil
+}
+
+// BridgeDirectPTY pumps a direct PTY session over an already-open WebSocket
+// connection. It uses the same bridge loop as BridgePTY but without the
+// tmux-specific artifact scanner.
+func BridgeDirectPTY(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, log *logrus.Entry) {
+	bridgeSession(conn, sess, session, act, nil, log)
 }
 
 // SpliceConns pumps bytes between an upgraded browser WS and a peer data conn.
@@ -247,4 +260,41 @@ func (h *PTYTerminalHandler) HandleSession(w http.ResponseWriter, r *http.Reques
 		log.WithError(err).Error("failed to start PTY session")
 		conn.WriteMessage(websocket.TextMessage, []byte("\r\n[termyard: failed to attach to session]\r\n"))
 	}
+}
+
+// HandleDirectSession handles a WebSocket connection for a direct PTY session
+// (no tmux). Query params: cols=<cols>, rows=<rows>, cwd=<dir>
+func (h *PTYTerminalHandler) HandleDirectSession(w http.ResponseWriter, r *http.Request) {
+	cols, _ := strconv.ParseUint(r.URL.Query().Get("cols"), 10, 16)
+	rows, _ := strconv.ParseUint(r.URL.Query().Get("rows"), 10, 16)
+	if cols == 0 {
+		cols = 80
+	}
+	if rows == 0 {
+		rows = 24
+	}
+	cwd := r.URL.Query().Get("cwd")
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		logrus.WithError(err).Warn("direct session ws upgrade failed")
+		return
+	}
+	defer conn.Close()
+
+	sess, err := pty.NewDirectPTYSession("", uint16(cols), uint16(rows), cwd)
+	if err != nil {
+		logrus.WithError(err).Error("failed to start direct PTY session")
+		conn.WriteMessage(websocket.TextMessage, []byte("\r\n[termyard: failed to create direct PTY session]\r\n"))
+		return
+	}
+
+	log := logrus.WithFields(logrus.Fields{
+		"cols": cols,
+		"rows": rows,
+		"cwd":  cwd,
+	})
+	log.Info("direct session ws client connected")
+
+	BridgeDirectPTY(conn, sess, cwd, h.activityTracker, log)
 }
