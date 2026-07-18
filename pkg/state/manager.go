@@ -279,19 +279,48 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 		newMap[s.Name] = s
 	}
 
-	// Detect removed sessions. A session that vanishes from discovery (e.g.
-	// killed directly via tmux, outside termyard's UI) must also have its metadata
-	// dropped, otherwise a later session reusing the same tmux name inherits the
-	// stale DisplayName, UserPrompt, agent message, etc.
+	// --- Mass-removal safety guards ---
+	// These protect against transient discovery failures (e.g. socket directory
+	// temporarily unreadable) that would otherwise wipe every tracked session
+	// from state, violating the "sessions must not disappear without explicit
+	// user action" guarantee.
+
+	// Guard 1: if ALL sessions vanished from discovery, skip this cycle entirely.
+	if len(m.sessions) > 0 && len(newMap) == 0 {
+		logrus.Warn("state: all sessions disappeared from discovery — skipping removal (likely transient)")
+		m.mu.Unlock()
+		return
+	}
+
+	// Compute which sessions would be removed (deferred action so we can guard).
 	removed := make([]string, 0)
 	for name := range m.sessions {
 		if _, ok := newMap[name]; !ok {
 			removed = append(removed, name)
-			delete(m.meta, name)
-			m.mu.Unlock()
-			m.broadcast(StateEvent{Type: "session-removed", Session: name})
-			m.mu.Lock()
 		}
+	}
+
+	// Guard 2: don't remove more than 50% of sessions in one cycle (unless we
+	// only had 2 or fewer — a single intentional kill would look like 50%).
+	// Removing 1-2 sessions is fine; removing MOST sessions is almost certainly
+	// a discovery bug, not real session death.
+	if len(removed) > len(m.sessions)/2 && len(m.sessions) > 2 {
+		logrus.WithFields(logrus.Fields{
+			"current":      len(m.sessions),
+			"would_remove": len(removed),
+		}).Warn("state: would remove majority of sessions — skipping removal (likely transient)")
+		m.mu.Unlock()
+		return
+	}
+
+	// Now perform the actual removals. A session that vanishes from discovery
+	// (e.g. killed outside termyard's UI) must also have its metadata dropped,
+	// otherwise a later session reusing the same name inherits stale state.
+	for _, name := range removed {
+		delete(m.meta, name)
+		m.mu.Unlock()
+		m.broadcast(StateEvent{Type: "session-removed", Session: name})
+		m.mu.Lock()
 	}
 
 	// Detect added sessions

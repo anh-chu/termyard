@@ -141,35 +141,64 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 
 // List scans the socket directory for *.sock files, reads their sidecar JSON,
 // and checks liveness by attempting a connection.
-// Stale socket+json files (where the socket is dead) are removed.
+// Stale socket+json files (where the daemon process is confirmed dead) are removed.
 func (r *Registry) List() []SessionInfo {
 	entries, err := filepath.Glob(filepath.Join(r.dir, "*.sock"))
 	if err != nil {
 		return nil
 	}
 
-	var out []SessionInfo
-	for _, sockPath := range entries {
-		name := sockPath[:len(sockPath)-len(".sock")]
-		name = filepath.Base(name)
+	type removal struct {
+		name   string
+		reason string
+	}
 
-		// Check liveness with generous timeout; under load a daemon
-		// may be slow to accept. Require 3 consecutive failures before
-		// declaring the socket dead and cleaning up.
+	var (
+		out      []SessionInfo
+		stale    []removal
+		total    = len(entries)
+	)
+	// Track which entries we saw for later failure-count cleanup.
+	seen := make(map[string]bool, total)
+
+	for _, sockPath := range entries {
+		name := filepath.Base(sockPath[:len(sockPath)-len(".sock")])
+		seen[name] = true
+
 		conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 		if err != nil {
 			r.failMu.Lock()
 			r.failCount[name]++
 			fails := r.failCount[name]
 			r.failMu.Unlock()
-			if fails >= 3 {
-				r.removeStale(name)
+
+			if fails < 5 {
+				logrus.WithFields(logrus.Fields{
+					"component": "registry",
+					"name":      name,
+					"fails":     fails,
+				}).Debug("daemon liveness check failed, will retry")
+				continue
+			}
+
+			// Threshold reached. Before removing, verify the daemon
+			// process is actually dead (not just slow/overloaded).
+			pid := r.readDaemonPID(name)
+			if pid > 0 && processAlive(pid) {
+				logrus.WithFields(logrus.Fields{
+					"component": "registry",
+					"name":      name,
+					"pid":       pid,
+					"fails":     fails,
+				}).Warn("daemon process is alive but socket unreachable — keeping session")
 				r.failMu.Lock()
 				delete(r.failCount, name)
 				r.failMu.Unlock()
-			} else {
-				logrus.WithFields(logrus.Fields{"name": name, "fails": fails}).Debug("daemon liveness check failed, will retry")
+				continue
 			}
+
+			// Process is dead — safe to clean up.
+			stale = append(stale, removal{name: name, reason: "daemon process dead"})
 			continue
 		}
 		conn.Close()
@@ -201,16 +230,77 @@ func (r *Registry) List() []SessionInfo {
 
 		out = append(out, info)
 	}
+
+	// Mass-removal protection: if ALL entries would be removed (stale > 0
+	// and live == 0), skip staleness cleanup — this is almost certainly a
+	// transient system event (load spike, tmpfs issue, etc.) and we should
+	// not nuke every session in one go.
+	if len(out) == 0 && len(stale) > 0 {
+		logrus.WithFields(logrus.Fields{
+			"component": "registry",
+			"stale":     len(stale),
+			"total":     total,
+		}).Warn("all sessions appear stale — skipping removal (probable transient event)")
+		// Keep all sessions — do not clean up.
+		for _, s := range stale {
+			r.failMu.Lock()
+			delete(r.failCount, s.name)
+			r.failMu.Unlock()
+		}
+	} else {
+		for _, s := range stale {
+			r.removeStale(s.name, s.reason)
+			r.failMu.Lock()
+			delete(r.failCount, s.name)
+			r.failMu.Unlock()
+		}
+	}
+
+	// Clean up failure counters for sessions whose sockets disappeared
+	// (e.g. killed externally).
+	r.failMu.Lock()
+	for name := range r.failCount {
+		if !seen[name] {
+			delete(r.failCount, name)
+		}
+	}
+	r.failMu.Unlock()
+
 	return out
 }
 
+// readDaemonPID reads the metadata JSON sidecar and returns the daemon PID,
+// or 0 if the file cannot be read or parsed.
+func (r *Registry) readDaemonPID(name string) int {
+	metaPath := r.metadataPath(name)
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return 0
+	}
+	var meta sessionMeta
+	if json.Unmarshal(data, &meta) != nil {
+		return 0
+	}
+	return meta.Pid
+}
+
+// processAlive returns true if the process with the given PID exists.
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil
+}
+
 // removeStale removes a socket file and its metadata sidecar.
-func (r *Registry) removeStale(name string) {
+func (r *Registry) removeStale(name, reason string) {
 	sockPath := r.SocketPath(name)
 	metaPath := r.metadataPath(name)
 	os.Remove(sockPath)
 	os.Remove(metaPath)
-	logrus.WithField("name", name).Debug("removed stale session files")
+	logrus.WithFields(logrus.Fields{
+		"component": "registry",
+		"name":      name,
+		"reason":    reason,
+	}).Info("removed stale session files")
 }
 
 // Kill sends a FrameClose to the daemon via its socket.

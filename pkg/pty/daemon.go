@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -215,6 +216,15 @@ type daemon struct {
 }
 
 func (d *daemon) run() error {
+	defer func() {
+		if r := recover(); r != nil {
+			d.log.WithFields(logrus.Fields{
+				"panic": r,
+				"stack": string(debug.Stack()),
+			}).Error("daemon run accept loop panicked")
+		}
+	}()
+
 	// Goroutine: read PTY → ring buffer → broadcast.
 	go d.pumpPTY()
 
@@ -238,6 +248,16 @@ func (d *daemon) run() error {
 
 // pumpPTY reads from the PTY and fans out output to all clients.
 func (d *daemon) pumpPTY() {
+	defer func() {
+		if r := recover(); r != nil {
+			d.log.WithFields(logrus.Fields{
+				"panic": r,
+				"stack": string(debug.Stack()),
+			}).Error("daemon pumpPTY panicked — shutting down")
+			d.shutdown()
+		}
+	}()
+
 	buf := make([]byte, 64*1024)
 	for {
 		n, err := d.ptyFd.Read(buf)
@@ -284,6 +304,16 @@ func (d *daemon) broadcast(data []byte) {
 
 // handleClient serves a single client connection.
 func (d *daemon) handleClient(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.log.WithFields(logrus.Fields{
+				"panic": r,
+				"stack": string(debug.Stack()),
+			}).Error("daemon handleClient panicked — closing connection")
+			conn.Close()
+		}
+	}()
+
 	d.log.Debug("client connected")
 
 	writeCh := make(chan []byte, 256)

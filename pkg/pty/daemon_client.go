@@ -11,6 +11,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	// maxClientBuffer caps the internal read buffer to prevent the server
+	// from growing unbounded memory when a daemon produces output faster
+	// than the WebSocket can drain it.
+	maxClientBuffer = 4 * 1024 * 1024 // 4 MiB
+)
+
 // DaemonSession connects to a running session daemon via Unix socket
 // and implements the Session interface (Read/Write/Resize/Close).
 type DaemonSession struct {
@@ -78,8 +85,17 @@ func (d *DaemonSession) readFrames() {
 }
 
 // appendData adds data to the internal buffer and wakes blocked readers.
+// If the buffer would exceed maxClientBuffer, the oldest data is discarded.
 func (d *DaemonSession) appendData(data []byte) {
 	d.mu.Lock()
+	if d.buf.Len()+len(data) > maxClientBuffer {
+		// Discard the oldest buffered data to make room.
+		// If the incoming data alone exceeds the cap, keep only the tail.
+		d.buf.Reset()
+		if len(data) > maxClientBuffer {
+			data = data[len(data)-maxClientBuffer:]
+		}
+	}
 	d.buf.Write(data)
 	d.mu.Unlock()
 	d.cond.Broadcast()
