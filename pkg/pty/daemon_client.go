@@ -137,13 +137,14 @@ func (d *DaemonSession) Resize(cols, rows uint16) error {
 	return err
 }
 
-// Close implements Session — sends a Close frame to the daemon and
-// closes the local connection.
+// Close implements Session — disconnects from the daemon WITHOUT
+// killing it.  The daemon keeps running so other clients (or a
+// later reconnect) can attach.  To actually terminate the daemon,
+// use Registry.Kill() which sends FrameClose explicitly.
 func (d *DaemonSession) Close() {
-	// Best-effort close frame; daemon might already be gone.
-	frame := encodeFrame(FrameClose, nil)
-	d.conn.Write(frame)
+	// Do NOT send FrameClose — that would shut down the daemon.
+	// Just close the local socket connection.
 	d.conn.Close()
 	d.signalDone()
-	logrus.Debug("daemon session client closed")
+	logrus.Debug("daemon session client disconnected (daemon still running)")
 }
