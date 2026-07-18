@@ -16,9 +16,8 @@ import (
 )
 
 const systemdUnit = `[Unit]
-Description=Termyard - Web dashboard for tmux sessions
-Requires=termyard-tmux.service
-After=default.target termyard-tmux.service
+Description=Termyard - Web dashboard for coding agent sessions
+After=default.target
 
 [Service]
 Type=simple
@@ -28,22 +27,6 @@ RestartSec=5
 KillMode=process
 OOMScoreAdjust=-600
 Environment=PATH={{.Path}}
-
-[Install]
-WantedBy=default.target
-`
-
-const tmuxServerUnit = `[Unit]
-Description=Termyard tmux server
-After=default.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c '{{.TmuxPath}} new-session -d -s _yardkeep; {{.TmuxPath}} set-option -g exit-empty off; {{.TmuxPath}} kill-session -t _yardkeep'
-KillMode=process
-OOMScoreAdjust=-800
-OOMPolicy=continue
 
 [Install]
 WantedBy=default.target
@@ -82,7 +65,6 @@ type serviceConfig struct {
 	ExecStart  string
 	Path       string
 	LogDir     string
-	TmuxPath   string
 }
 
 func getBinaryPath() (string, error) {
@@ -115,15 +97,10 @@ func buildServiceConfig(binPath string) (serviceConfig, error) {
 			return serviceConfig{}, err
 		}
 	}
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return serviceConfig{}, fmt.Errorf("could not find tmux: %w", err)
-	}
 	return serviceConfig{
 		BinaryPath: binPath,
 		ExecStart:  binPath + " server",
 		Path:       os.Getenv("PATH"),
-		TmuxPath:   tmuxPath,
 	}, nil
 }
 
@@ -161,44 +138,43 @@ func installLinux(ctx context.Context, c *cli.Command) error {
 	}
 
 	unitPath := filepath.Join(unitDir, "termyard.service")
-	tmuxUnitPath := filepath.Join(unitDir, "termyard-tmux.service")
 
 	if err := os.MkdirAll(unitDir, 0755); err != nil {
 		return fmt.Errorf("could not create systemd user directory: %w", err)
 	}
-
-	if err := writeRenderedUnit(tmuxUnitPath, tmuxServerUnit, cfg); err != nil {
-		return fmt.Errorf("could not write tmux unit: %w", err)
-	}
-	fmt.Printf("Wrote %s\n", tmuxUnitPath)
 
 	if err := writeRenderedUnit(unitPath, systemdUnit, cfg); err != nil {
 		return fmt.Errorf("could not write unit file: %w", err)
 	}
 	fmt.Printf("Wrote %s\n", unitPath)
 
+	// Remove legacy tmux unit if present (from pre-v4 installs).
+	legacyTmuxUnit := filepath.Join(unitDir, "termyard-tmux.service")
+	if _, err := os.Stat(legacyTmuxUnit); err == nil {
+		_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "termyard-tmux.service").Run()
+		_ = os.Remove(legacyTmuxUnit)
+		fmt.Printf("Removed legacy %s\n", legacyTmuxUnit)
+	}
+
 	// Reload and enable
 	if err := exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").Run(); err != nil {
 		return fmt.Errorf("systemctl daemon-reload failed: %w", err)
 	}
 
-	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "termyard-tmux.service").Run(); err != nil {
-		return fmt.Errorf("systemctl enable tmux failed: %w", err)
-	}
 	if err := exec.CommandContext(ctx, "systemctl", "--user", "enable", "--now", "termyard.service").Run(); err != nil {
 		return fmt.Errorf("systemctl enable failed: %w", err)
 	}
 
 	fmt.Println("Service enabled and started (systemctl --user)")
 	fmt.Println()
-	fmt.Println("  Status:   systemctl --user status termyard termyard-tmux")
+	fmt.Println("  Status:   systemctl --user status termyard")
 	fmt.Println("  Logs:     journalctl --user -u termyard -f")
 	fmt.Println("  Restart:  systemctl --user restart termyard")
 	fmt.Println("  Web UI:   https://localhost:7654")
 	return nil
 }
 
-// RefreshUnits rewrites both systemd user units and daemon-reloads,
+// RefreshUnits rewrites the systemd user unit and daemon-reloads,
 // but does NOT restart any services. Returns nil (not an error) when
 // termyard.service is not installed or on non-Linux platforms.
 func RefreshUnits(ctx context.Context, binPath string) error {
@@ -217,13 +193,16 @@ func RefreshUnits(ctx context.Context, binPath string) error {
 	if err != nil {
 		return fmt.Errorf("refresh: %w", err)
 	}
-	tmuxUnitPath := filepath.Join(unitDir, "termyard-tmux.service")
 
-	if err := writeRenderedUnit(tmuxUnitPath, tmuxServerUnit, cfg); err != nil {
-		return fmt.Errorf("refresh: write tmux unit: %w", err)
-	}
 	if err := writeRenderedUnit(unitPath, systemdUnit, cfg); err != nil {
 		return fmt.Errorf("refresh: write main unit: %w", err)
+	}
+
+	// Remove legacy tmux unit if present (from pre-v4 installs).
+	legacyTmuxUnit := filepath.Join(unitDir, "termyard-tmux.service")
+	if _, err := os.Stat(legacyTmuxUnit); err == nil {
+		_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "termyard-tmux.service").Run()
+		_ = os.Remove(legacyTmuxUnit)
 	}
 
 	return exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").Run()
@@ -304,23 +283,22 @@ func uninstallLinux(ctx context.Context, c *cli.Command) error {
 
 	unitDir := filepath.Join(configDir, "systemd", "user")
 	unitPath := filepath.Join(unitDir, "termyard.service")
-	tmuxUnitPath := filepath.Join(unitDir, "termyard-tmux.service")
 
 	// Disable and stop
 	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "termyard.service").Run()
-	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "termyard-tmux.service").Run()
 
 	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("could not remove unit file: %w", err)
 	}
-	if err := os.Remove(tmuxUnitPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("could not remove tmux unit file: %w", err)
-	}
+
+	// Clean up legacy tmux unit if present.
+	legacyTmuxUnit := filepath.Join(unitDir, "termyard-tmux.service")
+	_ = exec.CommandContext(ctx, "systemctl", "--user", "disable", "--now", "termyard-tmux.service").Run()
+	_ = os.Remove(legacyTmuxUnit)
 
 	_ = exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").Run()
 
 	fmt.Printf("Removed %s\n", unitPath)
-	fmt.Printf("Removed %s\n", tmuxUnitPath)
 	fmt.Println("Service disabled and stopped")
 	return nil
 }

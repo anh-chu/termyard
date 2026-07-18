@@ -80,8 +80,7 @@ func ServiceManaged() bool {
 
 func RestartManaged(binPath string) error {
 	// Refresh systemd units before scheduling a restart so the new
-	// binary starts with the current unit definitions (including
-	// KillMode=process to prevent cgroup reaping of tmux).
+	// binary starts with the current unit definitions.
 	if err := install.RefreshUnits(context.Background(), binPath); err != nil {
 		return fmt.Errorf("refresh units before restart: %w", err)
 	}

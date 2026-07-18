@@ -13,7 +13,6 @@ func TestRenderUnit_systemdUnit_containsKillModeProcess(t *testing.T) {
 		BinaryPath: "/usr/local/bin/termyard",
 		ExecStart:  "/usr/local/bin/termyard server",
 		Path:       "/usr/local/bin:/usr/bin",
-		TmuxPath:   "/usr/bin/tmux",
 	}
 	out, err := renderUnit(systemdUnit, cfg)
 	if err != nil {
@@ -33,34 +32,11 @@ func TestRenderUnit_systemdUnit_containsKillModeProcess(t *testing.T) {
 	}
 }
 
-func TestRenderUnit_tmuxServerUnit_containsKillModeProcess(t *testing.T) {
-	cfg := serviceConfig{
-		BinaryPath: "/usr/local/bin/termyard",
-		ExecStart:  "/usr/local/bin/termyard server",
-		Path:       "/usr/local/bin:/usr/bin",
-		TmuxPath:   "/opt/homebrew/bin/tmux",
-	}
-	out, err := renderUnit(tmuxServerUnit, cfg)
-	if err != nil {
-		t.Fatalf("renderUnit(tmuxServerUnit) = error: %v", err)
-	}
-	if !strings.Contains(out, "KillMode=process") {
-		t.Errorf("tmuxServerUnit output missing KillMode=process:\n%s", out)
-	}
-	if !strings.Contains(out, "OOMPolicy=continue") {
-		t.Errorf("tmuxServerUnit output missing OOMPolicy=continue:\n%s", out)
-	}
-	if !strings.Contains(out, "/opt/homebrew/bin/tmux new-session") {
-		t.Errorf("tmuxServerUnit output missing correct tmux path:\n%s", out)
-	}
-}
-
 func TestRenderUnit_templateInjection(t *testing.T) {
 	cfg := serviceConfig{
 		BinaryPath: "/usr/local/bin/termyard",
 		ExecStart:  "/usr/local/bin/termyard server",
 		Path:       "/usr/local/bin:/usr/bin",
-		TmuxPath:   "/usr/bin/tmux",
 	}
 	out, err := renderUnit(systemdUnit, cfg)
 	if err != nil {
@@ -72,32 +48,7 @@ func TestRenderUnit_templateInjection(t *testing.T) {
 	}
 }
 
-func TestRenderUnit_emptyTmuxPath(t *testing.T) {
-	cfg := serviceConfig{
-		BinaryPath: "/usr/local/bin/termyard",
-		ExecStart:  "/usr/local/bin/termyard server",
-		Path:       "/usr/local/bin:/usr/bin",
-		TmuxPath:   "",
-	}
-	out, err := renderUnit(tmuxServerUnit, cfg)
-	if err != nil {
-		t.Fatalf("renderUnit = error: %v", err)
-	}
-	if !strings.Contains(out, " new-session") {
-		t.Errorf("tmuxServerUnit should render even with empty TmuxPath:\n%s", out)
-	}
-}
-
-func TestRenderUnit_invalidTemplate(t *testing.T) {
-	_, err := renderUnit("{{.MissingField}}", serviceConfig{})
-	if err == nil {
-		t.Error("expected error for missing template field, got nil")
-	}
-}
-
 func TestSystemdUnit_hasNoControlGroupKillMode(t *testing.T) {
-	// The whole point: systemdUnit must use KillMode=process, not
-	// the default control-group which would reap tmux on restart.
 	cfg := testCfg()
 	out, err := renderUnit(systemdUnit, cfg)
 	if err != nil {
@@ -111,17 +62,14 @@ func TestSystemdUnit_hasNoControlGroupKillMode(t *testing.T) {
 	}
 }
 
-func TestSystemdUnit_requiresTmuxBeforeStart(t *testing.T) {
+func TestSystemdUnit_noTmuxDependency(t *testing.T) {
 	cfg := testCfg()
 	out, err := renderUnit(systemdUnit, cfg)
 	if err != nil {
 		t.Fatalf("renderUnit = error: %v", err)
 	}
-	if !strings.Contains(out, "Requires=termyard-tmux.service") {
-		t.Errorf("systemdUnit missing Requires=termyard-tmux.service:\n%s", out)
-	}
-	if !strings.Contains(out, "After=default.target termyard-tmux.service") {
-		t.Errorf("systemdUnit missing After directive:\n%s", out)
+	if strings.Contains(out, "tmux") {
+		t.Errorf("systemdUnit must NOT reference tmux:\n%s", out)
 	}
 }
 
@@ -131,7 +79,6 @@ func TestRefreshUnits_rewritesInstalledUnits(t *testing.T) {
 	}
 
 	configDir := t.TempDir()
-	binDir := t.TempDir()
 	unitDir := filepath.Join(configDir, "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0755); err != nil {
 		t.Fatal(err)
@@ -139,18 +86,12 @@ func TestRefreshUnits_rewritesInstalledUnits(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(unitDir, "termyard.service"), []byte("legacy"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(unitDir, "termyard-tmux.service"), []byte("Type=forking"), 0644); err != nil {
-		t.Fatal(err)
-	}
 
+	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "systemctl.log")
-	for name, script := range map[string]string{
-		"tmux":      "#!/bin/sh\nexit 0\n",
-		"systemctl": "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$TERMYARD_TEST_SYSTEMCTL_LOG\"\n",
-	} {
-		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0755); err != nil {
-			t.Fatal(err)
-		}
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TERMYARD_TEST_SYSTEMCTL_LOG\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "systemctl"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
@@ -171,19 +112,8 @@ func TestRefreshUnits_rewritesInstalledUnits(t *testing.T) {
 	if !strings.Contains(string(mainUnit), "ExecStart="+newBinary+" server") {
 		t.Errorf("main unit did not use the installed binary:\n%s", mainUnit)
 	}
-	tmuxUnit, err := os.ReadFile(filepath.Join(unitDir, "termyard-tmux.service"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(tmuxUnit), "Type=oneshot") {
-		t.Errorf("tmux unit was not refreshed:\n%s", tmuxUnit)
-	}
-	log, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(log) != "--user daemon-reload\n" {
-		t.Errorf("systemctl arguments = %q, want daemon reload", log)
+	if strings.Contains(string(mainUnit), "tmux") {
+		t.Errorf("main unit should not reference tmux:\n%s", mainUnit)
 	}
 }
 
@@ -192,6 +122,5 @@ func testCfg() serviceConfig {
 		BinaryPath: "/usr/local/bin/termyard",
 		ExecStart:  "/usr/local/bin/termyard server",
 		Path:       "/usr/local/bin:/usr/bin:/bin",
-		TmuxPath:   "/usr/bin/tmux",
 	}
 }
