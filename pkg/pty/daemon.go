@@ -2,13 +2,17 @@ package pty
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/creack/pty/v2"
 	"github.com/sirupsen/logrus"
@@ -16,11 +20,12 @@ import (
 
 // Frame types for the daemon wire protocol.
 const (
-	FrameOutput = 0x01 // daemon → client: raw PTY output
-	FrameInput  = 0x02 // client → daemon: raw bytes to write to PTY
-	FrameResize = 0x03 // client → daemon: 4 bytes (cols u16 BE + rows u16 BE)
-	FrameClose  = 0x04 // client → daemon: kill shell
-	FrameReplay = 0x05 // daemon → client: ring buffer contents on connect
+	FrameOutput      = 0x01 // daemon → client: raw PTY output
+	FrameInput       = 0x02 // client → daemon: raw bytes to write to PTY
+	FrameResize      = 0x03 // client → daemon: 4 bytes (cols u16 BE + rows u16 BE)
+	FrameClose       = 0x04 // client → daemon: kill shell
+	FrameReplay      = 0x05 // daemon → client: ring buffer contents on connect
+	FrameQueryBuffer = 0x06 // client → daemon: request ring buffer replay (0 payload)
 )
 
 // DaemonConfig configures a session daemon.
@@ -36,7 +41,21 @@ type DaemonConfig struct {
 // RunDaemon is the entry point for a session daemon process.
 // It creates a PTY, spawns the shell, listens on a Unix socket,
 // and serves clients until the shell exits or Close is received.
+// sessionMeta is written as a JSON sidecar file alongside the socket.
+type sessionMeta struct {
+	ID      string `json:"id"`
+	Pid     int    `json:"pid"`
+	Shell   string `json:"shell"`
+	Cwd     string `json:"cwd"`
+	Created string `json:"created"`
+	Cols    uint16 `json:"cols"`
+	Rows    uint16 `json:"rows"`
+}
+
 func RunDaemon(cfg DaemonConfig) error {
+	// Survive terminal hangup when the spawning process exits.
+	signal.Ignore(syscall.SIGHUP)
+
 	if cfg.Shell == "" {
 		cfg.Shell = os.Getenv("SHELL")
 		if cfg.Shell == "" {
@@ -79,12 +98,14 @@ func RunDaemon(cfg DaemonConfig) error {
 
 	// 3. Listen on Unix socket.
 	socketPath := filepath.Join(cfg.SocketDir, cfg.ID+".sock")
+	metadataPath := filepath.Join(cfg.SocketDir, cfg.ID+".json")
 	if err := os.MkdirAll(cfg.SocketDir, 0700); err != nil {
 		ptyFd.Close()
 		cmd.Process.Kill()
 		return fmt.Errorf("create socket dir: %w", err)
 	}
-	os.Remove(socketPath) // remove stale socket
+	os.Remove(socketPath)   // remove stale socket
+	os.Remove(metadataPath) // remove stale metadata
 
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -92,6 +113,27 @@ func RunDaemon(cfg DaemonConfig) error {
 		cmd.Process.Kill()
 		return fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
+	defer os.Remove(socketPath)
+	defer os.Remove(metadataPath)
+
+	// Write metadata sidecar so Registry.List can discover sessions.
+	meta := sessionMeta{
+		ID:      cfg.ID,
+		Pid:     os.Getpid(),
+		Shell:   cfg.Shell,
+		Cwd:     cfg.Cwd,
+		Created: time.Now().Format(time.RFC3339),
+		Cols:    cfg.Cols,
+		Rows:    cfg.Rows,
+	}
+	metaBytes, _ := json.Marshal(meta)
+	if err := os.WriteFile(metadataPath, metaBytes, 0600); err != nil {
+		ptyFd.Close()
+		cmd.Process.Kill()
+		ln.Close()
+		return fmt.Errorf("write metadata: %w", err)
+	}
+
 	log.WithField("socket", socketPath).Info("daemon listening")
 
 	// 4. Build and run the daemon.
@@ -301,6 +343,16 @@ func (d *daemon) handleClient(conn net.Conn) {
 				rows := binary.BigEndian.Uint16(payload[2:4])
 				_ = pty.Setsize(d.ptyFd, &pty.Winsize{Cols: cols, Rows: rows})
 			}
+		case FrameQueryBuffer:
+			// Send current ring buffer contents without disconnecting.
+			replay := d.ring.Snapshot()
+			if len(replay) > 0 {
+				frame := encodeFrame(FrameReplay, replay)
+				select {
+				case writeCh <- frame:
+				default:
+				}
+			}
 		case FrameClose:
 			d.shutdown()
 			return
@@ -329,7 +381,6 @@ func (d *daemon) shutdown() {
 		d.ptyFd.Close()
 		d.cmd.Process.Kill()
 		d.ln.Close()
-		os.Remove(d.socketPath)
 		close(d.shellDone)
 		d.log.Debug("daemon shutdown complete")
 	})

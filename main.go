@@ -14,6 +14,7 @@ import (
 	_ "github.com/anh-chu/termyard/pkg/commands/install"
 	_ "github.com/anh-chu/termyard/pkg/commands/notify"
 	_ "github.com/anh-chu/termyard/pkg/commands/server"
+	_ "github.com/anh-chu/termyard/pkg/commands/sessiondaemon"
 	_ "github.com/anh-chu/termyard/pkg/commands/update"
 )
 
