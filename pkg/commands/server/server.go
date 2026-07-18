@@ -25,7 +25,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
 	"github.com/anh-chu/termyard/pkg/sessionorder"
 	"github.com/anh-chu/termyard/pkg/state"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 	"github.com/anh-chu/termyard/pkg/webpush"
 )
@@ -42,22 +42,22 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	// refreshSessions discovers daemon sessions and pushes state.
 	refreshSessions := func() {
-		var sessions []*tmux.Session
+		var sessions []*model.Session
 		for _, d := range daemonReg.List() {
 			var created time.Time
 			if t, err := time.Parse(time.RFC3339, d.Created); err == nil {
 				created = t
 			}
-			sessions = append(sessions, &tmux.Session{
+			sessions = append(sessions, &model.Session{
 				Name:        d.ID,
 				Created:     created,
 				Backend:     "daemon",
 				ProjectPath: d.Cwd,
-				Windows: []*tmux.Window{{
+				Windows: []*model.Window{{
 					ID:     "daemon-" + d.ID,
 					Name:   "shell",
 					Active: true,
-					Panes: []*tmux.Pane{{
+					Panes: []*model.Pane{{
 						ID:          "daemon-" + d.ID + "-0",
 						Active:      true,
 						CurrentPath: d.Cwd,
@@ -423,7 +423,7 @@ func runShellNameWatcher(ctx context.Context, mgr *state.Manager, daemonReg *pty
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			var fgs []tmux.SessionForeground
+			var fgs []model.SessionForeground
 			if daemonReg != nil {
 				for _, d := range daemonReg.List() {
 					pid := d.ShellPid
@@ -431,7 +431,7 @@ func runShellNameWatcher(ctx context.Context, mgr *state.Manager, daemonReg *pty
 						pid = d.Pid
 					}
 					if cmd := foregroundCommand(pid); cmd != "" {
-						fgs = append(fgs, tmux.SessionForeground{
+						fgs = append(fgs, model.SessionForeground{
 							Session: d.ID,
 							Command: cmd,
 							PID:     pid,

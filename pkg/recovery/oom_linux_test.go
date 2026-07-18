@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 func TestTuneOomPanesAtRecursesChildren(t *testing.T) {
@@ -36,7 +36,7 @@ func TestTuneOomPanesAtRecursesChildren(t *testing.T) {
 	writeChildren(456, "789")
 	writeChildren(789, "")
 
-	sessions := []*tmux.Session{{Windows: []*tmux.Window{{Panes: []*tmux.Pane{{PID: 123}}}}}}
+	sessions := []*model.Session{{Windows: []*model.Window{{Panes: []*model.Pane{{PID: 123}}}}}}
 	if err := tuneOomPanesAt(filepath.Join(root, "proc"), sessions); err != nil {
 		t.Fatalf("tuneOomPanesAt() failed: %v", err)
 	}

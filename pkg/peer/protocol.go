@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/anh-chu/termyard/pkg/activity"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
@@ -130,7 +130,7 @@ type AuthOKPayload struct {
 
 // StateUpdatePayload carries a full session snapshot from a peer
 type StateUpdatePayload struct {
-	Sessions []*tmux.Session `json:"sessions"`
+	Sessions []*model.Session `json:"sessions"`
 	Version  string          `json:"version,omitempty"`
 }
 
@@ -169,7 +169,7 @@ type HostInfo struct {
 	Local    bool                   `json:"local,omitempty"`
 	Online   bool                   `json:"online"`
 	Address  string                 `json:"address,omitempty"`
-	Sessions []*tmux.Session        `json:"sessions"`
+	Sessions []*model.Session        `json:"sessions"`
 	Activity []*activity.Snapshot   `json:"activity,omitempty"`
 	Stats    map[string]interface{} `json:"stats,omitempty"`
 	LastSeen time.Time              `json:"last_seen"`

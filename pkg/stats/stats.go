@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 // SystemStats reads system info from /proc (Linux) or falls back to runtime info
@@ -108,7 +108,7 @@ type ProcessEntry struct {
 }
 
 // ProcessCountsFromSessions counts pane commands from session data, sorted by count descending
-func ProcessCountsFromSessions(sessions []*tmux.Session) []ProcessEntry {
+func ProcessCountsFromSessions(sessions []*model.Session) []ProcessEntry {
 	counts := make(map[string]int)
 	for _, s := range sessions {
 		for _, w := range s.Windows {

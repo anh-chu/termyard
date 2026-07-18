@@ -28,7 +28,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/recovery"
 	"github.com/anh-chu/termyard/pkg/state"
 	"github.com/anh-chu/termyard/pkg/stats"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
@@ -576,7 +576,7 @@ func handleCapturePane(p CapturePanePayload, pc *PeerConnection, deps SessionDep
 	} else if text, err := deps.DaemonReg.Capture(p.Session); err != nil {
 		res.Error = err.Error()
 	} else {
-		res.Text = tmux.LastLines(text, p.Lines)
+		res.Text = model.LastLines(text, p.Lines)
 	}
 	msg, err := NewMessage(MsgCapturePaneResult, res)
 	if err != nil {
@@ -1111,7 +1111,7 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 	}
 }
 
-func getPeerSessions(m *Manager, peerID string) []*tmux.Session {
+func getPeerSessions(m *Manager, peerID string) []*model.Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if h, ok := m.hosts[peerID]; ok {

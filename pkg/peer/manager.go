@@ -12,7 +12,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/identity"
 	"github.com/anh-chu/termyard/pkg/state"
 	"github.com/anh-chu/termyard/pkg/stats"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
@@ -28,7 +28,7 @@ type HostState struct {
 	Version    string
 	PublicKey  string
 	Address    string // network address (empty for local)
-	Sessions   []*tmux.Session
+	Sessions   []*model.Session
 	Stats      map[string]interface{}
 	Activity   []*activity.Snapshot
 	ToolEvents []*toolevents.Event
@@ -280,11 +280,11 @@ func (m *Manager) broadcast(evt state.StateEvent) {
 }
 
 // GetAllSessions returns sessions from all hosts, with host fields stamped
-func (m *Manager) GetAllSessions() []*tmux.Session {
+func (m *Manager) GetAllSessions() []*model.Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var all []*tmux.Session
+	var all []*model.Session
 	for _, h := range m.hosts {
 		for _, s := range h.Sessions {
 			s.Host = h.ID
@@ -297,7 +297,7 @@ func (m *Manager) GetAllSessions() []*tmux.Session {
 }
 
 // GetLocalSessions returns only this node's sessions
-func (m *Manager) GetLocalSessions() []*tmux.Session {
+func (m *Manager) GetLocalSessions() []*model.Session {
 	return m.localMgr.GetSessions()
 }
 
@@ -488,7 +488,7 @@ func (m *Manager) RemoveHost(id string) {
 }
 
 // UpdatePeerSessions updates a peer's session list
-func (m *Manager) UpdatePeerSessions(id string, sessions []*tmux.Session) {
+func (m *Manager) UpdatePeerSessions(id string, sessions []*model.Session) {
 	m.mu.Lock()
 	h, ok := m.hosts[id]
 	if ok {

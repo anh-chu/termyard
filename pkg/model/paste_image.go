@@ -1,4 +1,4 @@
-package tmux
+package model
 
 import (
 	"encoding/base64"

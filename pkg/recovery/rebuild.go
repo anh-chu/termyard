@@ -11,7 +11,7 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
 	"github.com/anh-chu/termyard/pkg/state"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 type rebuildClient interface {
@@ -150,7 +150,7 @@ func paneTarget(sessionName string, windowIndex, paneIndex int) string {
 }
 
 func buildStartCommand(agentType, agentSessionID, cwd, currentCommand string) string {
-	switch tmux.NormalizeAgentType(agentType) {
+	switch model.NormalizeAgentType(agentType) {
 	case "pi":
 		if agentSessionID != "" {
 			return "pi --resume " + shellQuote(agentSessionID)

@@ -52,7 +52,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/socket"
 	"github.com/anh-chu/termyard/pkg/state"
 	"github.com/anh-chu/termyard/pkg/stats"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 	"github.com/anh-chu/termyard/pkg/webpush"
 	"github.com/anh-chu/termyard/pkg/ws"
@@ -335,7 +335,7 @@ func EnforceScheduleCap(opts *Options, scheduleID string, keep int) {
 	}
 
 	// Collect tagged sessions from daemon registry.
-	var tagged []*tmux.Session
+	var tagged []*model.Session
 	if opts.DaemonReg != nil {
 		for _, info := range opts.DaemonReg.List() {
 			if keys[sessionKey("", info.ID)] {
@@ -343,7 +343,7 @@ func EnforceScheduleCap(opts *Options, scheduleID string, keep int) {
 				if t, err := time.Parse(time.RFC3339, info.Created); err == nil {
 					created = t
 				}
-				tagged = append(tagged, &tmux.Session{
+				tagged = append(tagged, &model.Session{
 					Name:    info.ID,
 					Created: created,
 					Backend: "daemon",
@@ -373,7 +373,7 @@ func CreateSession(opts *Options, req scheduler.CreateSessionReq) error {
 	if req.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if err := tmux.ValidateSessionName(req.Name); err != nil {
+	if err := model.ValidateSessionName(req.Name); err != nil {
 		return err
 	}
 
@@ -989,7 +989,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			})
 
 			r.Get("/sessions", func(w http.ResponseWriter, r *http.Request) {
-				var sessions []*tmux.Session
+				var sessions []*model.Session
 				if opts.PeerMgr != nil {
 					sessions = opts.PeerMgr.GetAllSessions()
 				} else {
@@ -1079,7 +1079,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{"text": tmux.LastLines(text, lines)})
+				json.NewEncoder(w).Encode(map[string]string{"text": model.LastLines(text, lines)})
 			})
 
 			r.Post("/session/new", func(w http.ResponseWriter, r *http.Request) {
@@ -1138,7 +1138,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 						http.Error(w, "name or path is required", http.StatusBadRequest)
 						return
 					}
-					if err := tmux.ValidateSessionName(req.Name); err != nil {
+					if err := model.ValidateSessionName(req.Name); err != nil {
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
@@ -1404,7 +1404,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 					http.Error(w, "old_name and new_name are required", http.StatusBadRequest)
 					return
 				}
-				if err := tmux.ValidateSessionName(req.NewName); err != nil {
+				if err := model.ValidateSessionName(req.NewName); err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
@@ -1659,10 +1659,10 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			r.Get("/stats", func(w http.ResponseWriter, r *http.Request) {
 				sessions := opts.StateMgr.GetSessions()
 				// Enumerate panes from daemon registry.
-				var allPanes []*tmux.Pane
+				var allPanes []*model.Pane
 				if opts.DaemonReg != nil {
 					for _, d := range opts.DaemonReg.List() {
-						allPanes = append(allPanes, &tmux.Pane{
+						allPanes = append(allPanes, &model.Pane{
 							ID:             d.ID + ":0.0",
 							CurrentCommand: d.Shell,
 							CurrentPath:    d.Cwd,
@@ -2493,12 +2493,12 @@ func handleUpload(w http.ResponseWriter, r *http.Request, opts *Options) {
 		handleRemoteUpload(w, r, opts, hostID, filename)
 		return
 	}
-	path, err := tmux.StoreUploadedFile(r.Body, filename)
+	path, err := model.StoreUploadedFile(r.Body, filename)
 	if err != nil {
 		if r.Context().Err() != nil {
 			return // client gone, nothing to write
 		}
-		if errors.Is(err, tmux.ErrEmptyUpload) {
+		if errors.Is(err, model.ErrEmptyUpload) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -2507,7 +2507,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, opts *Options) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"path": path, "quotedPath": tmux.ShellQuote(path),
+		"path": path, "quotedPath": model.ShellQuote(path),
 	})
 }
 
@@ -2656,7 +2656,7 @@ func handleRemoteUpload(w http.ResponseWriter, r *http.Request, opts *Options, h
 	}
 	if res.Error != "" {
 		code := http.StatusInternalServerError
-		if tmux.IsEmptyUploadMessage(res.Error) {
+		if model.IsEmptyUploadMessage(res.Error) {
 			code = http.StatusBadRequest
 		}
 		http.Error(w, "remote upload: "+res.Error, code)
@@ -2832,7 +2832,7 @@ func serveAndWait(ctx context.Context, opts *Options, logger *logrus.Entry, hand
 	return nil
 }
 
-func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tracker, localHost string) {
+func enrichSessionsFromTracker(sessions []*model.Session, tracker *toolevents.Tracker, localHost string) {
 	if tracker == nil {
 		return
 	}
@@ -2878,7 +2878,7 @@ func enrichSessionsFromTracker(sessions []*tmux.Session, tracker *toolevents.Tra
 // never resurrected here — the origin host is authoritative and relays the
 // correct state; this host's tracker is only a mirror and may hold a stale tool
 // entry that would otherwise revive a tag the origin already cleared.
-func shouldResurrectAgentMeta(session *tmux.Session, localHost string) bool {
+func shouldResurrectAgentMeta(session *model.Session, localHost string) bool {
 	if session.Host != "" && session.Host != localHost {
 		return false
 	}

@@ -11,14 +11,14 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 const uploadFrameTimeout = 60 * time.Second
 
 // handleOpenUpload is the host end of a dedicated upload data connection.
 // It receives binary frames (file content) from the hub, streams them to disk
-// via tmux.StoreUploadedFile, and replies with the stored path.
+// via model.StoreUploadedFile, and replies with the stored path.
 func handleOpenUpload(p OpenUploadPayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
 	log = log.WithFields(logrus.Fields{"stream": p.StreamID, "file": p.Filename})
 	dial := pc.Role == RoleDialer
@@ -55,7 +55,7 @@ func handleOpenUpload(p OpenUploadPayload, pc *PeerConnection, deps SessionDeps,
 	storeDone := make(chan storeUploadResult, 1)
 
 	go func() {
-		path, err := tmux.StoreUploadedFile(pr, p.Filename)
+		path, err := model.StoreUploadedFile(pr, p.Filename)
 		storeDone <- storeUploadResult{path: path, err: err}
 	}()
 
@@ -120,7 +120,7 @@ Loop:
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_ = conn.WriteMessage(websocket.TextMessage, mustMarshal(map[string]string{
 		"path":        storeRes.path,
-		"quotedPath": tmux.ShellQuote(storeRes.path),
+		"quotedPath": model.ShellQuote(storeRes.path),
 	}))
 }
 

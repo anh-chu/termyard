@@ -3,12 +3,12 @@ package state
 import (
 	"testing"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 func TestApplyRenameMigratesStateAndBroadcasts(t *testing.T) {
 	m := &Manager{
-		sessions: map[string]*tmux.Session{
+		sessions: map[string]*model.Session{
 			"old": {Name: "old"},
 		},
 		meta: map[string]SessionMetadata{

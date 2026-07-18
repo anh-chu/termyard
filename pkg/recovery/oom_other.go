@@ -2,6 +2,6 @@
 
 package recovery
 
-import "github.com/anh-chu/termyard/pkg/tmux"
+import "github.com/anh-chu/termyard/pkg/model"
 
-func TuneOomPanes(sessions []*tmux.Session) error { return nil }
+func TuneOomPanes(sessions []*model.Session) error { return nil }

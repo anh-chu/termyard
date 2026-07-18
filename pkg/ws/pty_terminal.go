@@ -12,7 +12,7 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/activity"
 	"github.com/anh-chu/termyard/pkg/pty"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
@@ -42,7 +42,7 @@ func NewPTYTerminalHandler(activityTracker *activity.Tracker, tracker *toolevent
 }
 
 func bridgeSessionWithCB(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, onOutput func(), log *logrus.Entry) {
-	conn.SetReadLimit(tmux.MaxPTYControlMessageBytes)
+	conn.SetReadLimit(model.MaxPTYControlMessageBytes)
 
 	output := newOutputCoalescer(func(mt int, payload []byte) error {
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -98,7 +98,7 @@ outer:
 				}
 				continue
 			}
-			if err := tmux.HandlePTYControlMessage(sess, message); err != nil {
+			if err := model.HandlePTYControlMessage(sess, message); err != nil {
 				log.WithError(err).Debug("control message failed")
 			}
 
@@ -136,8 +136,8 @@ func BridgeDirectPTY(conn *websocket.Conn, sess pty.Session, session string, act
 // SpliceConns pumps bytes between an upgraded browser WS and a peer data conn.
 // Teardown nudges both read deadlines and callers own Close.
 func SpliceConns(browser, data *websocket.Conn, log *logrus.Entry) {
-	browser.SetReadLimit(tmux.MaxPTYControlMessageBytes)
-	data.SetReadLimit(tmux.MaxPTYControlMessageBytes)
+	browser.SetReadLimit(model.MaxPTYControlMessageBytes)
+	data.SetReadLimit(model.MaxPTYControlMessageBytes)
 
 	var browserMu sync.Mutex
 	var once sync.Once

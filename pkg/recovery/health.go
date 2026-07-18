@@ -6,12 +6,12 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 type serverProbe interface {
 	ServerAlive() bool
-	ListSessions() ([]*tmux.Session, error)
+	ListSessions() ([]*model.Session, error)
 }
 
 // HealthPoller watches tmux server liveness and triggers recovery.

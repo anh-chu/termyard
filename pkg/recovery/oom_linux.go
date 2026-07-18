@@ -8,14 +8,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
-func TuneOomPanes(sessions []*tmux.Session) error {
+func TuneOomPanes(sessions []*model.Session) error {
 	return tuneOomPanesAt("/proc", sessions)
 }
 
-func tuneOomPanesAt(procRoot string, sessions []*tmux.Session) error {
+func tuneOomPanesAt(procRoot string, sessions []*model.Session) error {
 	seen := make(map[int]struct{})
 	for _, session := range sessions {
 		if session == nil {
