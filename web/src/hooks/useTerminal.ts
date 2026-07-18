@@ -791,7 +791,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
     })
-  }, [sessionName, hostId, cleanupWs, prefs.theme, prefs.terminal.font_size, prefs.terminal.font_family, prefs.terminal.scrollback, sendRawBytes])
+  }, [sessionName, hostId, backend, cleanupWs, prefs.theme, prefs.terminal.font_size, prefs.terminal.font_family, prefs.terminal.scrollback, sendRawBytes])
 
   const disconnect = useCallback(() => {
     // Invalidate any active connection

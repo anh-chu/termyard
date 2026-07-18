@@ -1021,8 +1021,10 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
         body: JSON.stringify({ name, path: '', command: '', backend: 'daemon' }),
       })
       if (res.ok) {
-        selectSession(name)
+        // Refresh first so session data (with backend field) is available
+        // before Terminal mounts and connects to the WebSocket.
         await refresh()
+        selectSession(name)
         setTimeout(() => refocusTerminal(), 300)
       }
     } catch (err) {
