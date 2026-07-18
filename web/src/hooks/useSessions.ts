@@ -29,6 +29,7 @@ export interface Session {
   host?: string        // peer fingerprint (empty = local)
   host_name?: string   // peer display name
   host_online?: boolean
+  backend?: string      // "daemon" for session-daemon sessions
   windows: Window[]
   created: string
   attached: boolean

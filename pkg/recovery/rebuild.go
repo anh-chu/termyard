@@ -11,7 +11,7 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
 	"github.com/anh-chu/termyard/pkg/state"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 type rebuildClient interface {
@@ -43,27 +43,9 @@ func NewRebuilder(client rebuildClient, sm *state.Manager, attrs *sessionattrs.S
 }
 
 func (r *Rebuilder) Rebuild(ctx context.Context) error {
-	if r == nil || r.client == nil {
-		return nil
-	}
-	manifest, err := Load()
-	if err != nil {
-		return err
-	}
-	if len(manifest.Sessions) == 0 {
-		return nil
-	}
-	for _, session := range manifest.Sessions {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if session.Name == "" || r.client.HasSession(session.Name) {
-			continue
-		}
-		if err := r.rebuildSession(session); err != nil {
-			r.log.WithError(err).WithField("session", session.Name).Warn("failed to rebuild session")
-		}
-	}
+	// Daemon sessions survive server crashes on their own.
+	// No tmux rebuild needed.
+	_ = ctx
 	return nil
 }
 
@@ -168,7 +150,7 @@ func paneTarget(sessionName string, windowIndex, paneIndex int) string {
 }
 
 func buildStartCommand(agentType, agentSessionID, cwd, currentCommand string) string {
-	switch tmux.NormalizeAgentType(agentType) {
+	switch model.NormalizeAgentType(agentType) {
 	case "pi":
 		if agentSessionID != "" {
 			return "pi --resume " + shellQuote(agentSessionID)

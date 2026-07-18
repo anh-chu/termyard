@@ -9,7 +9,6 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
 	"github.com/anh-chu/termyard/pkg/state"
-	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 // Snapshotter periodically persists manifest state.
@@ -62,7 +61,7 @@ func (s *Snapshotter) snapshotOnce() error {
 	sessions := s.stateMgr.SnapshotForManifest()
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Name < sessions[j].Name })
 	for _, session := range sessions {
-		if session == nil || session.Name == tmux.ControlSessionName() {
+		if session == nil {
 			continue
 		}
 		snap := SessionSnapshot{

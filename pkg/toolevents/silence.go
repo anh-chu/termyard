@@ -9,8 +9,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// TmuxClient is the subset of tmux.Client used by SilenceMonitor
-type TmuxClient interface {
+// CaptureClient is the narrow interface for pane content capture used by SilenceMonitor.
+type CaptureClient interface {
 	CapturePaneContent(paneID string) (string, error)
 }
 
@@ -43,7 +43,7 @@ type monitoredPane struct {
 type SilenceMonitor struct {
 	tracker  *Tracker
 	detector *Detector
-	client   TmuxClient
+	client   CaptureClient
 	log      *logrus.Entry
 	hostID   string // local host fingerprint (for multi-host)
 	hostName string // local host display name
@@ -53,7 +53,7 @@ type SilenceMonitor struct {
 }
 
 // NewSilenceMonitor creates a new SilenceMonitor.
-func NewSilenceMonitor(tracker *Tracker, detector *Detector, client TmuxClient) *SilenceMonitor {
+func NewSilenceMonitor(tracker *Tracker, detector *Detector, client CaptureClient) *SilenceMonitor {
 	return &SilenceMonitor{
 		tracker:   tracker,
 		detector:  detector,

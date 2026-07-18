@@ -24,10 +24,11 @@ import (
 	"github.com/anh-chu/termyard/pkg/common"
 	"github.com/anh-chu/termyard/pkg/git"
 	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/pty"
 	"github.com/anh-chu/termyard/pkg/recovery"
 	"github.com/anh-chu/termyard/pkg/state"
 	"github.com/anh-chu/termyard/pkg/stats"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
@@ -80,6 +81,25 @@ type BrowserBroadcaster interface {
 	BroadcastJSON(v interface{})
 }
 
+// DaemonRegistry is the interface for daemon session operations.
+type DaemonRegistry interface {
+	Create(name, shell, cwd string, cols, rows uint16) error
+	Kill(name string) error
+	Capture(name string) (string, error)
+	SocketPath(name string) string
+	List() []DaemonSessionInfo
+}
+
+// DaemonSessionInfo holds metadata for a daemon-backed session.
+type DaemonSessionInfo struct {
+	ID       string
+	Pid      int
+	ShellPid int
+	Shell    string
+	Cwd      string
+	Created  string
+}
+
 // SessionDeps groups the runtime dependencies needed by a peer session.
 type SessionDeps struct {
 	Manager     *Manager
@@ -88,7 +108,7 @@ type SessionDeps struct {
 	ActTracker  *activity.Tracker
 	ToolTracker *toolevents.Tracker
 	PeerStore   *identity.PeerStore
-	TmuxClient  *tmux.Client
+	DaemonReg   DaemonRegistry
 	StreamReg   *StreamRegistry
 	CaptureReg  *CaptureRegistry
 	FileReadReg *FileReadRegistry
@@ -506,7 +526,7 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 	log = log.WithFields(logrus.Fields{"stream": p.StreamID, "session": p.Session})
 	dial := pc.Role == RoleDialer
 	var conn *websocket.Conn
-	if deps.Manager == nil || deps.TmuxClient == nil || deps.Identity == nil {
+	if deps.Manager == nil || deps.DaemonReg == nil || deps.Identity == nil {
 		return
 	}
 	if dial {
@@ -518,7 +538,7 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 		}
 		conn = c
 	} else {
-		if deps.StreamReg == nil || deps.Manager == nil || deps.TmuxClient == nil {
+		if deps.StreamReg == nil || deps.Manager == nil || deps.DaemonReg == nil {
 			return
 		}
 		ps := NewPendingStream(p.StreamID, p.Session, p.Cols, p.Rows, deps.Manager.LocalID(), p.ViewerHostID, pc.HostID)
@@ -536,22 +556,27 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 	if err := conn.SetCompressionLevel(flate.BestSpeed); err != nil {
 		log.WithError(err).Debug("set compression level ignored")
 	}
-	_ = ws.BridgePTY(conn, deps.TmuxClient.TmuxPath(), p.Session, p.Cols, p.Rows, deps.ActTracker, deps.TmuxClient, deps.ToolTracker, log)
+
+	socketPath := deps.DaemonReg.SocketPath(p.Session)
+	ds, err := pty.NewDaemonSession(socketPath)
+	if err != nil {
+		log.WithError(err).Debug("failed to connect to daemon socket")
+		return
+	}
+	defer ds.Close()
+	_ = ds.Resize(p.Cols, p.Rows)
+	ws.BridgeDirectPTY(conn, ds, p.Session, deps.ActTracker, log)
 }
 
-// handleCapturePane resolves this peer's own primary pane for the requested
-// session, captures its visible buffer (last p.Lines lines), and replies to the
-// hub with the same token. Read-only: no PTY attach, no pane side effects.
+// handleCapturePane captures the daemon ring buffer for the requested session.
 func handleCapturePane(p CapturePanePayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
 	res := CapturePaneResultPayload{Token: p.Token}
-	if deps.TmuxClient == nil {
-		res.Error = "tmux unavailable"
-	} else if paneID, err := deps.TmuxClient.PrimaryPaneID(p.Session); err != nil {
-		res.Error = err.Error()
-	} else if text, err := deps.TmuxClient.CapturePaneContent(paneID); err != nil {
+	if deps.DaemonReg == nil {
+		res.Error = "daemon registry unavailable"
+	} else if text, err := deps.DaemonReg.Capture(p.Session); err != nil {
 		res.Error = err.Error()
 	} else {
-		res.Text = tmux.LastLines(text, p.Lines)
+		res.Text = model.LastLines(text, p.Lines)
 	}
 	msg, err := NewMessage(MsgCapturePaneResult, res)
 	if err != nil {
@@ -572,8 +597,13 @@ func handleFileRead(p FileReadPayload, pc *PeerConnection, deps SessionDeps, log
 	path := p.Path
 	if !filepath.IsAbs(path) {
 		base := ""
-		if p.Session != "" && deps.TmuxClient != nil {
-			base = toolevents.ResolveSessionCWD(deps.TmuxClient, p.Session)
+		if p.Session != "" && deps.DaemonReg != nil {
+			for _, s := range deps.DaemonReg.List() {
+				if s.ID == p.Session {
+					base = s.Cwd
+					break
+				}
+			}
 		}
 		if base == "" {
 			res.Error = "cannot resolve relative path: no active pane cwd"
@@ -956,8 +986,8 @@ func handleSessionMessage(peerID string, msg *Message, pc *PeerConnection, deps 
 }
 
 func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps SessionDeps, log *logrus.Entry) {
-	if deps.TmuxClient == nil {
-		log.Warn("no tmux client available for session action")
+	if deps.DaemonReg == nil {
+		log.Warn("no daemon registry available for session action")
 		return
 	}
 	switch payload.Action {
@@ -972,8 +1002,7 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Name == "" {
 			return
 		}
-		// Create worktree locally if requested. Same logic as the local
-		// session create path in pkg/server.
+		// Create worktree locally if requested.
 		if params.WorktreeBranch != "" && params.Path != "" {
 			expanded := params.Path
 			if strings.HasPrefix(expanded, "~") {
@@ -999,20 +1028,18 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 			}
 			params.Path = destPath
 		}
-		if err := deps.TmuxClient.NewSession(params.Name, params.Path, params.Command); err != nil {
+		shell := params.Command
+		if shell == "" {
+			shell = os.Getenv("SHELL")
+			if shell == "" {
+				shell = "/bin/bash"
+			}
+		}
+		if err := deps.DaemonReg.Create(params.Name, shell, params.Path, 0, 0); err != nil {
 			log.WithError(err).Warn("new session via peer failed")
 			return
 		}
-		// Tag the locally-spawned session with its owning schedule so it groups in
-		// this node's own UI; the remote scheduler only set the id on its side. The
-		// tmux user-option is the durable source of truth; the attr write is the
-		// one-release fallback for clients still reading the side-store.
-		if params.ScheduleID != "" {
-			if err := deps.TmuxClient.SetScheduleID(params.Name, params.ScheduleID); err != nil {
-				log.WithError(err).Warn("failed to set schedule id option for peer-spawned session")
-			}
-		}
-		// Fallback side-store write (drop next release):
+		// Schedule ID is stored via the session-attrs sink.
 		if params.ScheduleID != "" && deps.AttrsSink != nil {
 			if err := deps.AttrsSink.SetScheduleID(params.Name, params.ScheduleID); err != nil {
 				log.WithError(err).Warn("failed to store schedule id for peer-spawned session")
@@ -1023,35 +1050,10 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		sendStateUpdate(pc, deps)
 
 	case "rename":
-		var params struct {
-			OldName string `json:"old_name"`
-			NewName string `json:"new_name"`
-		}
-		if err := json.Unmarshal(payload.Params, &params); err != nil {
-			return
-		}
-		if err := deps.TmuxClient.RenameSession(params.OldName, params.NewName); err != nil {
-			log.WithError(err).Warn("rename session via peer failed")
-			return
-		}
-		if deps.LocalMgr != nil {
-			deps.LocalMgr.ApplyRename(params.OldName, params.NewName)
-		}
-		sendStateUpdate(pc, deps)
+		// Daemon sessions don't support rename — no-op.
 
 	case "select-window":
-		var params struct {
-			Session string `json:"session"`
-			Window  int    `json:"window"`
-			Pane    string `json:"pane,omitempty"`
-		}
-		if err := json.Unmarshal(payload.Params, &params); err != nil {
-			return
-		}
-		deps.TmuxClient.SelectWindow(params.Session, fmt.Sprintf("%d", params.Window))
-		if params.Pane != "" {
-			deps.TmuxClient.SelectPane(params.Pane)
-		}
+		// Daemon sessions are single-pane — no-op.
 
 	case "kill":
 		var params struct {
@@ -1061,7 +1063,7 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 		if err := json.Unmarshal(payload.Params, &params); err != nil || params.Name == "" {
 			return
 		}
-		if err := deps.TmuxClient.KillSession(params.ID, params.Name); err != nil {
+		if err := deps.DaemonReg.Kill(params.Name); err != nil {
 			log.WithError(err).Warn("kill session via peer failed")
 		}
 		if err := recovery.ForgetSession(params.Name); err != nil {
@@ -1081,9 +1083,6 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 			log.Warn("no state manager available for regenerate-name action")
 			return
 		}
-		// The hub generates the name with its own namer (this peer may have none
-		// configured) and sends it here to apply. Fall back to local naming when
-		// no name is supplied.
 		if params.Name != "" {
 			deps.LocalMgr.ApplyAIName(params.Session, params.Name)
 		} else if _, err := deps.LocalMgr.RegenerateName(params.Session); err != nil {
@@ -1112,7 +1111,7 @@ func handleSessionAction(payload *SessionActionPayload, pc *PeerConnection, deps
 	}
 }
 
-func getPeerSessions(m *Manager, peerID string) []*tmux.Session {
+func getPeerSessions(m *Manager, peerID string) []*model.Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if h, ok := m.hosts[peerID]; ok {

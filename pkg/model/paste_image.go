@@ -1,4 +1,4 @@
-package tmux
+package model
 
 import (
 	"encoding/base64"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anh-chu/termyard/pkg/pty"
 )
 
 const (
@@ -39,8 +41,8 @@ type PTYControlMessage struct {
 	Filename string `json:"filename,omitempty"`
 }
 
-// HandlePTYControlMessage applies a websocket control message to a PTY-backed tmux session.
-func HandlePTYControlMessage(ptySess *PTYSession, raw []byte) error {
+// HandlePTYControlMessage applies a websocket control message to a PTY session.
+func HandlePTYControlMessage(ptySess pty.Session, raw []byte) error {
 	var msg PTYControlMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		return err

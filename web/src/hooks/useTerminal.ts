@@ -141,7 +141,7 @@ async function sendPastedImage(ws: WebSocket, file: File, fallbackType: string):
   }))
 }
 
-export function useTerminal(sessionName: string, hostId?: string) {
+export function useTerminal(sessionName: string, hostId?: string, backend?: string) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
@@ -556,8 +556,15 @@ export function useTerminal(sessionName: string, hostId?: string) {
 
     // Connect WebSocket for this session
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
-    const wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
+    let wsUrl: string
+    if (backend === 'daemon') {
+      wsUrl = `${protocol}//${window.location.host}/ws/daemon-session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}`
+    } else if (sessionName.startsWith('direct-pty:')) {
+      wsUrl = `${protocol}//${window.location.host}/ws/direct-session?cols=${cols}&rows=${rows}`
+    } else {
+      const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
+      wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
+    }
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -784,7 +791,7 @@ export function useTerminal(sessionName: string, hostId?: string) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
     })
-  }, [sessionName, hostId, cleanupWs, prefs.theme, prefs.terminal.font_size, prefs.terminal.font_family, prefs.terminal.scrollback, sendRawBytes])
+  }, [sessionName, hostId, backend, cleanupWs, prefs.theme, prefs.terminal.font_size, prefs.terminal.font_family, prefs.terminal.scrollback, sendRawBytes])
 
   const disconnect = useCallback(() => {
     // Invalidate any active connection

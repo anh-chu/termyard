@@ -15,7 +15,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/auth"
 	"github.com/anh-chu/termyard/pkg/identity"
 	"github.com/anh-chu/termyard/pkg/peer"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 func TestHandleUploadLocal(t *testing.T) {
@@ -45,8 +45,8 @@ func TestHandleUploadLocal(t *testing.T) {
 	if res.QuotedPath == "" {
 		t.Fatal("quotedPath is empty")
 	}
-	if res.QuotedPath != tmux.ShellQuote(res.Path) {
-		t.Fatalf("quotedPath = %q, want %q", res.QuotedPath, tmux.ShellQuote(res.Path))
+	if res.QuotedPath != model.ShellQuote(res.Path) {
+		t.Fatalf("quotedPath = %q, want %q", res.QuotedPath, model.ShellQuote(res.Path))
 	}
 
 	// File exists with correct content.

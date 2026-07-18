@@ -10,7 +10,6 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/peer"
 	"github.com/anh-chu/termyard/pkg/state"
-	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 // CreateSessionReq reuses the session-spawn contract across HTTP and cron.
@@ -35,7 +34,6 @@ type PeerLookup interface {
 // Runner fires due jobs on a 1s tick.
 type Runner struct {
 	store    *Store
-	client   *tmux.Client
 	stateMgr *state.Manager
 	peerMgr  PeerLookup
 	createFn CreateSessionFunc
@@ -53,13 +51,12 @@ func (r *Runner) SetCapEnforcer(fn func(job Job)) {
 	r.capFn = fn
 }
 
-func NewRunner(store *Store, client *tmux.Client, stateMgr *state.Manager, peerMgr PeerLookup, createFn CreateSessionFunc, log *logrus.Entry) *Runner {
+func NewRunner(store *Store, stateMgr *state.Manager, peerMgr PeerLookup, createFn CreateSessionFunc, log *logrus.Entry) *Runner {
 	if log == nil {
 		log = logrus.NewEntry(logrus.StandardLogger())
 	}
 	return &Runner{
 		store:    store,
-		client:   client,
 		stateMgr: stateMgr,
 		peerMgr:  peerMgr,
 		createFn: createFn,

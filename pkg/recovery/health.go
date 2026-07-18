@@ -6,12 +6,12 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 type serverProbe interface {
 	ServerAlive() bool
-	ListSessions() ([]*tmux.Session, error)
+	ListSessions() ([]*model.Session, error)
 }
 
 // HealthPoller watches tmux server liveness and triggers recovery.
@@ -39,25 +39,11 @@ func NewHealthPoller(client serverProbe, interval time.Duration, onGone func()) 
 }
 
 func (h *HealthPoller) Run(ctx context.Context) {
+	// Daemon sessions survive server crashes. No tmux health polling needed.
 	if h == nil {
 		return
 	}
-	h.wasAlive = h.client != nil && h.client.ServerAlive()
-	if !h.wasAlive && manifestHasSessions() {
-		h.maybeTrigger()
-	}
-	ticker := time.NewTicker(h.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			h.probe()
-		case <-h.hintCh:
-			h.probe()
-		}
-	}
+	<-ctx.Done()
 }
 
 func (h *HealthPoller) Hint() {

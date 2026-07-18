@@ -1012,6 +1012,35 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     return null
   }, [selectSession, refresh, refocusTerminal])
 
+  const handleQuickShell = useCallback(async () => {
+    const name = `shell-${Date.now()}`
+    try {
+      const res = await fetch('/api/session/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, path: '', command: '', backend: 'daemon' }),
+      })
+      if (res.ok) {
+        // Session key must include the local host ID (if multi-host is active)
+        // so it matches the key the API returns. Without this, the pruning
+        // effect clears singleView because the key doesn't match.
+        const sk = localHostId ? `${localHostId}/${name}` : name
+        // Guard against prune effect clearing singleView before
+        // the session appears in the sessions list.
+        pendingSessionRef.current = sk
+        // Refresh so session data (with backend field) is available
+        // before Terminal mounts and connects to the WebSocket.
+        await refresh()
+        selectSession(sk)
+        setTimeout(() => refocusTerminal(), 300)
+      }
+    } catch (err) {
+      console.error('Failed to create daemon session:', err)
+    }
+  }, [selectSession, refresh, refocusTerminal, localHostId])
+
+
+
   const handleDropNewSession = useCallback((targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
     let key = targetKey || activeKey
 
@@ -1220,6 +1249,8 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
             sessionAttrs={sessionAttrs}
             setSessionAttr={setSessionAttr}
             pruningSuspended={pruningSuspended}
+
+            onQuickShell={handleQuickShell}
           />
         )}
         <div
@@ -1310,6 +1341,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
               <Terminal
                 sessionName={parseSessionKey(singleView).name}
                 hostId={parseSessionKey(singleView).host || undefined}
+                backend={sessions.find(s => sessionKey(s) === singleView)?.backend}
                 fullscreen={terminalFullscreen}
                 onToggleFullscreen={toggleFullscreen}
               />
@@ -1341,6 +1373,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
               onMovePanes={(sourceKey, targetKey, edge) =>
                 setPaneTree(prev => prev ? movePane(prev, sourceKey, targetKey, edge) : prev)
               }
+              getBackend={(key) => sessions.find(s => sessionKey(s) === key)?.backend}
             />
           ) : (
             <Overview

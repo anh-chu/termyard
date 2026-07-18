@@ -64,6 +64,9 @@ interface SidebarProps {
   // Pruning per-device ordering then would delete entries for sessions that
   // simply haven't reappeared yet.
   pruningSuspended?: boolean
+  // Direct PTY session keys currently in the pane tree (not tmux sessions)
+
+  onQuickShell?: () => void
 }
 
 interface RenameState {
@@ -198,6 +201,8 @@ export function Sidebar({
   sessionAttrs,
   setSessionAttr,
   pruningSuspended,
+
+  onQuickShell,
 }: SidebarProps) {
   const glancePreview = useGlance(!!hasMultipleHosts)
   const { schedules } = useSchedules()
@@ -1400,6 +1405,19 @@ export function Sidebar({
                 <circle cx="3.5" cy="18" r="1.5" fill="currentColor" stroke="none" />
               </svg>
             </button>
+            {onQuickShell && (
+              <button
+                type="button"
+                onClick={onQuickShell}
+                title="Quick Shell (direct PTY, no tmux)"
+                className="shrink-0 rounded-md border border-hairline bg-surface-elevated px-2 py-2 text-mute hover:text-ink transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 17 10 11 4 5" />
+                  <line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+              </button>
+            )}
             {onToggleCollapse && (
               <button
                 type="button"

@@ -19,43 +19,80 @@ import (
 	"github.com/anh-chu/termyard/pkg/peer"
 	"github.com/anh-chu/termyard/pkg/portforward"
 	"github.com/anh-chu/termyard/pkg/preferences"
-	"github.com/anh-chu/termyard/pkg/recovery"
+	"github.com/anh-chu/termyard/pkg/pty"
 	"github.com/anh-chu/termyard/pkg/scheduler"
 	"github.com/anh-chu/termyard/pkg/server"
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
 	"github.com/anh-chu/termyard/pkg/sessionorder"
 	"github.com/anh-chu/termyard/pkg/state"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 	"github.com/anh-chu/termyard/pkg/webpush"
 )
 
 func Execute(ctx context.Context, c *cli.Command) error {
-	client, err := tmux.NewClient()
-	if err != nil {
-		return err
-	}
-
-	stateMgr := state.NewManager(client)
+	stateMgr := state.NewManager()
 	tracker := toolevents.NewTracker()
 	tracker.EnablePersistence()
 	actTracker := activity.NewTracker()
 
-	interval := time.Duration(c.Int("discovery-interval")) * time.Second
-	discovery := tmux.NewDiscovery(client, interval, func(sessions []*tmux.Session) {
+	// Session daemon registry — the only session backend.
+	daemonReg := pty.NewRegistry(defaultSessionDir())
+	stateMgr.SetDaemonRegistry(&daemonRegAdapter{reg: daemonReg})
+
+	// refreshSessions discovers daemon sessions and pushes state.
+	refreshSessions := func() {
+		var sessions []*model.Session
+		for _, d := range daemonReg.List() {
+			var created time.Time
+			if t, err := time.Parse(time.RFC3339, d.Created); err == nil {
+				created = t
+			}
+			sessions = append(sessions, &model.Session{
+				Name:        d.ID,
+				Created:     created,
+				Backend:     "daemon",
+				ProjectPath: d.Cwd,
+				Windows: []*model.Window{{
+					ID:     "daemon-" + d.ID,
+					Name:   "shell",
+					Active: true,
+					Panes: []*model.Pane{{
+						ID:          "daemon-" + d.ID + "-0",
+						Active:      true,
+						CurrentPath: d.Cwd,
+					}},
+				}},
+			})
+		}
 		stateMgr.UpdateSessions(sessions)
-		_ = recovery.TuneOomPanes(sessions)
-	})
-	go discovery.Run(ctx)
+	}
+
+	// Poll daemon sessions every 2 seconds.
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				refreshSessions()
+			}
+		}
+	}()
 
 	reconciler := toolevents.NewReconciler(tracker, func(paneID string) toolevents.PaneState {
-		panes, err := client.ListAllPanes()
-		if err != nil {
-			return toolevents.PaneState{Exists: false}
-		}
-		for _, p := range panes {
-			if p.ID == paneID {
-				return toolevents.PaneState{Exists: true, CurrentCommand: p.CurrentCommand, PID: p.PID}
+		if idx := strings.Index(paneID, ":0.0"); idx > 0 {
+			name := paneID[:idx]
+			for _, d := range daemonReg.List() {
+				if d.ID == name {
+					pid := d.ShellPid
+					if pid == 0 {
+						pid = d.Pid
+					}
+					return toolevents.PaneState{Exists: true, CurrentCommand: d.Shell, PID: pid}
+				}
 			}
 		}
 		return toolevents.PaneState{Exists: false}
@@ -63,27 +100,28 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	go reconciler.Run(ctx)
 
 	detector := toolevents.NewDetector(tracker, func() []toolevents.PaneInfo {
-		panes, err := client.ListAllPanesDetailed()
-		if err != nil {
-			return nil
-		}
 		var infos []toolevents.PaneInfo
-		for _, p := range panes {
+		for _, d := range daemonReg.List() {
+			pid := d.ShellPid
+			if pid == 0 {
+				pid = d.Pid
+			}
 			infos = append(infos, toolevents.PaneInfo{
-				PaneID:  p.ID,
-				Session: p.Session,
-				Window:  p.Window,
-				PID:     p.PID,
+				PaneID:  d.ID + ":0.0",
+				Session: d.ID,
+				Window:  0,
+				PID:     pid,
 			})
 		}
 		return infos
 	}, 5*time.Second)
 	go detector.Run(ctx)
 
-	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, client)
+	captureClient := &daemonCaptureClient{daemon: daemonReg}
+	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, captureClient)
 	go silenceMonitor.Run(ctx)
 
-	go runShellNameWatcher(ctx, client, stateMgr)
+	go runShellNameWatcher(ctx, stateMgr, daemonReg)
 
 	attrsStore, err := sessionattrs.NewStore()
 	if err != nil {
@@ -103,65 +141,17 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		groupStore = nil
 	}
 
-	var health *recovery.HealthPoller
-	if !c.Bool("no-recovery") {
-		snap := recovery.NewSnapshotter(stateMgr, attrsStore)
-		go snap.Run(ctx)
-
-		reb := recovery.NewRebuilder(client, stateMgr, attrsStore)
-		health = recovery.NewHealthPoller(client, 3*time.Second, func() {
-			logrus.Warn("tmux server gone, rebuilding from manifest")
-			stateMgr.SetRecovering(true)
-			defer stateMgr.SetRecovering(false)
-			if err := reb.Rebuild(ctx); err != nil {
-				logrus.WithError(err).Error("rebuild failed")
-			}
-			if sessions, err := client.ListSessions(); err == nil {
-				stateMgr.UpdateSessions(sessions)
-				_ = recovery.TuneOomPanes(sessions)
-			}
-			discovery.SetInterval(interval)
-		})
-		go health.Run(ctx)
-	}
-
-	if !c.Bool("no-control-mode") {
-		fallbackInterval := 30 * time.Second
-		ctrlMode := tmux.NewControlMode(client, func(sessions []*tmux.Session) {
-			stateMgr.UpdateSessions(sessions)
-			_ = recovery.TuneOomPanes(sessions)
-		},
-			tmux.WithOnConnect(func() {
-				discovery.SetInterval(fallbackInterval)
-			}),
-			tmux.WithOnDisconnect(func() {
-				discovery.SetInterval(interval)
-				if health != nil {
-					health.Hint()
-				}
-			}),
-			tmux.WithOnOutput(func(paneID string, dataLen int) {
-				session := stateMgr.SessionForPane(paneID)
-				if session != "" {
-					actTracker.Record(session, dataLen)
-				}
-				silenceMonitor.RecordOutput(paneID)
-				tracker.RecordProgress(paneID)
-			}),
-		)
-		go ctrlMode.Run(ctx)
-	}
-
 	go tracker.RunInactivityPromoter(ctx, toolevents.DefaultInactivityTimeout)
 
-	// Stuck monitor: flag agents that claim "active" but show no progress
-	// (no tool events, no terminal output) and aren't at an input prompt.
+	// Stuck monitor: flag agents that claim "active" but show no progress.
 	checkPrompt := func(paneID string) (bool, bool) {
-		content, err := client.CapturePaneContent(paneID)
-		if err != nil {
-			return false, false
+		if idx := strings.Index(paneID, ":0.0"); idx > 0 {
+			name := paneID[:idx]
+			if text, err := daemonReg.Capture(name); err == nil {
+				return toolevents.DetectPrompt(text).IsPrompt, true
+			}
 		}
-		return toolevents.DetectPrompt(content).IsPrompt, true
+		return false, false
 	}
 	go tracker.RunStuckMonitor(ctx, toolevents.DefaultStuckTimeout, checkPrompt)
 
@@ -254,7 +244,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		ActTracker:  actTracker,
 		ToolTracker: tracker,
 		PeerStore:   peerStore,
-		TmuxClient:  client,
+		DaemonReg:   &peerDaemonAdapter{reg: daemonReg},
 		StreamReg:   streamReg,
 		CaptureReg:  captureReg,
 		FileReadReg: fileReadReg,
@@ -271,7 +261,6 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		TLSCert:          c.String("tls-cert"),
 		TLSKey:           c.String("tls-key"),
 		TLSAuto:          c.Bool("tls"),
-		Client:           client,
 		StateMgr:         stateMgr,
 		Tracker:          tracker,
 		ActivityTracker:  actTracker,
@@ -295,11 +284,37 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		Detector:         detector,
 		PortForwardStore: portforward.NewStore(),
 		SchedulerStore:   schedulerStore,
+		DaemonReg:        daemonReg,
+		CWDResolver:      &daemonCWDResolver{reg: daemonReg},
+		OnDaemonOutput: func(paneID string) {
+			silenceMonitor.RecordOutput(paneID)
+		},
+		RefreshSessions: refreshSessions,
 		OnPrefsChanged:   applyNamerFromPrefs,
 	}
 	if schedulerStore != nil {
-		runner := scheduler.NewRunner(schedulerStore, client, stateMgr, peerMgr, func(req scheduler.CreateSessionReq) error {
-			return server.CreateSession(opts, req)
+		runner := scheduler.NewRunner(schedulerStore, stateMgr, peerMgr, func(req scheduler.CreateSessionReq) error {
+			// Remote sessions still go through peer/tmux path.
+			if req.Host != "" && peerMgr != nil && !peerMgr.IsLocal(req.Host) {
+				return server.CreateSession(opts, req)
+			}
+			// Local sessions use daemon backend.
+			shell := req.Command
+			if shell == "" || shell == "shell" {
+				shell = ""
+			}
+			cwd := req.Path
+			if cwd == "~" {
+				cwd = ""
+			}
+			if err := daemonReg.Create(req.Name, shell, cwd, 120, 40); err != nil {
+				return err
+			}
+			if req.AgentType != "" {
+				stateMgr.SetSessionAgentType(req.Name, req.AgentType)
+			}
+			refreshSessions()
+			return nil
 		}, logrus.WithField("component", "scheduler"))
 		runner.SetCapEnforcer(func(job scheduler.Job) {
 			// Pre-spawn: leave room for the incoming run.
@@ -330,17 +345,7 @@ func init() {
 			Sources: cli.EnvVars("TERMYARD_PORT"),
 			Value:   7654,
 		},
-		&cli.IntFlag{
-			Name:    "discovery-interval",
-			Usage:   "Session discovery interval in seconds",
-			Sources: cli.EnvVars("TERMYARD_DISCOVERY_INTERVAL"),
-			Value:   2,
-		},
-		&cli.BoolFlag{
-			Name:    "no-control-mode",
-			Usage:   "Disable tmux control mode (use polling only)",
-			Sources: cli.EnvVars("TERMYARD_NO_CONTROL_MODE"),
-		},
+
 		&cli.StringFlag{
 			Name:    "socket",
 			Usage:   "Unix socket path for local notify CLI (auto-detected if omitted)",
@@ -351,11 +356,7 @@ func init() {
 			Usage:   "Disable authentication (not recommended for remote access)",
 			Sources: cli.EnvVars("TERMYARD_NO_AUTH"),
 		},
-		&cli.BoolFlag{
-			Name:    "no-recovery",
-			Usage:   "Disable tmux crash recovery loops",
-			Sources: cli.EnvVars("TERMYARD_NO_RECOVERY"),
-		},
+
 		&cli.BoolFlag{
 			Name:    "tls",
 			Usage:   "Serve HTTPS with a self-signed cert (enables secure-context browser features over LAN)",
@@ -376,18 +377,9 @@ func init() {
 	cmd := &cli.Command{
 		Name:        "server",
 		Usage:       "start the termyard web server",
-		Description: "starts the web dashboard for monitoring and interacting with tmux sessions",
+		Description: "starts the web dashboard for monitoring and interacting with coding agent sessions",
 		Flags:       flags,
 		Action:      Execute,
-		Before: func(ctx context.Context, c *cli.Command) (context.Context, error) {
-			logrus.Info("checking for tmux...")
-			_, err := tmux.NewClient()
-			if err != nil {
-				return ctx, err
-			}
-			logrus.Info("tmux found")
-			return ctx, nil
-		},
 	}
 
 	common.RegisterCommand(cmd)
@@ -414,7 +406,7 @@ var trivialCmds = map[string]bool{
 // non-agent session starts a new meaningful process, asks the AI namer to
 // refresh that session's display name. The actual eligibility gate (namer
 // enabled, no agent, not user-set) lives in TriggerShellNaming.
-func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Manager) {
+func runShellNameWatcher(ctx context.Context, mgr *state.Manager, daemonReg *pty.Registry) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -431,9 +423,21 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fgs, err := client.ListForegroundCommands()
-			if err != nil {
-				continue
+			var fgs []model.SessionForeground
+			if daemonReg != nil {
+				for _, d := range daemonReg.List() {
+					pid := d.ShellPid
+					if pid == 0 {
+						pid = d.Pid
+					}
+					if cmd := foregroundCommand(pid); cmd != "" {
+						fgs = append(fgs, model.SessionForeground{
+							Session: d.ID,
+							Command: cmd,
+							PID:     pid,
+						})
+					}
+				}
 			}
 			for _, fg := range fgs {
 				prev := lastCmd[fg.Session]
@@ -455,8 +459,8 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 				named[fg.Session] = true
 
 				cmds := []string{cmd}
-				if pane := tmux.PrimaryPane(currentWindows(client, fg.Session)); pane != nil {
-					if content, err := client.CapturePaneHistory(pane.ID, -100); err == nil {
+				if daemonReg != nil {
+					if content, err := daemonReg.Capture(fg.Session); err == nil {
 						cmds = recentCommands(content, cmd)
 					}
 				}
@@ -466,22 +470,16 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 	}
 }
 
-func currentWindows(client *tmux.Client, session string) []*tmux.Window {
-	wins, err := client.ListWindows(session)
-	if err != nil {
-		return nil
-	}
-	for _, w := range wins {
-		if panes, err := client.ListPanes(w.ID); err == nil {
-			w.Panes = panes
-		}
-	}
-	return wins
-}
+
 
 // recentCommands extracts up to a handful of recent input lines from captured
 // pane content as a hint for naming. Falls back to [foreground] if nothing
 // useful is found.
+func defaultSessionDir() string {
+	uid := fmt.Sprintf("%d", os.Getuid())
+	return fmt.Sprintf("/tmp/termyard-sessions-%s", uid)
+}
+
 func recentCommands(content, foreground string) []string {
 	lines := strings.Split(content, "\n")
 	var out []string
@@ -505,4 +503,104 @@ func recentCommands(content, foreground string) []string {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out
+}
+
+// daemonCaptureClient routes pane capture to the daemon registry.
+type daemonCaptureClient struct {
+	daemon *pty.Registry
+}
+
+func (c *daemonCaptureClient) CapturePaneContent(paneID string) (string, error) {
+	if idx := strings.Index(paneID, ":0.0"); idx > 0 {
+		return c.daemon.Capture(paneID[:idx])
+	}
+	return c.daemon.Capture(paneID)
+}
+
+// peerDaemonAdapter wraps *pty.Registry to satisfy peer.DaemonRegistry.
+type peerDaemonAdapter struct {
+	reg *pty.Registry
+}
+
+func (a *peerDaemonAdapter) Create(name, shell, cwd string, cols, rows uint16) error {
+	return a.reg.Create(name, shell, cwd, cols, rows)
+}
+func (a *peerDaemonAdapter) Kill(name string) error    { return a.reg.Kill(name) }
+func (a *peerDaemonAdapter) Capture(name string) (string, error) { return a.reg.Capture(name) }
+func (a *peerDaemonAdapter) SocketPath(name string) string       { return a.reg.SocketPath(name) }
+func (a *peerDaemonAdapter) List() []peer.DaemonSessionInfo {
+	infos := a.reg.List()
+	out := make([]peer.DaemonSessionInfo, len(infos))
+	for i, info := range infos {
+		out[i] = peer.DaemonSessionInfo{
+			ID:       info.ID,
+			Pid:      info.Pid,
+			ShellPid: info.ShellPid,
+			Shell:    info.Shell,
+			Cwd:      info.Cwd,
+			Created:  info.Created,
+		}
+	}
+	return out
+}
+
+// daemonCWDResolver satisfies toolevents.CWDResolver for daemon sessions.
+type daemonCWDResolver struct {
+	reg *pty.Registry
+}
+
+func (r *daemonCWDResolver) SessionCWD(session string) string {
+	for _, d := range r.reg.List() {
+		if d.ID == session {
+			return d.Cwd
+		}
+	}
+	return ""
+}
+
+// foregroundCommand returns the name of the foreground process running under
+// the given shell PID, or "" if the shell has no children / is idle.
+func foregroundCommand(shellPid int) string {
+	childrenPath := fmt.Sprintf("/proc/%d/task/%d/children", shellPid, shellPid)
+	data, err := os.ReadFile(childrenPath)
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(strings.TrimSpace(string(data)))
+	if len(fields) == 0 {
+		return "" // shell is idle, no foreground process
+	}
+	// Use the first child (most likely the foreground process).
+	childPid := fields[0]
+	commPath := fmt.Sprintf("/proc/%s/comm", childPid)
+	comm, err := os.ReadFile(commPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(comm))
+}
+
+// daemonRegAdapter wraps pty.Registry to satisfy state.DaemonRegistry.
+type daemonRegAdapter struct {
+	reg *pty.Registry
+}
+
+func (a *daemonRegAdapter) List() []state.DaemonSessionInfo {
+	infos := a.reg.List()
+	out := make([]state.DaemonSessionInfo, len(infos))
+	for i, info := range infos {
+		out[i] = state.DaemonSessionInfo{
+			ID:       info.ID,
+			Pid:      info.Pid,
+			ShellPid: info.ShellPid,
+			Shell:    info.Shell,
+			Cwd:      info.Cwd,
+			Created:  info.Created,
+		}
+	}
+	return out
+}
+
+func (a *daemonRegAdapter) Capture(name string) (string, error) {
+	return a.reg.Capture(name)
 }

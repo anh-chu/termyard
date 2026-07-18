@@ -14,7 +14,7 @@ import (
 
 	"github.com/anh-chu/termyard/pkg/git"
 	"github.com/anh-chu/termyard/pkg/namer"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
@@ -36,10 +36,13 @@ type SessionMetadata struct {
 // Manager holds the central state tree
 type Manager struct {
 	mu       sync.RWMutex
-	sessions map[string]*tmux.Session
-	client   *tmux.Client
+	sessions map[string]*model.Session
 	meta     map[string]SessionMetadata
 	namer    *namer.Namer
+
+	// daemonReg provides metadata lookup for daemon sessions so
+	// loadSessionDetails can populate CWD, PID, and synthetic panes.
+	daemonReg DaemonRegistry
 
 	// onRename, when set, fires after a rename is applied (manual, AI naming, or
 	// peer-driven) so external per-session stores keyed by session name can
@@ -56,6 +59,27 @@ type Manager struct {
 	subscribers []chan StateEvent
 }
 
+// DaemonRegistry is the subset of pty.Registry needed by the state manager.
+type DaemonRegistry interface {
+	List() []DaemonSessionInfo
+	Capture(name string) (string, error)
+}
+
+// DaemonSessionInfo carries the daemon session metadata the state manager needs.
+type DaemonSessionInfo struct {
+	ID       string
+	Pid      int
+	ShellPid int
+	Shell    string
+	Cwd      string
+	Created  string
+}
+
+// SetDaemonRegistry wires the daemon registry into the state manager.
+func (m *Manager) SetDaemonRegistry(reg DaemonRegistry) {
+	m.daemonReg = reg
+}
+
 // StateEvent represents a change in the state tree
 type StateEvent struct {
 	Type     string      `json:"type"`
@@ -66,10 +90,9 @@ type StateEvent struct {
 }
 
 // NewManager creates a new state manager
-func NewManager(client *tmux.Client) *Manager {
+func NewManager() *Manager {
 	m := &Manager{
-		sessions: make(map[string]*tmux.Session),
-		client:   client,
+		sessions: make(map[string]*model.Session),
 		meta:     make(map[string]SessionMetadata),
 	}
 	if home, err := os.UserHomeDir(); err == nil {
@@ -241,7 +264,7 @@ func (m *Manager) notice(severity, source, session, message string) {
 
 // UpdateSessions takes a snapshot of sessions from discovery, diffs against
 // previous state, and broadcasts changes
-func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
+func (m *Manager) UpdateSessions(sessions []*model.Session) {
 	// Load full details for each session
 	for _, session := range sessions {
 		if err := m.loadSessionDetails(session); err != nil {
@@ -251,24 +274,53 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 
 	m.mu.Lock()
 	// Build new map
-	newMap := make(map[string]*tmux.Session, len(sessions))
+	newMap := make(map[string]*model.Session, len(sessions))
 	for _, s := range sessions {
 		newMap[s.Name] = s
 	}
 
-	// Detect removed sessions. A session that vanishes from discovery (e.g.
-	// killed directly via tmux, outside termyard's UI) must also have its metadata
-	// dropped, otherwise a later session reusing the same tmux name inherits the
-	// stale DisplayName, UserPrompt, agent message, etc.
+	// --- Mass-removal safety guards ---
+	// These protect against transient discovery failures (e.g. socket directory
+	// temporarily unreadable) that would otherwise wipe every tracked session
+	// from state, violating the "sessions must not disappear without explicit
+	// user action" guarantee.
+
+	// Guard 1: if ALL sessions vanished from discovery, skip this cycle entirely.
+	if len(m.sessions) > 0 && len(newMap) == 0 {
+		logrus.Warn("state: all sessions disappeared from discovery — skipping removal (likely transient)")
+		m.mu.Unlock()
+		return
+	}
+
+	// Compute which sessions would be removed (deferred action so we can guard).
 	removed := make([]string, 0)
 	for name := range m.sessions {
 		if _, ok := newMap[name]; !ok {
 			removed = append(removed, name)
-			delete(m.meta, name)
-			m.mu.Unlock()
-			m.broadcast(StateEvent{Type: "session-removed", Session: name})
-			m.mu.Lock()
 		}
+	}
+
+	// Guard 2: don't remove more than 50% of sessions in one cycle (unless we
+	// only had 2 or fewer — a single intentional kill would look like 50%).
+	// Removing 1-2 sessions is fine; removing MOST sessions is almost certainly
+	// a discovery bug, not real session death.
+	if len(removed) > len(m.sessions)/2 && len(m.sessions) > 2 {
+		logrus.WithFields(logrus.Fields{
+			"current":      len(m.sessions),
+			"would_remove": len(removed),
+		}).Warn("state: would remove majority of sessions — skipping removal (likely transient)")
+		m.mu.Unlock()
+		return
+	}
+
+	// Now perform the actual removals. A session that vanishes from discovery
+	// (e.g. killed outside termyard's UI) must also have its metadata dropped,
+	// otherwise a later session reusing the same name inherits stale state.
+	for _, name := range removed {
+		delete(m.meta, name)
+		m.mu.Unlock()
+		m.broadcast(StateEvent{Type: "session-removed", Session: name})
+		m.mu.Lock()
 	}
 
 	// Detect added sessions
@@ -294,32 +346,9 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 }
 
 // loadSessionDetails fills in windows and panes for a session
-func (m *Manager) loadSessionDetails(session *tmux.Session) error {
-	windows, err := m.client.ListWindows(session.Name)
-	if err != nil {
-		return err
-	}
-
-	for _, win := range windows {
-		panes, err := m.client.ListPanes(win.ID)
-		if err != nil {
-			logrus.WithError(err).WithField("window", win.Name).Warn("failed to list panes")
-			continue
-		}
-		win.Panes = panes
-	}
-
-	session.Windows = windows
-	session.ProjectPath = tmux.ResolveProjectPath(windows, "")
-	session.AgentType = tmux.InferAgentType(windows, "")
-
-	if pane := tmux.PrimaryPane(windows); pane != nil {
-		if content, err := m.client.CapturePaneHistory(pane.ID, -200); err == nil {
-			session.PromptPreview = tmux.ExtractPromptPreview(content)
-		}
-	}
-
-	m.applyMetadata(session)
+func (m *Manager) loadSessionDetails(session *model.Session) error {
+	// All sessions are daemon-backed now.
+	m.loadDaemonSessionDetails(session)
 
 	// Detect linked git worktrees so the UI can offer cleanup on kill.
 	if session.ProjectPath != "" {
@@ -338,11 +367,72 @@ func (m *Manager) loadSessionDetails(session *tmux.Session) error {
 	return nil
 }
 
+// loadDaemonSessionDetails populates a daemon session with a synthetic
+// single-window, single-pane structure using daemon registry metadata.
+func (m *Manager) loadDaemonSessionDetails(session *model.Session) {
+	if m.daemonReg == nil {
+		m.applyMetadata(session)
+		return
+	}
+
+	// Find this session's daemon metadata.
+	var info *DaemonSessionInfo
+	for _, di := range m.daemonReg.List() {
+		if di.ID == session.Name {
+			info = &di
+			break
+		}
+	}
+
+	cwd := ""
+	pid := 0
+	if info != nil {
+		cwd = info.Cwd
+		pid = info.ShellPid
+		if pid == 0 {
+			pid = info.Pid
+		}
+		// Try to read live CWD from the shell process.
+		if pid > 0 {
+			if liveCwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid)); err == nil && liveCwd != "" {
+				cwd = liveCwd
+			}
+		}
+	}
+
+	// Build synthetic pane.
+	pane := &model.Pane{
+		ID:          session.Name + ":0.0",
+		Active:      true,
+		CurrentPath: cwd,
+		PID:         pid,
+	}
+	win := &model.Window{
+		ID:    session.Name + ":0",
+		Name:  session.Name,
+		Index: 0,
+		Active: true,
+		Panes: []*model.Pane{pane},
+	}
+	session.Windows = []*model.Window{win}
+
+	if cwd != "" {
+		session.ProjectPath = cwd
+	}
+
+	// Capture prompt preview from the daemon's ring buffer.
+	if text, err := m.daemonReg.Capture(session.Name); err == nil && text != "" {
+		session.PromptPreview = model.ExtractPromptPreview(text)
+	}
+
+	m.applyMetadata(session)
+}
+
 // sessionHasLiveAgent reports whether any pane in the session currently has a
 // recognized coding agent process running in its tree. Used to distinguish a
 // live agent (keep its identity) from a session that used to run one but has
 // reverted to a shell or other process (drop the stale identity).
-func sessionHasLiveAgent(windows []*tmux.Window) bool {
+func sessionHasLiveAgent(windows []*model.Window) bool {
 	for _, win := range windows {
 		for _, pane := range win.Panes {
 			if pane.PID <= 0 {
@@ -355,7 +445,7 @@ func sessionHasLiveAgent(windows []*tmux.Window) bool {
 	}
 	return false
 }
-func (m *Manager) applyMetadata(session *tmux.Session) {
+func (m *Manager) applyMetadata(session *model.Session) {
 	m.mu.RLock()
 	meta := m.meta[session.Name]
 	m.mu.RUnlock()
@@ -381,7 +471,7 @@ func (m *Manager) applyMetadata(session *tmux.Session) {
 
 	if session.AgentType == "" && meta.AgentType != "" {
 		if agentAlive() {
-			session.AgentType = tmux.NormalizeAgentType(meta.AgentType)
+			session.AgentType = model.NormalizeAgentType(meta.AgentType)
 		} else {
 			m.mu.Lock()
 			stored := m.meta[session.Name]
@@ -492,7 +582,7 @@ func (m *Manager) UpdateSessionMetadataFromEvent(evt *toolevents.Event) {
 			session.ProjectPath = meta.ProjectPath
 		}
 		if session.AgentType == "" && meta.AgentType != "" {
-			session.AgentType = tmux.NormalizeAgentType(meta.AgentType)
+			session.AgentType = model.NormalizeAgentType(meta.AgentType)
 		}
 		if session.PromptPreview == "" && meta.PromptPreview != "" {
 			session.PromptPreview = meta.PromptPreview
@@ -705,13 +795,13 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	// Decide tmux rename inside the lock to avoid collision races.
 	newName := ""
 	if allowRename && !alreadyRenamed && displayName != sessionName {
-		if tmux.ValidateSessionName(displayName) == nil {
+		if model.ValidateSessionName(displayName) == nil {
 			taken := make(map[string]bool, len(m.sessions))
 			for n := range m.sessions {
 				taken[n] = true
 			}
 			cand := namer.Dedup(displayName, taken)
-			if tmux.ValidateSessionName(cand) == nil && !taken[cand] {
+			if model.ValidateSessionName(cand) == nil && !taken[cand] {
 				newName = cand
 			}
 		}
@@ -726,13 +816,7 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 		return
 	}
 
-	if err := m.client.RenameSession(sessionName, newName); err != nil {
-		m.notice("warn", "ai-naming", sessionName, fmt.Sprintf("tmux rename to %q failed: %v", newName, err))
-		m.saveNames()
-		m.broadcast(StateEvent{Type: "sessions-changed"})
-		return
-	}
-
+	// Daemon sessions don't need tmux rename — the DisplayName is sufficient.
 	// Migrate meta + sessions keys to the new name.
 	m.ApplyRename(sessionName, newName)
 	m.broadcast(StateEvent{Type: "sessions-changed"})
@@ -964,20 +1048,8 @@ func (m *Manager) ApplyAIName(sessionName, name string) string {
 // foregroundCommands returns the active pane's foreground command for a
 // session, used as shell-naming context for a manual name refresh.
 func (m *Manager) foregroundCommands(session string) []string {
-	if m.client == nil {
-		return nil
-	}
-	fgs, err := m.client.ListForegroundCommands()
-	if err != nil {
-		return nil
-	}
-	for _, fg := range fgs {
-		if fg.Session == session {
-			if cmd := strings.TrimSpace(fg.Command); cmd != "" {
-				return []string{cmd}
-			}
-		}
-	}
+	// Daemon sessions don't have tmux foreground command tracking.
+	_ = session
 	return nil
 }
 
@@ -1024,54 +1096,25 @@ func (m *Manager) SessionForPane(paneID string) string {
 	return ""
 }
 
-// GetSessions returns all tracked sessions with full details
-func (m *Manager) GetSessions() []*tmux.Session {
-	// Always refresh from tmux for accuracy
-	sessions, err := m.client.ListSessions()
-	if err != nil {
-		logrus.WithError(err).Warn("failed to list sessions")
-		m.mu.RLock()
-		defer m.mu.RUnlock()
-		result := make([]*tmux.Session, 0, len(m.sessions))
-		for _, s := range m.sessions {
-			result = append(result, s)
-		}
-		return result
+// GetSessions returns all tracked sessions with full details.
+func (m *Manager) GetSessions() []*model.Session {
+	m.mu.RLock()
+	result := make([]*model.Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		result = append(result, s)
 	}
-
-	// Filter out the control mode session
-	filtered := make([]*tmux.Session, 0, len(sessions))
-	for _, s := range sessions {
-		if s.Name != tmux.ControlSessionName() {
-			filtered = append(filtered, s)
-		}
-	}
-	sessions = filtered
-
-	for _, session := range sessions {
-		if err := m.loadSessionDetails(session); err != nil {
-			logrus.WithError(err).WithField("session", session.Name).Warn("failed to load session details")
-		}
-	}
-
-	m.mu.Lock()
-	m.sessions = make(map[string]*tmux.Session, len(sessions))
-	for _, s := range sessions {
-		m.sessions[s.Name] = s
-	}
-	m.mu.Unlock()
-
-	return sessions
+	m.mu.RUnlock()
+	return result
 }
 
 // SnapshotForManifest returns deep copies of current tracked sessions.
-func (m *Manager) SnapshotForManifest() []*tmux.Session {
+func (m *Manager) SnapshotForManifest() []*model.Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	out := make([]*tmux.Session, 0, len(m.sessions))
+	out := make([]*model.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		if s == nil || s.Name == tmux.ControlSessionName() {
+		if s == nil {
 			continue
 		}
 		out = append(out, deepCopySession(s))
@@ -1079,20 +1122,20 @@ func (m *Manager) SnapshotForManifest() []*tmux.Session {
 	return out
 }
 
-func deepCopySession(s *tmux.Session) *tmux.Session {
+func deepCopySession(s *model.Session) *model.Session {
 	if s == nil {
 		return nil
 	}
 	copySession := *s
 	if len(s.Windows) > 0 {
-		copySession.Windows = make([]*tmux.Window, 0, len(s.Windows))
+		copySession.Windows = make([]*model.Window, 0, len(s.Windows))
 		for _, win := range s.Windows {
 			if win == nil {
 				continue
 			}
 			copyWin := *win
 			if len(win.Panes) > 0 {
-				copyWin.Panes = make([]*tmux.Pane, 0, len(win.Panes))
+				copyWin.Panes = make([]*model.Pane, 0, len(win.Panes))
 				for _, pane := range win.Panes {
 					if pane == nil {
 						continue

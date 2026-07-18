@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 var (
@@ -168,28 +167,18 @@ func displayPathForResolved(path string) string {
 	return displayPathForHome(path, home)
 }
 
-// ActivePaneCwd returns the CurrentPath of the active pane among panes, or ""
-// if none — no fallback to inactive panes, so a relative file open resolves
-// against exactly the pane shown in the terminal.
-func ActivePaneCwd(panes []*tmux.Pane) string {
-	for _, pane := range panes {
-		if pane.Active {
-			return strings.TrimSpace(pane.CurrentPath)
-		}
-	}
-	return ""
+
+// CWDResolver returns the working directory for a session.
+type CWDResolver interface {
+	SessionCWD(session string) string
 }
 
-// ResolveSessionCWD returns trusted session cwd from tmux pane state only.
-// It intentionally ignores cwd from unauthenticated /tool-event payloads.
-func ResolveSessionCWD(client *tmux.Client, session string) string {
-	if client == nil || session == "" {
+// ResolveSessionCWD returns the session's working directory.
+func ResolveSessionCWD(resolver CWDResolver, session string) string {
+	if resolver == nil || session == "" {
 		return ""
 	}
-	if panes, err := client.ListPanes(session); err == nil {
-		return ActivePaneCwd(panes)
-	}
-	return ""
+	return resolver.SessionCWD(session)
 }
 
 func resolveAgainstBase(base, p string) string {

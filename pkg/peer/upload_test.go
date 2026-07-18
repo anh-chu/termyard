@@ -15,7 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/anh-chu/termyard/pkg/identity"
-	"github.com/anh-chu/termyard/pkg/tmux"
+	"github.com/anh-chu/termyard/pkg/model"
 )
 
 func TestOpenUploadCapability(t *testing.T) {
@@ -86,7 +86,7 @@ func TestUploadWireProtocolRoundTrip(t *testing.T) {
 	}, 1)
 
 	go func() {
-		path, err := tmux.StoreUploadedFile(pr, "upload-test.dat")
+		path, err := model.StoreUploadedFile(pr, "upload-test.dat")
 		storeDone <- struct {
 			path string
 			err  error
@@ -161,7 +161,7 @@ func TestUploadWireProtocolRoundTrip(t *testing.T) {
 	// Send result back to hub.
 	reply, _ := json.Marshal(map[string]string{
 		"path":        result.path,
-		"quotedPath": tmux.ShellQuote(result.path),
+		"quotedPath": model.ShellQuote(result.path),
 	})
 	peerConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if err := peerConn.WriteMessage(websocket.TextMessage, reply); err != nil {
@@ -234,7 +234,7 @@ func TestUploadWireProtocolAbortCleanup(t *testing.T) {
 	storeDone := make(chan error, 1)
 
 	go func() {
-		_, err := tmux.StoreUploadedFile(pr, "abort-test.dat")
+		_, err := model.StoreUploadedFile(pr, "abort-test.dat")
 		storeDone <- err
 	}()
 
