@@ -55,7 +55,10 @@ type sessionMeta struct {
 }
 
 func RunDaemon(cfg DaemonConfig) error {
-	// Survive terminal hangup when the spawning process exits.
+	// Ensure we're a session leader so we survive parent/server restarts.
+	// Registry.Create sets Setsid on the child, but if someone starts us
+	// directly (e.g. systemd, manual invocation) we need our own session.
+	syscall.Setsid() // no-op if already a session leader
 	signal.Ignore(syscall.SIGHUP)
 
 	if cfg.Shell == "" {
