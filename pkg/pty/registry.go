@@ -18,14 +18,15 @@ import (
 
 // SessionInfo holds metadata about a running session daemon.
 type SessionInfo struct {
-	ID      string
-	Pid     int
-	Shell   string
-	Cwd     string
-	Created string // RFC3339
-	Cols    uint16
-	Rows    uint16
-	Socket  string // full path to .sock file
+	ID       string
+	Pid      int
+	ShellPid int
+	Shell    string
+	Cwd      string
+	Created  string // RFC3339
+	Cols     uint16
+	Rows     uint16
+	Socket   string // full path to .sock file
 }
 
 // Registry manages session daemon lifecycle: create, list, kill, capture.
@@ -182,6 +183,7 @@ func (r *Registry) List() []SessionInfo {
 			var meta sessionMeta
 			if json.Unmarshal(data, &meta) == nil {
 				info.Pid = meta.Pid
+				info.ShellPid = meta.ShellPid
 				info.Shell = meta.Shell
 				info.Cwd = meta.Cwd
 				info.Created = meta.Created

@@ -41,6 +41,10 @@ type Manager struct {
 	meta     map[string]SessionMetadata
 	namer    *namer.Namer
 
+	// daemonReg provides metadata lookup for daemon sessions so
+	// loadSessionDetails can populate CWD, PID, and synthetic panes.
+	daemonReg DaemonRegistry
+
 	// onRename, when set, fires after a rename is applied (manual, AI naming, or
 	// peer-driven) so external per-session stores keyed by session name can
 	// migrate their entries.
@@ -54,6 +58,27 @@ type Manager struct {
 	// Subscribers for state changes
 	subMu       sync.RWMutex
 	subscribers []chan StateEvent
+}
+
+// DaemonRegistry is the subset of pty.Registry needed by the state manager.
+type DaemonRegistry interface {
+	List() []DaemonSessionInfo
+	Capture(name string) (string, error)
+}
+
+// DaemonSessionInfo carries the daemon session metadata the state manager needs.
+type DaemonSessionInfo struct {
+	ID       string
+	Pid      int
+	ShellPid int
+	Shell    string
+	Cwd      string
+	Created  string
+}
+
+// SetDaemonRegistry wires the daemon registry into the state manager.
+func (m *Manager) SetDaemonRegistry(reg DaemonRegistry) {
+	m.daemonReg = reg
 }
 
 // StateEvent represents a change in the state tree
@@ -296,7 +321,8 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 // loadSessionDetails fills in windows and panes for a session
 func (m *Manager) loadSessionDetails(session *tmux.Session) error {
 	if session.Backend == "daemon" {
-		return nil // daemon sessions carry their own window/pane info
+		m.loadDaemonSessionDetails(session)
+		return nil
 	}
 	windows, err := m.client.ListWindows(session.Name)
 	if err != nil {
@@ -339,6 +365,67 @@ func (m *Manager) loadSessionDetails(session *tmux.Session) error {
 	}
 
 	return nil
+}
+
+// loadDaemonSessionDetails populates a daemon session with a synthetic
+// single-window, single-pane structure using daemon registry metadata.
+func (m *Manager) loadDaemonSessionDetails(session *tmux.Session) {
+	if m.daemonReg == nil {
+		m.applyMetadata(session)
+		return
+	}
+
+	// Find this session's daemon metadata.
+	var info *DaemonSessionInfo
+	for _, di := range m.daemonReg.List() {
+		if di.ID == session.Name {
+			info = &di
+			break
+		}
+	}
+
+	cwd := ""
+	pid := 0
+	if info != nil {
+		cwd = info.Cwd
+		pid = info.ShellPid
+		if pid == 0 {
+			pid = info.Pid
+		}
+		// Try to read live CWD from the shell process.
+		if pid > 0 {
+			if liveCwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid)); err == nil && liveCwd != "" {
+				cwd = liveCwd
+			}
+		}
+	}
+
+	// Build synthetic pane.
+	pane := &tmux.Pane{
+		ID:          session.Name + ":0.0",
+		Active:      true,
+		CurrentPath: cwd,
+		PID:         pid,
+	}
+	win := &tmux.Window{
+		ID:    session.Name + ":0",
+		Name:  session.Name,
+		Index: 0,
+		Active: true,
+		Panes: []*tmux.Pane{pane},
+	}
+	session.Windows = []*tmux.Window{win}
+
+	if cwd != "" {
+		session.ProjectPath = cwd
+	}
+
+	// Capture prompt preview from the daemon's ring buffer.
+	if text, err := m.daemonReg.Capture(session.Name); err == nil && text != "" {
+		session.PromptPreview = tmux.ExtractPromptPreview(text)
+	}
+
+	m.applyMetadata(session)
 }
 
 // sessionHasLiveAgent reports whether any pane in the session currently has a

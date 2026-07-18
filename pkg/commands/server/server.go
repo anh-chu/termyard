@@ -44,6 +44,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	// Session daemon registry — discover daemon-backed sessions alongside tmux.
 	daemonReg := pty.NewRegistry(defaultSessionDir())
+	stateMgr.SetDaemonRegistry(&daemonRegAdapter{reg: daemonReg})
 
 	// mergedRefresh combines tmux sessions with daemon sessions before updating state.
 	mergedRefresh := func(tmuxSessions []*tmux.Session) {
@@ -84,6 +85,20 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	go discovery.Run(ctx)
 
 	reconciler := toolevents.NewReconciler(tracker, func(paneID string) toolevents.PaneState {
+		// Check daemon sessions first.
+		if idx := strings.Index(paneID, ":0.0"); idx > 0 {
+			name := paneID[:idx]
+			for _, d := range daemonReg.List() {
+				if d.ID == name {
+					pid := d.ShellPid
+					if pid == 0 {
+						pid = d.Pid
+					}
+					return toolevents.PaneState{Exists: true, CurrentCommand: d.Shell, PID: pid}
+				}
+			}
+		}
+		// Fall back to tmux.
 		panes, err := client.ListAllPanes()
 		if err != nil {
 			return toolevents.PaneState{Exists: false}
@@ -98,24 +113,36 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	go reconciler.Run(ctx)
 
 	detector := toolevents.NewDetector(tracker, func() []toolevents.PaneInfo {
-		panes, err := client.ListAllPanesDetailed()
-		if err != nil {
-			return nil
-		}
 		var infos []toolevents.PaneInfo
-		for _, p := range panes {
+		// Tmux panes.
+		if panes, err := client.ListAllPanesDetailed(); err == nil {
+			for _, p := range panes {
+				infos = append(infos, toolevents.PaneInfo{
+					PaneID:  p.ID,
+					Session: p.Session,
+					Window:  p.Window,
+					PID:     p.PID,
+				})
+			}
+		}
+		// Daemon session panes.
+		for _, d := range daemonReg.List() {
+			pid := d.ShellPid
+			if pid == 0 {
+				pid = d.Pid
+			}
 			infos = append(infos, toolevents.PaneInfo{
-				PaneID:  p.ID,
-				Session: p.Session,
-				Window:  p.Window,
-				PID:     p.PID,
+				PaneID:  d.ID + ":0.0",
+				Session: d.ID,
+				Window:  0,
+				PID:     pid,
 			})
 		}
 		return infos
 	}, 5*time.Second)
 	go detector.Run(ctx)
 
-	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, client)
+	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, &compositeCaptureClient{tmux: client, daemon: daemonReg})
 	go silenceMonitor.Run(ctx)
 
 	go runShellNameWatcher(ctx, client, stateMgr)
@@ -574,4 +601,47 @@ func recentCommands(content, foreground string) []string {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out
+}
+
+// compositeCaptureClient tries daemon capture first (for daemon-style pane IDs
+// like "sessionName:0.0"), then falls back to tmux.
+type compositeCaptureClient struct {
+	tmux   *tmux.Client
+	daemon *pty.Registry
+}
+
+func (c *compositeCaptureClient) CapturePaneContent(paneID string) (string, error) {
+	// Daemon pane IDs are "sessionName:0.0". Extract the session name.
+	if idx := strings.Index(paneID, ":0.0"); idx > 0 {
+		name := paneID[:idx]
+		if text, err := c.daemon.Capture(name); err == nil {
+			return text, nil
+		}
+	}
+	return c.tmux.CapturePaneContent(paneID)
+}
+
+// daemonRegAdapter wraps pty.Registry to satisfy state.DaemonRegistry.
+type daemonRegAdapter struct {
+	reg *pty.Registry
+}
+
+func (a *daemonRegAdapter) List() []state.DaemonSessionInfo {
+	infos := a.reg.List()
+	out := make([]state.DaemonSessionInfo, len(infos))
+	for i, info := range infos {
+		out[i] = state.DaemonSessionInfo{
+			ID:       info.ID,
+			Pid:      info.Pid,
+			ShellPid: info.ShellPid,
+			Shell:    info.Shell,
+			Cwd:      info.Cwd,
+			Created:  info.Created,
+		}
+	}
+	return out
+}
+
+func (a *daemonRegAdapter) Capture(name string) (string, error) {
+	return a.reg.Capture(name)
 }

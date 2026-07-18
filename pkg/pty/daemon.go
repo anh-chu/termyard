@@ -43,13 +43,14 @@ type DaemonConfig struct {
 // and serves clients until the shell exits or Close is received.
 // sessionMeta is written as a JSON sidecar file alongside the socket.
 type sessionMeta struct {
-	ID      string `json:"id"`
-	Pid     int    `json:"pid"`
-	Shell   string `json:"shell"`
-	Cwd     string `json:"cwd"`
-	Created string `json:"created"`
-	Cols    uint16 `json:"cols"`
-	Rows    uint16 `json:"rows"`
+	ID       string `json:"id"`
+	Pid      int    `json:"pid"`
+	ShellPid int    `json:"shell_pid"`
+	Shell    string `json:"shell"`
+	Cwd      string `json:"cwd"`
+	Created  string `json:"created"`
+	Cols     uint16 `json:"cols"`
+	Rows     uint16 `json:"rows"`
 }
 
 func RunDaemon(cfg DaemonConfig) error {
@@ -118,13 +119,14 @@ func RunDaemon(cfg DaemonConfig) error {
 
 	// Write metadata sidecar so Registry.List can discover sessions.
 	meta := sessionMeta{
-		ID:      cfg.ID,
-		Pid:     os.Getpid(),
-		Shell:   cfg.Shell,
-		Cwd:     cfg.Cwd,
-		Created: time.Now().Format(time.RFC3339),
-		Cols:    cfg.Cols,
-		Rows:    cfg.Rows,
+		ID:       cfg.ID,
+		Pid:      os.Getpid(),
+		ShellPid: cmd.Process.Pid,
+		Shell:    cfg.Shell,
+		Cwd:      cfg.Cwd,
+		Created:  time.Now().Format(time.RFC3339),
+		Cols:     cfg.Cols,
+		Rows:     cfg.Rows,
 	}
 	metaBytes, _ := json.Marshal(meta)
 	if err := os.WriteFile(metadataPath, metaBytes, 0600); err != nil {

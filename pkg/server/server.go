@@ -320,7 +320,7 @@ func sessionKey(host, name string) string {
 // call pass max-1 to leave room for the incoming run; for an update-time prune
 // pass max. A negative keep is treated as unlimited and is a no-op.
 func EnforceScheduleCap(opts *Options, scheduleID string, keep int) {
-	if opts == nil || opts.AttrsStore == nil || opts.Client == nil || keep < 0 || scheduleID == "" {
+	if opts == nil || opts.AttrsStore == nil || keep < 0 || scheduleID == "" {
 		return
 	}
 	keys := map[string]bool{}
@@ -332,25 +332,48 @@ func EnforceScheduleCap(opts *Options, scheduleID string, keep int) {
 	if len(keys) == 0 {
 		return
 	}
-	sessions, err := opts.Client.ListSessions()
-	if err != nil {
-		logrus.WithError(err).Warn("schedule cap: list sessions failed")
-		return
-	}
+
+	// Collect tagged sessions from both tmux and daemon backends.
 	var tagged []*tmux.Session
-	for _, s := range sessions {
-		if keys[sessionKey(s.Host, s.Name)] {
-			tagged = append(tagged, s)
+	if opts.Client != nil {
+		if sessions, err := opts.Client.ListSessions(); err == nil {
+			for _, s := range sessions {
+				if keys[sessionKey(s.Host, s.Name)] {
+					tagged = append(tagged, s)
+				}
+			}
 		}
 	}
+	if opts.DaemonReg != nil {
+		for _, info := range opts.DaemonReg.List() {
+			if keys[sessionKey("", info.ID)] {
+				created := time.Time{}
+				if t, err := time.Parse(time.RFC3339, info.Created); err == nil {
+					created = t
+				}
+				tagged = append(tagged, &tmux.Session{
+					Name:    info.ID,
+					Created: created,
+					Backend: "daemon",
+				})
+			}
+		}
+	}
+
 	sort.Slice(tagged, func(i, j int) bool {
 		return tagged[i].Created.Before(tagged[j].Created)
 	})
 	for len(tagged) > keep {
 		victim := tagged[0]
 		tagged = tagged[1:]
-		if err := opts.Client.KillSession(victim.ID, victim.Name); err != nil {
-			logrus.WithError(err).WithField("session", victim.Name).Warn("schedule cap: kill oldest failed")
+		if victim.Backend == "daemon" {
+			if err := opts.DaemonReg.Kill(victim.Name); err != nil {
+				logrus.WithError(err).WithField("session", victim.Name).Warn("schedule cap: kill daemon failed")
+			}
+		} else if opts.Client != nil {
+			if err := opts.Client.KillSession(victim.ID, victim.Name); err != nil {
+				logrus.WithError(err).WithField("session", victim.Name).Warn("schedule cap: kill oldest failed")
+			}
 		}
 	}
 }
@@ -1060,7 +1083,14 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 					return
 				}
 
-				// Local session.
+				// Local session — try daemon registry first, fall back to tmux.
+				if opts.DaemonReg != nil {
+					if text, err := opts.DaemonReg.Capture(session); err == nil {
+						w.Header().Set("Content-Type", "application/json")
+						json.NewEncoder(w).Encode(map[string]string{"text": tmux.LastLines(text, lines)})
+						return
+					}
+				}
 				if opts.Client == nil {
 					http.Error(w, "tmux unavailable", http.StatusInternalServerError)
 					return
