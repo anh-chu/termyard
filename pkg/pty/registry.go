@@ -9,12 +9,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
+
+// ansiRe matches ANSI escape sequences (CSI, OSC, and simple escapes).
+var ansiRe = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x1b\x07]*(?:\x07|\x1b\\)|[()][AB012]|\[\?[0-9;]*[hl]|=|>|\x1b)`)
+
+// ctrlRe matches carriage returns and other non-newline control chars.
+var ctrlRe = regexp.MustCompile(`[\x00-\x08\x0b\x0c\x0e-\x1f]`)
 
 // SessionInfo holds metadata about a running session daemon.
 type SessionInfo struct {
@@ -262,5 +269,9 @@ func (r *Registry) Capture(name string) (string, error) {
 		return "", fmt.Errorf("unexpected frame type: %02x", ftype)
 	}
 
-	return string(payload), nil
+	// Strip ANSI escape sequences and control chars so callers get clean text
+	// (like tmux capture-pane).
+	clean := ansiRe.ReplaceAllString(string(payload), "")
+	clean = ctrlRe.ReplaceAllString(clean, "")
+	return clean, nil
 }
