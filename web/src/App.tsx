@@ -27,6 +27,8 @@ import { useSessionAttrs } from './hooks/useSessionAttrs'
 import { useSessionOrder } from './hooks/useSessionOrder'
 import { useGroupSync } from './hooks/useGroupSync'
 import { Toasts, Toast } from './components/Toasts'
+import { RecoveryPanel } from './components/RecoveryPanel'
+import { useCrashedSessions } from './hooks/useCrashedSessions'
 import { useSelfUpdate, type UpdateStatus } from './hooks/useSelfUpdate'
 import { applyTheme } from './theme'
 import { sessionSignal } from './lib/sessionState'
@@ -181,6 +183,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   // mirrored across the mesh. Viewport state (pane-tree, active-key,
   // active-group-id, sidebar-collapsed) stays per-device in localStorage.
   const { sets: sessionAttrs, setAttr: setSessionAttr, refresh: refreshSessionAttrs } = useSessionAttrs(authenticated)
+  const crashedHook = useCrashedSessions()
 
   // Auto-lock: idle detection
   const lastActivityRef = useRef<number>(Date.now())
@@ -657,7 +660,10 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     if (evt.type === 'session-attrs-updated') {
       refreshSessionAttrs()
     }
-  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs, refreshSessionOrder, refreshGroups, migrateSessionKey])
+    if (evt.type === 'sessions-crashed') {
+      crashedHook.refresh()
+    }
+  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs, refreshSessionOrder, refreshGroups, migrateSessionKey, crashedHook.refresh])
 
   const { connected } = useWebSocket('/ws/events', onEvent)
 
@@ -1143,6 +1149,14 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   return (
     <div className="flex flex-col h-full w-full bg-background text-foreground relative">
       <Toasts toasts={toasts} onDismiss={dismissToast} />
+      {crashedHook.crashedSessions.length > 0 && (
+        <RecoveryPanel
+          crashedSessions={crashedHook.crashedSessions}
+          onRecover={crashedHook.recover}
+          onDismiss={crashedHook.dismiss}
+          onDismissAll={crashedHook.dismissAll}
+        />
+      )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {portForwardsOpen && (
         <PortForwardModal onClose={() => setPortForwardsOpen(false)} />
@@ -1251,6 +1265,8 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
             pruningSuspended={pruningSuspended}
 
             onQuickShell={handleQuickShell}
+            crashedCount={crashedHook.crashedSessions.length}
+            onCrashedClick={() => crashedHook.refresh()}
           />
         )}
         <div

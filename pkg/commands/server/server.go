@@ -38,6 +38,18 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	// Session daemon registry — the only session backend.
 	daemonReg := pty.NewRegistry(defaultSessionDir())
+
+	// Wire up durable lifecycle store for crash detection and recovery.
+	if lcStore, err := pty.NewLifecycleStore(pty.DefaultStateDir()); err != nil {
+		logrus.WithError(err).Warn("failed to create lifecycle store — crash recovery disabled")
+	} else {
+		daemonReg.SetLifecycleStore(lcStore)
+		// Detect any sessions that crashed while the server was down.
+		if crashed := lcStore.DetectCrashes(); len(crashed) > 0 {
+			logrus.WithField("count", len(crashed)).Warn("detected crashed sessions from previous run")
+		}
+	}
+
 	stateMgr.SetDaemonRegistry(&daemonRegAdapter{reg: daemonReg})
 
 	// refreshSessions discovers daemon sessions and pushes state.
@@ -66,6 +78,13 @@ func Execute(ctx context.Context, c *cli.Command) error {
 			})
 		}
 		stateMgr.UpdateSessions(sessions)
+
+		// Run crash detection on each refresh cycle.
+		if lcStore := daemonReg.LifecycleStore(); lcStore != nil {
+			if crashed := lcStore.DetectCrashes(); len(crashed) > 0 {
+				logrus.WithField("count", len(crashed)).Warn("detected newly crashed sessions")
+			}
+		}
 	}
 
 	// Poll daemon sessions every 2 seconds.
@@ -603,4 +622,22 @@ func (a *daemonRegAdapter) List() []state.DaemonSessionInfo {
 
 func (a *daemonRegAdapter) Capture(name string) (string, error) {
 	return a.reg.Capture(name)
+}
+
+func (a *daemonRegAdapter) CrashedSessions() []state.CrashedSessionInfo {
+	recs := a.reg.CrashedSessions()
+	out := make([]state.CrashedSessionInfo, len(recs))
+	for i, rec := range recs {
+		out[i] = state.CrashedSessionInfo{
+			ID:         rec.ID,
+			Shell:      rec.Shell,
+			Cwd:        rec.Cwd,
+			Cols:       rec.Cols,
+			Rows:       rec.Rows,
+			CreatedAt:  rec.CreatedAt.Format(time.RFC3339),
+			DaemonPID:  rec.DaemonPID,
+			Generation: rec.Generation,
+		}
+	}
+	return out
 }

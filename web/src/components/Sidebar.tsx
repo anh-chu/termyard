@@ -67,6 +67,8 @@ interface SidebarProps {
   // Direct PTY session keys currently in the pane tree
 
   onQuickShell?: () => void
+  crashedCount?: number
+  onCrashedClick?: () => void
 }
 
 interface RenameState {
@@ -203,6 +205,8 @@ export function Sidebar({
   pruningSuspended,
 
   onQuickShell,
+  crashedCount = 0,
+  onCrashedClick,
 }: SidebarProps) {
   const glancePreview = useGlance(!!hasMultipleHosts)
   const { schedules } = useSchedules()
@@ -1405,6 +1409,24 @@ export function Sidebar({
                 <circle cx="3.5" cy="18" r="1.5" fill="currentColor" stroke="none" />
               </svg>
             </button>
+            {crashedCount > 0 && (
+              <button
+                type="button"
+                onClick={onCrashedClick}
+                title={`${crashedCount} crashed session${crashedCount === 1 ? '' : 's'} — click to recover`}
+                className="shrink-0 rounded-md border px-2 py-2 transition-colors flex items-center gap-1"
+                style={{ borderColor: 'var(--accent-red)', background: 'rgba(255,97,97,0.12)', color: 'var(--accent-red)' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,97,97,0.22)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,97,97,0.12)' }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <span style={{ fontSize: '10px', fontWeight: 700 }}>{crashedCount}</span>
+              </button>
+            )}
             {onQuickShell && (
               <button
                 type="button"

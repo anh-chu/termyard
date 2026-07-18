@@ -36,6 +36,7 @@ type DaemonConfig struct {
 	Cols, Rows uint16 // initial terminal size
 	Cwd        string // working directory
 	SocketDir  string // directory for Unix sockets (default: /tmp/termyard-sessions-{uid}/)
+	StateDir   string // directory for lifecycle state (default: XDG_STATE_HOME/termyard/sessions/)
 	BufferSize int    // ring buffer size in bytes (default: 1MB)
 }
 
@@ -142,19 +143,45 @@ func RunDaemon(cfg DaemonConfig) error {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
+	// 3b. Set up durable lifecycle state so crashes can be detected.
+	stateDir := cfg.StateDir
+	if stateDir == "" {
+		stateDir = DefaultStateDir()
+	}
+	lifecycleStore, lcErr := NewLifecycleStore(stateDir)
+	if lcErr != nil {
+		log.WithError(lcErr).Warn("cannot create lifecycle store — crash detection disabled")
+	} else {
+		lr := LifecycleRecord{
+			ID:         cfg.ID,
+			Shell:      cfg.Shell,
+			Cwd:        cfg.Cwd,
+			Cols:       cfg.Cols,
+			Rows:       cfg.Rows,
+			DaemonPID:  os.Getpid(),
+			Generation: NewGeneration(),
+		}
+		if err := lifecycleStore.RecordActive(lr); err != nil {
+			log.WithError(err).Warn("failed to write lifecycle record")
+		} else {
+			log.WithField("state_dir", stateDir).Debug("lifecycle store ready")
+		}
+	}
+
 	log.WithField("socket", socketPath).Info("daemon listening")
 
 	// 4. Build and run the daemon.
 	d := &daemon{
-		config:     cfg,
-		ptyFd:      ptyFd,
-		cmd:        cmd,
-		ring:       ring,
-		ln:         ln,
-		socketPath: socketPath,
-		log:        log,
-		clients:    make(map[net.Conn]chan []byte),
-		shellDone:  make(chan struct{}),
+		config:         cfg,
+		ptyFd:          ptyFd,
+		cmd:            cmd,
+		ring:           ring,
+		ln:             ln,
+		socketPath:     socketPath,
+		log:            log,
+		lifecycleStore: lifecycleStore,
+		clients:        make(map[net.Conn]chan []byte),
+		shellDone:      make(chan struct{}),
 	}
 	return d.run()
 }
@@ -210,6 +237,8 @@ type daemon struct {
 	ln         net.Listener
 	socketPath string
 	log        *logrus.Entry
+
+	lifecycleStore *LifecycleStore // durable lifecycle state
 
 	clientsMu sync.RWMutex
 	clients   map[net.Conn]chan []byte // per-client write channel
@@ -413,8 +442,16 @@ func (d *daemon) removeClient(conn net.Conn) {
 }
 
 // shutdown closes the PTY, kills the shell, and closes the listener.
+// It also transitions the lifecycle record to cleanly_ended so the
+// registry knows this was intentional, not a crash.
 func (d *daemon) shutdown() {
 	d.closeOnce.Do(func() {
+		// Transition lifecycle before tearing down.
+		if d.lifecycleStore != nil {
+			if err := d.lifecycleStore.Transition(d.config.ID, LifecycleActive, LifecycleCleanlyEnded); err != nil {
+				d.log.WithError(err).Debug("lifecycle transition to cleanly_ended failed (may already be ended)")
+			}
+		}
 		d.ptyFd.Close()
 		d.cmd.Process.Kill()
 		d.ln.Close()

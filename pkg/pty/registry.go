@@ -41,6 +41,8 @@ type Registry struct {
 	dir       string // socket directory
 	failMu    sync.Mutex
 	failCount map[string]int // consecutive liveness failures per session
+
+	lifecycleStore *LifecycleStore // durable lifecycle state (may be nil)
 }
 
 // NewRegistry creates a session registry using the given socket directory.
@@ -53,6 +55,18 @@ func NewRegistry(dir string) *Registry {
 // Dir returns the registry's socket directory.
 func (r *Registry) Dir() string {
 	return r.dir
+}
+
+// SetLifecycleStore wires the durable lifecycle store into the registry.
+// When set, the registry will differentiate crashes from clean shutdowns
+// and persist session metadata for crash recovery.
+func (r *Registry) SetLifecycleStore(store *LifecycleStore) {
+	r.lifecycleStore = store
+}
+
+// LifecycleStore returns the durable lifecycle store, or nil if not set.
+func (r *Registry) LifecycleStore() *LifecycleStore {
+	return r.lifecycleStore
 }
 
 // SocketPath returns the full path to a session's Unix socket.
@@ -104,7 +118,28 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 		"--socket-dir", r.dir,
 	}
 
+	// Pass state dir for lifecycle persistence.
+	stateDir := DefaultStateDir()
+	args = append(args, "--state-dir", stateDir)
+
 	cmd := exec.Command(exe, args...)
+
+	// Wrap in a systemd user scope if systemd-run is available.
+	// This gives the daemon its own cgroup so a server OOM doesn't
+	// cascade to session daemons.  Use a unique unit name (PID suffix)
+	// so recovering a crashed session doesn't collide with the old scope.
+	if systemdRun, err := exec.LookPath("systemd-run"); err == nil {
+		unitName := fmt.Sprintf("termyard-session-%s-%d.scope", name, time.Now().UnixMilli())
+		scopeArgs := []string{
+			"--user", "--scope",
+			"--unit", unitName,
+			"--",
+		}
+		fullArgs := append(scopeArgs, exe)
+		fullArgs = append(fullArgs, args...)
+		cmd = exec.Command(systemdRun, fullArgs...)
+	}
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	// Open /dev/null explicitly so the daemon doesn't inherit parent's
 	// fds (which may be pipes that close when the server restarts).
@@ -291,9 +326,49 @@ func processAlive(pid int) bool {
 }
 
 // removeStale removes a socket file and its metadata sidecar.
+// If the lifecycle store is configured, this function checks whether the
+// daemon exited intentionally (cleanly_ended, termination_requested, dismissed)
+// or crashed (active state with dead process).  Crashed sessions are NOT
+// deleted — they are left on disk for recovery.
 func (r *Registry) removeStale(name, reason string) {
 	sockPath := r.SocketPath(name)
 	metaPath := r.metadataPath(name)
+
+	// Check lifecycle store for crash detection.
+	if r.lifecycleStore != nil {
+		rec, err := r.lifecycleStore.Get(name)
+		if err == nil {
+			switch rec.State {
+			case LifecycleActive:
+				// The daemon process died but the lifecycle record
+				// was never transitioned out of active — this is a crash.
+				// Preserve the socket and metadata for recovery.
+				logrus.WithFields(logrus.Fields{
+					"component": "registry",
+					"name":      name,
+					"pid":       rec.DaemonPID,
+				}).Warn("daemon crashed — preserving session for recovery")
+				if transErr := r.lifecycleStore.Transition(name, LifecycleActive, LifecycleCrashed); transErr != nil {
+					logrus.WithError(transErr).WithField("name", name).Warn("failed to transition to crashed")
+				}
+				// Do NOT delete socket/metadata — they are needed for recovery.
+				return
+
+			case LifecycleCleanlyEnded, LifecycleTerminationRequested, LifecycleDismissed:
+				// Intentionally terminated or dismissed — clean up normally.
+
+			case LifecycleCrashed:
+				// Already marked as crashed, keep preserved.
+				return
+
+			default:
+				// Unknown state — clean up cautiously.
+			}
+		}
+		// If no lifecycle record exists (pre-lifecycle daemon),
+		// fall through to normal cleanup.
+	}
+
 	os.Remove(sockPath)
 	os.Remove(metaPath)
 	logrus.WithFields(logrus.Fields{
@@ -304,7 +379,18 @@ func (r *Registry) removeStale(name, reason string) {
 }
 
 // Kill sends a FrameClose to the daemon via its socket.
+// It marks the session as intentionally terminated in the lifecycle store
+// so the registry can distinguish explicit kills from crashes.
 func (r *Registry) Kill(name string) error {
+	// Record intentional kill before sending FrameClose.
+	// If the daemon process dies without transitioning to cleanly_ended,
+	// the termination_requested state tells the registry this wasn't a crash.
+	if r.lifecycleStore != nil {
+		// Best-effort — ignore errors (the record may not exist yet or
+		// the state may already have changed).
+		_ = r.lifecycleStore.Transition(name, LifecycleActive, LifecycleTerminationRequested)
+	}
+
 	socketPath := r.SocketPath(name)
 	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
 	if err != nil {
@@ -364,4 +450,127 @@ func (r *Registry) Capture(name string) (string, error) {
 	clean := ansiRe.ReplaceAllString(string(payload), "")
 	clean = ctrlRe.ReplaceAllString(clean, "")
 	return clean, nil
+}
+
+// CrashedSessions returns lifecycle records for all sessions that crashed
+// (state == "crashed").  Returns nil if no lifecycle store is configured.
+func (r *Registry) CrashedSessions() []LifecycleRecord {
+	if r.lifecycleStore == nil {
+		return nil
+	}
+	return r.lifecycleStore.ListByState(LifecycleCrashed)
+}
+
+// RecoverSession re-spawns a daemon for a previously crashed session.
+// It reads the saved shell/cwd from the lifecycle record, starts a new daemon,
+// and transitions the state to "recovered".  The old stale socket and metadata
+// files are cleaned up before the new daemon is spawned.
+// Optional shellOverride and cwdOverride allow the user to choose a different
+// shell or working directory at recovery time.
+func (r *Registry) RecoverSession(id string, shellOverride ...string) error {
+	if r.lifecycleStore == nil {
+		return fmt.Errorf("no lifecycle store configured")
+	}
+
+	rec, err := r.lifecycleStore.Get(id)
+	if err != nil {
+		return fmt.Errorf("get lifecycle record for %s: %w", id, err)
+	}
+	if rec.State != LifecycleCrashed {
+		return fmt.Errorf("session %s is in state %q, not crashed", id, rec.State)
+	}
+
+	shell := rec.Shell
+	cwd := rec.Cwd
+	if len(shellOverride) > 0 && shellOverride[0] != "" {
+		shell = shellOverride[0]
+	}
+	if len(shellOverride) > 1 && shellOverride[1] != "" {
+		cwd = shellOverride[1]
+	}
+
+	// Clean up old stale files so the new daemon can claim the socket.
+	os.Remove(r.SocketPath(id))
+	os.Remove(r.metadataPath(id))
+
+	// Spawn a new daemon with the saved (or overridden) configuration.
+	if err := r.Create(id, shell, cwd, rec.Cols, rec.Rows); err != nil {
+		return fmt.Errorf("re-spawn daemon for %s: %w", id, err)
+	}
+
+	// Transition to recovered.
+	if err := r.lifecycleStore.Transition(id, LifecycleCrashed, LifecycleRecovered); err != nil {
+		return fmt.Errorf("transition to recovered: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"component": "registry",
+		"id":        id,
+		"shell":     shell,
+		"cwd":       cwd,
+	}).Info("recovered crashed session")
+
+	return nil
+}
+
+// DismissSession marks a crashed session as dismissed and cleans up its files.
+func (r *Registry) DismissSession(id string) error {
+	if r.lifecycleStore == nil {
+		// Without a lifecycle store, just delete files.
+		os.Remove(r.SocketPath(id))
+		os.Remove(r.metadataPath(id))
+		return nil
+	}
+
+	rec, err := r.lifecycleStore.Get(id)
+	if err != nil {
+		// No lifecycle record — just clean up files.
+		os.Remove(r.SocketPath(id))
+		os.Remove(r.metadataPath(id))
+		return nil
+	}
+
+	if rec.State != LifecycleCrashed {
+		return fmt.Errorf("session %s is in state %q, not crashed", id, rec.State)
+	}
+
+	// Transition to dismissed and clean up.
+	if err := r.lifecycleStore.Transition(id, LifecycleCrashed, LifecycleDismissed); err != nil {
+		return fmt.Errorf("transition to dismissed: %w", err)
+	}
+
+	// Clean up socket and metadata.
+	os.Remove(r.SocketPath(id))
+	os.Remove(r.metadataPath(id))
+	// Keep the lifecycle file (it records the dismissed state for audit).
+
+	return nil
+}
+
+// DismissAll marks all crashed sessions as dismissed and cleans up their files.
+func (r *Registry) DismissAll() error {
+	crashed := r.CrashedSessions()
+	for _, rec := range crashed {
+		_ = r.DismissSession(rec.ID)
+	}
+	return nil
+}
+
+// CleanupCrashedIfDead removes crash-preserved files for a session if the
+// daemon process is confirmed dead and the user hasn't chosen recovery.
+// This is called as a fallback when a session transitions from crashed to
+// cleanly_ended (e.g. the daemon's shell finally exits after a crash).
+func (r *Registry) CleanupCrashedIfDead(id string) {
+	if r.lifecycleStore == nil {
+		return
+	}
+	rec, err := r.lifecycleStore.Get(id)
+	if err != nil || rec.State != LifecycleCrashed {
+		return
+	}
+	if !processAlive(rec.DaemonPID) {
+		// Process long dead — safe to clean up.
+		os.Remove(r.SocketPath(id))
+		os.Remove(r.metadataPath(id))
+	}
 }
