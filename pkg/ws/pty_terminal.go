@@ -49,6 +49,10 @@ func NewPTYTerminalHandler(tmuxPath string, activityTracker *activity.Tracker, t
 // bridgeSession pumps data between a pty.Session and a WebSocket connection.
 // The scanner, if non-nil, receives output chunks for artifact detection.
 func bridgeSession(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, scanner *artifactScanner, log *logrus.Entry) {
+	bridgeSessionWithCB(conn, sess, session, act, scanner, nil, log)
+}
+
+func bridgeSessionWithCB(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, scanner *artifactScanner, onOutput func(), log *logrus.Entry) {
 	conn.SetReadLimit(tmux.MaxPTYControlMessageBytes)
 
 	output := newOutputCoalescer(func(mt int, payload []byte) error {
@@ -76,6 +80,9 @@ func bridgeSession(conn *websocket.Conn, sess pty.Session, session string, act *
 				ptyReads++
 				if act != nil {
 					act.Record(session, n)
+				}
+				if onOutput != nil {
+					onOutput()
 				}
 				chunk := append([]byte(nil), buffer[:n]...)
 				output.Submit(chunk)
@@ -156,9 +163,14 @@ func BridgePTY(conn *websocket.Conn, tmuxPath, session string, cols, rows uint16
 
 // BridgeDirectPTY pumps a direct PTY session over an already-open WebSocket
 // connection. It uses the same bridge loop as BridgePTY but without the
-// tmux-specific artifact scanner.
-func BridgeDirectPTY(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, log *logrus.Entry) {
-	bridgeSession(conn, sess, session, act, nil, log)
+// tmux-specific artifact scanner. An optional onOutput callback is invoked
+// on every PTY read so the silence monitor can track daemon output activity.
+func BridgeDirectPTY(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, log *logrus.Entry, onOutput ...func()) {
+	var cb func()
+	if len(onOutput) > 0 {
+		cb = onOutput[0]
+	}
+	bridgeSessionWithCB(conn, sess, session, act, nil, cb, log)
 }
 
 // SpliceConns pumps bytes between an upgraded browser WS and a peer data conn.

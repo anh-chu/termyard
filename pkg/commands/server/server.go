@@ -145,7 +145,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	silenceMonitor := toolevents.NewSilenceMonitor(tracker, detector, &compositeCaptureClient{tmux: client, daemon: daemonReg})
 	go silenceMonitor.Run(ctx)
 
-	go runShellNameWatcher(ctx, client, stateMgr)
+	go runShellNameWatcher(ctx, client, stateMgr, daemonReg)
 
 	attrsStore, err := sessionattrs.NewStore()
 	if err != nil {
@@ -357,6 +357,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PortForwardStore: portforward.NewStore(),
 		SchedulerStore:   schedulerStore,
 		DaemonReg:        daemonReg,
+		OnDaemonOutput: func(paneID string) {
+			silenceMonitor.RecordOutput(paneID)
+		},
 		RefreshSessions: func() {
 			fresh, err := client.ListSessions()
 			if err != nil {
@@ -505,7 +508,7 @@ var trivialCmds = map[string]bool{
 // non-agent session starts a new meaningful process, asks the AI namer to
 // refresh that session's display name. The actual eligibility gate (namer
 // enabled, no agent, not user-set) lives in TriggerShellNaming.
-func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Manager) {
+func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Manager, daemonReg *pty.Registry) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -524,7 +527,23 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 		case <-ticker.C:
 			fgs, err := client.ListForegroundCommands()
 			if err != nil {
-				continue
+				fgs = nil
+			}
+			// Append daemon session foreground processes.
+			if daemonReg != nil {
+				for _, d := range daemonReg.List() {
+					pid := d.ShellPid
+					if pid == 0 {
+						pid = d.Pid
+					}
+					if cmd := foregroundCommand(pid); cmd != "" {
+						fgs = append(fgs, tmux.SessionForeground{
+							Session: d.ID,
+							Command: cmd,
+							PID:     pid,
+						})
+					}
+				}
 			}
 			for _, fg := range fgs {
 				prev := lastCmd[fg.Session]
@@ -548,6 +567,11 @@ func runShellNameWatcher(ctx context.Context, client *tmux.Client, mgr *state.Ma
 				cmds := []string{cmd}
 				if pane := tmux.PrimaryPane(currentWindows(client, fg.Session)); pane != nil {
 					if content, err := client.CapturePaneHistory(pane.ID, -100); err == nil {
+						cmds = recentCommands(content, cmd)
+					}
+				} else if daemonReg != nil {
+					// Daemon session — capture from ring buffer.
+					if content, err := daemonReg.Capture(fg.Session); err == nil {
 						cmds = recentCommands(content, cmd)
 					}
 				}
@@ -619,6 +643,28 @@ func (c *compositeCaptureClient) CapturePaneContent(paneID string) (string, erro
 		}
 	}
 	return c.tmux.CapturePaneContent(paneID)
+}
+
+// foregroundCommand returns the name of the foreground process running under
+// the given shell PID, or "" if the shell has no children / is idle.
+func foregroundCommand(shellPid int) string {
+	childrenPath := fmt.Sprintf("/proc/%d/task/%d/children", shellPid, shellPid)
+	data, err := os.ReadFile(childrenPath)
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(strings.TrimSpace(string(data)))
+	if len(fields) == 0 {
+		return "" // shell is idle, no foreground process
+	}
+	// Use the first child (most likely the foreground process).
+	childPid := fields[0]
+	commPath := fmt.Sprintf("/proc/%s/comm", childPid)
+	comm, err := os.ReadFile(commPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(comm))
 }
 
 // daemonRegAdapter wraps pty.Registry to satisfy state.DaemonRegistry.

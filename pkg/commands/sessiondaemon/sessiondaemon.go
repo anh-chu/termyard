@@ -125,6 +125,56 @@ func executeSessionKill(ctx context.Context, c *cli.Command) error {
 	return nil
 }
 
+func executeSessionCapture(ctx context.Context, c *cli.Command) error {
+	if c.NArg() < 1 {
+		return fmt.Errorf("session name is required")
+	}
+	name := c.Args().First()
+
+	socketDir := c.String("socket-dir")
+	if socketDir == "" {
+		socketDir = defaultSessionDir()
+	}
+
+	reg := pty.NewRegistry(socketDir)
+	text, err := reg.Capture(name)
+	if err != nil {
+		return err
+	}
+
+	lines := int(c.Int("lines"))
+	if lines > 0 {
+		parts := splitLastLines(text, lines)
+		text = parts
+	}
+
+	fmt.Print(text)
+	return nil
+}
+
+// splitLastLines returns the last n lines of text.
+func splitLastLines(text string, n int) string {
+	var lines []string
+	start := 0
+	for i, ch := range text {
+		if ch == '\n' {
+			lines = append(lines, text[start:i+1])
+			start = i + 1
+		}
+	}
+	if start < len(text) {
+		lines = append(lines, text[start:])
+	}
+	if len(lines) <= n {
+		return text
+	}
+	result := ""
+	for _, l := range lines[len(lines)-n:] {
+		result += l
+	}
+	return result
+}
+
 func init() {
 	logrus.Debug("registering sessiondaemon commands")
 
@@ -238,6 +288,23 @@ func init() {
 					},
 				},
 				Action: executeSessionKill,
+			},
+			{
+				Name:      "capture",
+				Usage:     "capture a session daemon's terminal content",
+				ArgsUsage: "NAME",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "socket-dir",
+						Usage: "socket directory",
+					},
+					&cli.IntFlag{
+						Name:  "lines",
+						Usage: "number of lines to return (0 = all)",
+						Value: 40,
+					},
+				},
+				Action: executeSessionCapture,
 			},
 		},
 	}

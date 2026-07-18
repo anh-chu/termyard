@@ -93,6 +93,7 @@ type Options struct {
 	SchedulerRunner  *scheduler.Runner
 	DaemonReg        *pty.Registry
 	RefreshSessions  func() // triggers merged tmux+daemon state refresh
+	OnDaemonOutput   func(paneID string) // called on PTY output for daemon sessions (silence monitor)
 	Hub              *ws.Hub
 }
 
@@ -3100,7 +3101,12 @@ func handleDaemonSession(w http.ResponseWriter, r *http.Request, opts *Options) 
 	defer conn.Close()
 
 	log := logrus.WithFields(logrus.Fields{"session": name, "backend": "daemon"})
-	ws.BridgeDirectPTY(conn, sess, name, opts.ActivityTracker, log)
+	paneID := name + ":0.0"
+	var onOutput func()
+	if opts.OnDaemonOutput != nil {
+		onOutput = func() { opts.OnDaemonOutput(paneID) }
+	}
+	ws.BridgeDirectPTY(conn, sess, name, opts.ActivityTracker, log, onOutput)
 }
 
 func ensureUniqueSessionName(name string, existing []string) string {

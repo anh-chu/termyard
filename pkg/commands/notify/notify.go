@@ -436,6 +436,17 @@ func detectTmuxContext() (string, int, string) {
 		}
 	}
 
+	// Daemon session fallback: TERMYARD_SESSION / TERMYARD_PANE are set by
+	// the session daemon so agents running inside daemon sessions can
+	// identify themselves without tmux.
+	if tySession := os.Getenv("TERMYARD_SESSION"); tySession != "" {
+		tyPane := os.Getenv("TERMYARD_PANE")
+		if tyPane == "" {
+			tyPane = tySession + ":0.0"
+		}
+		return tySession, 0, tyPane
+	}
+
 	// Fallback: use display-message (returns active pane context)
 	session, _ := tmuxQuery("#{session_name}")
 	winStr, _ := tmuxQuery("#{window_index}")

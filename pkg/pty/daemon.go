@@ -81,6 +81,8 @@ func RunDaemon(cfg DaemonConfig) error {
 	cmd := exec.Command(cfg.Shell)
 	cmd.Env = directLocaleEnv()
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, "TERMYARD_SESSION="+cfg.ID)
+	cmd.Env = append(cmd.Env, "TERMYARD_PANE="+cfg.ID+":0.0")
 	if cfg.Cwd != "" {
 		cmd.Dir = cfg.Cwd
 	}
