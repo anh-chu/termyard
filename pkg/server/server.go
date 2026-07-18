@@ -1098,58 +1098,132 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				req.Path = strings.TrimSpace(req.Path)
 				req.Command = strings.TrimSpace(req.Command)
 
-				// Daemon backend — create via Registry, bypass tmux entirely.
-				if req.Backend == "daemon" && req.Host == "" {
+				// Remote host — always forward via peer (tmux on the peer side).
+				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
+					req.Name = resolveNewSessionName(opts, req.Host, req.Name, req.Command, req.Path)
 					if req.Name == "" {
-						req.Name = fmt.Sprintf("shell-%d", time.Now().Unix())
-					}
-					shell := req.Command
-					if shell == "" || shell == "shell" {
-						shell = "" // let daemon default to $SHELL
-					}
-					cwd := req.Path
-					if cwd == "~" {
-						cwd = ""
-					}
-					if err := opts.DaemonReg.Create(req.Name, shell, cwd, 120, 40); err != nil {
-						http.Error(w, err.Error(), http.StatusInternalServerError)
+						http.Error(w, "name or path is required", http.StatusBadRequest)
 						return
 					}
-					// Trigger state refresh so WebSocket clients get notified.
-					// Must merge daemon + tmux sessions, same as discovery.
-					if opts.StateMgr != nil && opts.RefreshSessions != nil {
-						opts.RefreshSessions()
+					if err := CreateSession(opts, scheduler.CreateSessionReq{
+						Name:           req.Name,
+						Host:           req.Host,
+						Path:           req.Path,
+						Command:        req.Command,
+						AgentType:      req.AgentType,
+						WorktreeBranch: req.WorktreeBranch,
+						ScheduleID:     req.ScheduleID,
+					}); err != nil {
+						switch err.Error() {
+						case "peer not connected", "peer send queue full":
+							http.Error(w, err.Error(), http.StatusBadGateway)
+						default:
+							http.Error(w, err.Error(), http.StatusInternalServerError)
+						}
+						return
 					}
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
 					return
 				}
 
-				req.Name = resolveNewSessionName(opts, req.Host, req.Name, req.Command, req.Path)
-				if req.Name == "" {
-					http.Error(w, "name or path is required", http.StatusBadRequest)
-					return
-				}
-				if err := tmux.ValidateSessionName(req.Name); err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				if err := CreateSession(opts, scheduler.CreateSessionReq{
-					Name:           req.Name,
-					Host:           req.Host,
-					Path:           req.Path,
-					Command:        req.Command,
-					AgentType:      req.AgentType,
-					WorktreeBranch: req.WorktreeBranch,
-					ScheduleID:     req.ScheduleID,
-				}); err != nil {
-					switch err.Error() {
-					case "peer not connected", "peer send queue full":
-						http.Error(w, err.Error(), http.StatusBadGateway)
-					default:
-						http.Error(w, err.Error(), http.StatusInternalServerError)
+				// Local session — daemon backend (default).
+				// Only fall back to tmux when backend is explicitly "tmux".
+				if req.Backend == "tmux" {
+					req.Name = resolveNewSessionName(opts, req.Host, req.Name, req.Command, req.Path)
+					if req.Name == "" {
+						http.Error(w, "name or path is required", http.StatusBadRequest)
+						return
 					}
+					if err := tmux.ValidateSessionName(req.Name); err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					if err := CreateSession(opts, scheduler.CreateSessionReq{
+						Name:           req.Name,
+						Host:           req.Host,
+						Path:           req.Path,
+						Command:        req.Command,
+						AgentType:      req.AgentType,
+						WorktreeBranch: req.WorktreeBranch,
+						ScheduleID:     req.ScheduleID,
+					}); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
 					return
+				}
+
+				// Daemon backend (default for all local sessions).
+				if req.Name == "" {
+					req.Name = resolveNewSessionName(opts, "", req.Name, req.Command, req.Path)
+				}
+				if req.Name == "" {
+					req.Name = fmt.Sprintf("shell-%d", time.Now().UnixMilli())
+				}
+				shell := req.Command
+				if shell == "" || shell == "shell" {
+					shell = "" // let daemon default to $SHELL
+				}
+				cwd := req.Path
+				if cwd == "~" {
+					cwd = ""
+				}
+				// If a worktree branch is requested, create the linked worktree
+				// first and redirect the session path to it.
+				if req.WorktreeBranch != "" && cwd != "" {
+					expanded := cwd
+					if strings.HasPrefix(expanded, "~") {
+						if home, err := os.UserHomeDir(); err == nil && home != "" {
+							expanded = home + expanded[1:]
+						}
+					}
+					if !filepath.IsAbs(expanded) {
+						if home, err := os.UserHomeDir(); err == nil {
+							expanded = filepath.Join(home, expanded)
+						}
+					}
+					sanitized := strings.ReplaceAll(req.WorktreeBranch, "/", "-")
+					worktreesDir := filepath.Join(expanded, ".worktrees")
+					if err := os.MkdirAll(worktreesDir, 0755); err != nil {
+						http.Error(w, fmt.Sprintf("mkdir .worktrees: %v", err), http.StatusInternalServerError)
+						return
+					}
+					destPath := filepath.Join(worktreesDir, sanitized)
+					if err := git.CreateWorktree(expanded, req.WorktreeBranch, destPath); err != nil {
+						http.Error(w, fmt.Sprintf("git worktree add: %v", err), http.StatusInternalServerError)
+						return
+					}
+					cwd = destPath
+				}
+				if err := opts.DaemonReg.Create(req.Name, shell, cwd, 120, 40); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				// Store agent type and schedule ID so they persist in state.
+				if req.AgentType != "" && opts.StateMgr != nil {
+					opts.StateMgr.SetSessionAgentType(req.Name, req.AgentType)
+				}
+				if opts.AttrsStore != nil && req.ScheduleID != "" {
+					localHost := ""
+					if opts.PeerMgr != nil {
+						localHost = opts.PeerMgr.LocalID()
+					}
+					key := sessionKey(localHost, req.Name)
+					if attr, err := opts.AttrsStore.SetScheduleID(key, req.ScheduleID); err != nil {
+						logrus.WithError(err).Warn("failed to store schedule id")
+					} else {
+						fanoutAttrsDeltaToPeers(opts, key, attr)
+						if opts.Hub != nil {
+							opts.Hub.BroadcastJSON(map[string]interface{}{"type": "session-attrs-updated", "key": key})
+						}
+					}
+				}
+				// Trigger state refresh so WebSocket clients get notified.
+				if opts.StateMgr != nil && opts.RefreshSessions != nil {
+					opts.RefreshSessions()
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]string{"name": req.Name})

@@ -342,7 +342,28 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}
 	if schedulerStore != nil {
 		runner := scheduler.NewRunner(schedulerStore, client, stateMgr, peerMgr, func(req scheduler.CreateSessionReq) error {
-			return server.CreateSession(opts, req)
+			// Remote sessions still go through peer/tmux path.
+			if req.Host != "" && peerMgr != nil && !peerMgr.IsLocal(req.Host) {
+				return server.CreateSession(opts, req)
+			}
+			// Local sessions use daemon backend.
+			shell := req.Command
+			if shell == "" || shell == "shell" {
+				shell = ""
+			}
+			cwd := req.Path
+			if cwd == "~" {
+				cwd = ""
+			}
+			if err := daemonReg.Create(req.Name, shell, cwd, 120, 40); err != nil {
+				return err
+			}
+			if req.AgentType != "" {
+				stateMgr.SetSessionAgentType(req.Name, req.AgentType)
+			}
+			fresh, _ := client.ListSessions()
+			mergedRefresh(fresh)
+			return nil
 		}, logrus.WithField("component", "scheduler"))
 		runner.SetCapEnforcer(func(job scheduler.Job) {
 			// Pre-spawn: leave room for the incoming run.
