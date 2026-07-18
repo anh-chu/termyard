@@ -44,6 +44,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/namer"
 	"github.com/anh-chu/termyard/pkg/peer"
 	"github.com/anh-chu/termyard/pkg/portforward"
+	"github.com/anh-chu/termyard/pkg/pty"
 	"github.com/anh-chu/termyard/pkg/preferences"
 	"github.com/anh-chu/termyard/pkg/recovery"
 	"github.com/anh-chu/termyard/pkg/scheduler"
@@ -90,6 +91,7 @@ type Options struct {
 	PortForwardStore *portforward.Store
 	SchedulerStore   *scheduler.Store
 	SchedulerRunner  *scheduler.Runner
+	DaemonReg        *pty.Registry
 	Hub              *ws.Hub
 }
 
@@ -1085,6 +1087,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 					AgentType      string `json:"agent_type,omitempty"`
 					WorktreeBranch string `json:"worktree_branch,omitempty"`
 					ScheduleID     string `json:"schedule_id,omitempty"`
+					Backend        string `json:"backend,omitempty"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -1093,6 +1096,35 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				req.Name = strings.TrimSpace(req.Name)
 				req.Path = strings.TrimSpace(req.Path)
 				req.Command = strings.TrimSpace(req.Command)
+
+				// Daemon backend — create via Registry, bypass tmux entirely.
+				if req.Backend == "daemon" && req.Host == "" {
+					if req.Name == "" {
+						req.Name = fmt.Sprintf("shell-%d", time.Now().Unix())
+					}
+					shell := req.Command
+					if shell == "" || shell == "shell" {
+						shell = "" // let daemon default to $SHELL
+					}
+					cwd := req.Path
+					if cwd == "~" {
+						cwd = ""
+					}
+					if err := opts.DaemonReg.Create(req.Name, shell, cwd, 120, 40); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					// Trigger state refresh so WebSocket clients get notified.
+					if opts.StateMgr != nil {
+						if fresh, err := opts.Client.ListSessions(); err == nil {
+							opts.StateMgr.UpdateSessions(fresh)
+						}
+					}
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
+					return
+				}
+
 				req.Name = resolveNewSessionName(opts, req.Host, req.Name, req.Command, req.Path)
 				if req.Name == "" {
 					http.Error(w, "name or path is required", http.StatusBadRequest)
@@ -1419,6 +1451,22 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				var worktreePath string
 				if req.RemoveWorktree && opts.StateMgr != nil {
 					worktreePath = opts.StateMgr.GetSessionProjectPath(req.Name)
+				}
+
+				// Daemon backend — kill via Registry instead of tmux.
+				if opts.DaemonReg != nil {
+					for _, d := range opts.DaemonReg.List() {
+						if d.ID == req.Name {
+							if err := opts.DaemonReg.Kill(req.Name); err != nil {
+								logrus.WithError(err).WithField("session", req.Name).Warn("daemon kill failed")
+							}
+							if opts.StateMgr != nil {
+								opts.StateMgr.RemoveSession(req.Name)
+							}
+							w.WriteHeader(http.StatusNoContent)
+							return
+						}
+					}
 				}
 
 				// Kill by ID first (avoids tmux special-target interpretation of names
@@ -2145,6 +2193,9 @@ func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			ptyHandler.HandleSession(w, req)
 		})
 		r.With(authMw).Get("/ws/direct-session", ptyHandler.HandleDirectSession)
+		r.With(authMw).Get("/ws/daemon-session", func(w http.ResponseWriter, req *http.Request) {
+			handleDaemonSession(w, req, opts)
+		})
 	} else {
 		r.Get("/ws/events", hub.HandleEvents)
 		r.Get("/ws/session", func(w http.ResponseWriter, req *http.Request) {
@@ -2156,6 +2207,9 @@ func registerWSRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			ptyHandler.HandleSession(w, req)
 		})
 		r.Get("/ws/direct-session", ptyHandler.HandleDirectSession)
+		r.Get("/ws/daemon-session", func(w http.ResponseWriter, req *http.Request) {
+			handleDaemonSession(w, req, opts)
+		})
 	}
 
 	// Peer WebSocket routes (no browser auth — peers use their own challenge-response)
@@ -2895,6 +2949,54 @@ func existingSessionNames(opts *Options, host string) []string {
 	}
 
 	return nil
+}
+
+// handleDaemonSession upgrades to WebSocket and bridges a session daemon
+// (direct PTY with persistence) to the browser. Query params: name=<id>, cols=<>, rows=<>.
+func handleDaemonSession(w http.ResponseWriter, r *http.Request, opts *Options) {
+	if opts.DaemonReg == nil {
+		http.Error(w, "daemon sessions not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+
+	cols, _ := strconv.ParseUint(r.URL.Query().Get("cols"), 10, 16)
+	rows, _ := strconv.ParseUint(r.URL.Query().Get("rows"), 10, 16)
+	if cols == 0 {
+		cols = 120
+	}
+	if rows == 0 {
+		rows = 40
+	}
+
+	socketPath := opts.DaemonReg.SocketPath(name)
+	sess, err := pty.NewDaemonSession(socketPath)
+	if err != nil {
+		http.Error(w, "daemon connect: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Resize to match browser.
+	sess.Resize(uint16(cols), uint16(rows))
+
+	upgrader := websocket.Upgrader{
+		CheckOrigin:    ws.CheckSameOrigin,
+		ReadBufferSize: 1024, WriteBufferSize: 1024 * 32,
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		sess.Close()
+		return
+	}
+	defer conn.Close()
+
+	log := logrus.WithFields(logrus.Fields{"session": name, "backend": "daemon"})
+	ws.BridgeDirectPTY(conn, sess, name, opts.ActivityTracker, log)
 }
 
 func ensureUniqueSessionName(name string, existing []string) string {

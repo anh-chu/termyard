@@ -295,6 +295,9 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 
 // loadSessionDetails fills in windows and panes for a session
 func (m *Manager) loadSessionDetails(session *tmux.Session) error {
+	if session.Backend == "daemon" {
+		return nil // daemon sessions carry their own window/pane info
+	}
 	windows, err := m.client.ListWindows(session.Name)
 	if err != nil {
 		return err

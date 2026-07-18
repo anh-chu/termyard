@@ -141,7 +141,7 @@ async function sendPastedImage(ws: WebSocket, file: File, fallbackType: string):
   }))
 }
 
-export function useTerminal(sessionName: string, hostId?: string) {
+export function useTerminal(sessionName: string, hostId?: string, backend?: string) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
@@ -556,12 +556,11 @@ export function useTerminal(sessionName: string, hostId?: string) {
 
     // Connect WebSocket for this session
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const isDirectPty = sessionName.startsWith('direct-pty:')
     let wsUrl: string
-    if (isDirectPty) {
-      // direct-pty:<timestamp> — no cwd in the key, just connect
-      const cwdParam = ''
-      wsUrl = `${protocol}//${window.location.host}/ws/direct-session?cols=${cols}&rows=${rows}${cwdParam}`
+    if (backend === 'daemon') {
+      wsUrl = `${protocol}//${window.location.host}/ws/daemon-session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}`
+    } else if (sessionName.startsWith('direct-pty:')) {
+      wsUrl = `${protocol}//${window.location.host}/ws/direct-session?cols=${cols}&rows=${rows}`
     } else {
       const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
       wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`

@@ -14,6 +14,7 @@ import { ArtifactPreview } from './ArtifactPreview'
 interface TerminalProps {
   sessionName: string
   hostId?: string
+  backend?: string
   fullscreen?: boolean
   onToggleFullscreen?: () => void
   // In split view, only the active pane shows the mobile key bar to avoid duplicates.
@@ -150,7 +151,7 @@ function HoldableKey({
   )
 }
 
-export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, keyBarEnabled = true }: TerminalProps) {
+export function Terminal({ sessionName, hostId, backend, fullscreen, onToggleFullscreen, keyBarEnabled = true }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const {
     termRef,
@@ -172,7 +173,7 @@ export function Terminal({ sessionName, hostId, fullscreen, onToggleFullscreen, 
     selectionMenu,
     setSelectionMenu,
     reconfigure,
-  } = useTerminal(sessionName, hostId)
+  } = useTerminal(sessionName, hostId, backend)
   const { prefs } = usePreferences()
   const [showMobileKeyBar, setShowMobileKeyBar] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)

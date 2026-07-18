@@ -1012,31 +1012,25 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     return null
   }, [selectSession, refresh, refocusTerminal])
 
-  const handleQuickShell = useCallback(() => {
-    const key = `direct-pty:${Date.now()}`
-    selectSession(key)
-  }, [selectSession])
-
-  const handleDirectPtyClose = useCallback((key: string) => {
-    closePane(key)
-    setSingleView(prev => prev === key ? null : prev)
-  }, [closePane])
-
-  // Extract direct PTY keys from pane tree and singleView for sidebar display
-  const directPtyKeys = useMemo(() => {
-    const keys: string[] = []
-    if (singleView && singleView.startsWith('direct-pty:')) {
-      keys.push(singleView)
-    }
-    if (paneTree) {
-      for (const leaf of getLeaves(paneTree)) {
-        if (leaf.startsWith('direct-pty:') && !keys.includes(leaf)) {
-          keys.push(leaf)
-        }
+  const handleQuickShell = useCallback(async () => {
+    const name = `shell-${Date.now()}`
+    try {
+      const res = await fetch('/api/session/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, path: '', command: '', backend: 'daemon' }),
+      })
+      if (res.ok) {
+        selectSession(name)
+        await refresh()
+        setTimeout(() => refocusTerminal(), 300)
       }
+    } catch (err) {
+      console.error('Failed to create daemon session:', err)
     }
-    return keys
-  }, [singleView, paneTree])
+  }, [selectSession, refresh, refocusTerminal])
+
+
 
   const handleDropNewSession = useCallback((targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
     let key = targetKey || activeKey
@@ -1246,9 +1240,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
             sessionAttrs={sessionAttrs}
             setSessionAttr={setSessionAttr}
             pruningSuspended={pruningSuspended}
-            directPtyKeys={directPtyKeys}
-            onDirectPtySelect={(key) => selectSession(key)}
-            onDirectPtyClose={handleDirectPtyClose}
+
             onQuickShell={handleQuickShell}
           />
         )}
@@ -1340,6 +1332,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
               <Terminal
                 sessionName={parseSessionKey(singleView).name}
                 hostId={parseSessionKey(singleView).host || undefined}
+                backend={sessions.find(s => sessionKey(s) === singleView)?.backend}
                 fullscreen={terminalFullscreen}
                 onToggleFullscreen={toggleFullscreen}
               />
@@ -1371,6 +1364,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
               onMovePanes={(sourceKey, targetKey, edge) =>
                 setPaneTree(prev => prev ? movePane(prev, sourceKey, targetKey, edge) : prev)
               }
+              getBackend={(key) => sessions.find(s => sessionKey(s) === key)?.backend}
             />
           ) : (
             <Overview

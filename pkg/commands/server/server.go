@@ -19,6 +19,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/peer"
 	"github.com/anh-chu/termyard/pkg/portforward"
 	"github.com/anh-chu/termyard/pkg/preferences"
+	"github.com/anh-chu/termyard/pkg/pty"
 	"github.com/anh-chu/termyard/pkg/recovery"
 	"github.com/anh-chu/termyard/pkg/scheduler"
 	"github.com/anh-chu/termyard/pkg/server"
@@ -41,10 +42,41 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	tracker.EnablePersistence()
 	actTracker := activity.NewTracker()
 
+	// Session daemon registry — discover daemon-backed sessions alongside tmux.
+	daemonReg := pty.NewRegistry(defaultSessionDir())
+
+	// mergedRefresh combines tmux sessions with daemon sessions before updating state.
+	mergedRefresh := func(tmuxSessions []*tmux.Session) {
+		daemonInfos := daemonReg.List()
+		for _, d := range daemonInfos {
+			var created time.Time
+			if t, err := time.Parse(time.RFC3339, d.Created); err == nil {
+				created = t
+			}
+			tmuxSessions = append(tmuxSessions, &tmux.Session{
+				Name:        d.ID,
+				Created:     created,
+				Backend:     "daemon",
+				ProjectPath: d.Cwd,
+				Windows: []*tmux.Window{{
+					ID:     "daemon-" + d.ID,
+					Name:   "shell",
+					Active: true,
+					Panes: []*tmux.Pane{{
+						ID:          "daemon-" + d.ID + "-0",
+						Active:      true,
+						CurrentPath: d.Cwd,
+					}},
+				}},
+			})
+		}
+		stateMgr.UpdateSessions(tmuxSessions)
+		_ = recovery.TuneOomPanes(tmuxSessions)
+	}
+
 	interval := time.Duration(c.Int("discovery-interval")) * time.Second
 	discovery := tmux.NewDiscovery(client, interval, func(sessions []*tmux.Session) {
-		stateMgr.UpdateSessions(sessions)
-		_ = recovery.TuneOomPanes(sessions)
+		mergedRefresh(sessions)
 	})
 	go discovery.Run(ctx)
 
@@ -127,9 +159,8 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 	if !c.Bool("no-control-mode") {
 		fallbackInterval := 30 * time.Second
-		ctrlMode := tmux.NewControlMode(client, func(sessions []*tmux.Session) {
-			stateMgr.UpdateSessions(sessions)
-			_ = recovery.TuneOomPanes(sessions)
+		ctrlMode := tmux.NewControlMode(client, func(tmuxSessions []*tmux.Session) {
+			mergedRefresh(tmuxSessions)
 		},
 			tmux.WithOnConnect(func() {
 				discovery.SetInterval(fallbackInterval)
@@ -295,6 +326,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		Detector:         detector,
 		PortForwardStore: portforward.NewStore(),
 		SchedulerStore:   schedulerStore,
+		DaemonReg:        daemonReg,
 		OnPrefsChanged:   applyNamerFromPrefs,
 	}
 	if schedulerStore != nil {
@@ -482,6 +514,11 @@ func currentWindows(client *tmux.Client, session string) []*tmux.Window {
 // recentCommands extracts up to a handful of recent input lines from captured
 // pane content as a hint for naming. Falls back to [foreground] if nothing
 // useful is found.
+func defaultSessionDir() string {
+	uid := fmt.Sprintf("%d", os.Getuid())
+	return fmt.Sprintf("/tmp/termyard-sessions-%s", uid)
+}
+
 func recentCommands(content, foreground string) []string {
 	lines := strings.Split(content, "\n")
 	var out []string
