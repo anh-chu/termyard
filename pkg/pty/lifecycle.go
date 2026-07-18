@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -25,16 +27,17 @@ const (
 // LifecycleRecord holds durable state for a session daemon.
 // Written as a JSON file under the lifecycle store directory.
 type LifecycleRecord struct {
-	ID         string    `json:"id"`
-	State      string    `json:"state"`
-	Shell      string    `json:"shell"`
-	Cwd        string    `json:"cwd"`
-	Cols       uint16    `json:"cols"`
-	Rows       uint16    `json:"rows"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	DaemonPID  int       `json:"daemon_pid"`
-	Generation string    `json:"generation"`
+	ID            string    `json:"id"`
+	State         string    `json:"state"`
+	Shell         string    `json:"shell"`
+	Cwd           string    `json:"cwd"`
+	Cols          uint16    `json:"cols"`
+	Rows          uint16    `json:"rows"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	DaemonPID     int       `json:"daemon_pid"`
+	Generation    string    `json:"generation"`
+	ProcStartTime int64     `json:"proc_start_time,omitempty"` // /proc/pid/stat field 22 (starttime in clock ticks)
 }
 
 // LifecycleStore persists LifecycleRecord files to a durable directory.
@@ -158,11 +161,40 @@ func (s *LifecycleStore) Remove(id string) error {
 	return os.Remove(s.path(id))
 }
 
+// procStartTime reads field 22 (starttime) from /proc/<pid>/stat.
+// Returns 0 if the file cannot be read or parsed.
+func procStartTime(pid int) int64 {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0
+	}
+	// Fields are space-separated; field 2 (comm) is in parens and may
+	// contain spaces, so find the last ')' first.
+	s := string(data)
+	idx := strings.LastIndex(s, ")")
+	if idx < 0 || idx+2 >= len(s) {
+		return 0
+	}
+	fields := strings.Fields(s[idx+2:])
+	// starttime is field 22 in stat (1-indexed), which is fields[19]
+	// after skipping the first 3 fields (state, ppid, pgrp at positions 3-5).
+	// After ')' we have fields starting at position 3, so starttime is at index 19.
+	if len(fields) < 20 {
+		return 0
+	}
+	v, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
 // DetectCrashes finds records in state "active" whose daemon process is no
 // longer alive, transitions them to "crashed", and returns the affected
 // records (in their new "crashed" state).
 //
-// Process liveness is checked with syscall.Kill(pid, 0).
+// Process liveness is checked with syscall.Kill(pid, 0), guarded by
+// /proc/<pid>/stat start time to prevent PID-reuse false negatives.
 func (s *LifecycleStore) DetectCrashes() []LifecycleRecord {
 	actives := s.ListByState(LifecycleActive)
 
@@ -172,7 +204,23 @@ func (s *LifecycleStore) DetectCrashes() []LifecycleRecord {
 			continue
 		}
 		if processAlive(rec.DaemonPID) {
-			continue
+			// PID exists, but is it the same process? Check start time.
+			if rec.ProcStartTime > 0 {
+				current := procStartTime(rec.DaemonPID)
+				if current > 0 && current != rec.ProcStartTime {
+					// PID was reused by a different process — treat as dead.
+					logrus.WithFields(logrus.Fields{
+						"id":               rec.ID,
+						"daemon_pid":       rec.DaemonPID,
+						"expected_start":   rec.ProcStartTime,
+						"actual_start":     current,
+					}).Warn("PID reused by different process — treating as crashed")
+				} else {
+					continue // same process, still alive
+				}
+			} else {
+				continue // no start time recorded, trust PID
+			}
 		}
 		// Process is dead — transition to crashed.
 		logrus.WithFields(logrus.Fields{

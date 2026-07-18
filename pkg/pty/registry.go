@@ -36,12 +36,27 @@ type SessionInfo struct {
 	Socket   string // full path to .sock file
 }
 
+// validSessionID returns true if id is safe for use in file paths.
+// Rejects empty, contains path separators, dots-only, or control chars.
+func validSessionID(id string) bool {
+	if id == "" || id == "." || id == ".." {
+		return false
+	}
+	for _, c := range id {
+		if c == '/' || c == '\\' || c == '\x00' {
+			return false
+		}
+	}
+	return true
+}
+
 // Registry manages session daemon lifecycle: create, list, kill, capture.
 type Registry struct {
 	dir       string // socket directory
 	failMu    sync.Mutex
 	failCount map[string]int // consecutive liveness failures per session
 
+	recoveryMu     sync.Mutex      // serializes recover/dismiss operations
 	lifecycleStore *LifecycleStore // durable lifecycle state (may be nil)
 }
 
@@ -468,6 +483,11 @@ func (r *Registry) CrashedSessions() []LifecycleRecord {
 // Optional shellOverride and cwdOverride allow the user to choose a different
 // shell or working directory at recovery time.
 func (r *Registry) RecoverSession(id string, shellOverride ...string) error {
+	if !validSessionID(id) {
+		return fmt.Errorf("invalid session id: %q", id)
+	}
+	r.recoveryMu.Lock()
+	defer r.recoveryMu.Unlock()
 	if r.lifecycleStore == nil {
 		return fmt.Errorf("no lifecycle store configured")
 	}
@@ -489,18 +509,22 @@ func (r *Registry) RecoverSession(id string, shellOverride ...string) error {
 		cwd = shellOverride[1]
 	}
 
+	// Transition to recovered BEFORE spawning — the new daemon will
+	// overwrite the lifecycle record with a fresh "active" state on
+	// startup, which is the correct final state.
+	if err := r.lifecycleStore.Transition(id, LifecycleCrashed, LifecycleRecovered); err != nil {
+		return fmt.Errorf("transition to recovered: %w", err)
+	}
+
 	// Clean up old stale files so the new daemon can claim the socket.
 	os.Remove(r.SocketPath(id))
 	os.Remove(r.metadataPath(id))
 
 	// Spawn a new daemon with the saved (or overridden) configuration.
 	if err := r.Create(id, shell, cwd, rec.Cols, rec.Rows); err != nil {
+		// Rollback lifecycle state on spawn failure.
+		_ = r.lifecycleStore.Transition(id, LifecycleRecovered, LifecycleCrashed)
 		return fmt.Errorf("re-spawn daemon for %s: %w", id, err)
-	}
-
-	// Transition to recovered.
-	if err := r.lifecycleStore.Transition(id, LifecycleCrashed, LifecycleRecovered); err != nil {
-		return fmt.Errorf("transition to recovered: %w", err)
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -515,8 +539,17 @@ func (r *Registry) RecoverSession(id string, shellOverride ...string) error {
 
 // DismissSession marks a crashed session as dismissed and cleans up its files.
 func (r *Registry) DismissSession(id string) error {
+	if !validSessionID(id) {
+		return fmt.Errorf("invalid session id: %q", id)
+	}
+	r.recoveryMu.Lock()
+	defer r.recoveryMu.Unlock()
+	return r.dismissSessionLocked(id)
+}
+
+// dismissSessionLocked is the inner implementation; caller must hold recoveryMu.
+func (r *Registry) dismissSessionLocked(id string) error {
 	if r.lifecycleStore == nil {
-		// Without a lifecycle store, just delete files.
 		os.Remove(r.SocketPath(id))
 		os.Remove(r.metadataPath(id))
 		return nil
@@ -524,7 +557,6 @@ func (r *Registry) DismissSession(id string) error {
 
 	rec, err := r.lifecycleStore.Get(id)
 	if err != nil {
-		// No lifecycle record — just clean up files.
 		os.Remove(r.SocketPath(id))
 		os.Remove(r.metadataPath(id))
 		return nil
@@ -534,24 +566,22 @@ func (r *Registry) DismissSession(id string) error {
 		return fmt.Errorf("session %s is in state %q, not crashed", id, rec.State)
 	}
 
-	// Transition to dismissed and clean up.
 	if err := r.lifecycleStore.Transition(id, LifecycleCrashed, LifecycleDismissed); err != nil {
 		return fmt.Errorf("transition to dismissed: %w", err)
 	}
 
-	// Clean up socket and metadata.
 	os.Remove(r.SocketPath(id))
 	os.Remove(r.metadataPath(id))
-	// Keep the lifecycle file (it records the dismissed state for audit).
-
 	return nil
 }
 
 // DismissAll marks all crashed sessions as dismissed and cleans up their files.
 func (r *Registry) DismissAll() error {
+	r.recoveryMu.Lock()
+	defer r.recoveryMu.Unlock()
 	crashed := r.CrashedSessions()
 	for _, rec := range crashed {
-		_ = r.DismissSession(rec.ID)
+		_ = r.dismissSessionLocked(rec.ID)
 	}
 	return nil
 }

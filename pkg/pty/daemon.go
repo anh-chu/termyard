@@ -152,14 +152,16 @@ func RunDaemon(cfg DaemonConfig) error {
 	if lcErr != nil {
 		log.WithError(lcErr).Warn("cannot create lifecycle store — crash detection disabled")
 	} else {
+		pid := os.Getpid()
 		lr := LifecycleRecord{
-			ID:         cfg.ID,
-			Shell:      cfg.Shell,
-			Cwd:        cfg.Cwd,
-			Cols:       cfg.Cols,
-			Rows:       cfg.Rows,
-			DaemonPID:  os.Getpid(),
-			Generation: NewGeneration(),
+			ID:            cfg.ID,
+			Shell:         cfg.Shell,
+			Cwd:           cfg.Cwd,
+			Cols:          cfg.Cols,
+			Rows:          cfg.Rows,
+			DaemonPID:     pid,
+			Generation:    NewGeneration(),
+			ProcStartTime: procStartTime(pid),
 		}
 		if err := lifecycleStore.RecordActive(lr); err != nil {
 			log.WithError(err).Warn("failed to write lifecycle record")
