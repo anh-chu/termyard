@@ -29,10 +29,10 @@ func makeTestDeps(t *testing.T) (SessionDeps, *LinkSupervisor, *identity.PeerSto
 	if err != nil {
 		t.Fatal(err)
 	}
-	mgr := NewManager(id, ps, state.NewManager(nil))
+	mgr := NewManager(id, ps, state.NewManager())
 	deps := SessionDeps{
 		Manager:     mgr,
-		LocalMgr:    state.NewManager(nil),
+		LocalMgr:    state.NewManager(),
 		Identity:    id,
 		ActTracker:  activity.NewTracker(),
 		ToolTracker: toolevents.NewTracker(),
@@ -158,7 +158,7 @@ func TestGetHostsForPeerOnlyLocal(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(tmpHome, ".config", "termyard"), 0o700)
 	id, _ := identity.Generate("local-node")
 	ps, _ := identity.NewPeerStore()
-	mgr := NewManager(id, ps, state.NewManager(nil))
+	mgr := NewManager(id, ps, state.NewManager())
 
 	// Register two fake remote peers.
 	mgr.RegisterPeer("fp-a", "remote-a", "pk-a", nil)

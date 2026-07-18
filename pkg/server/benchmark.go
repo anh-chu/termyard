@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/anh-chu/termyard/pkg/pty"
-	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 const (
@@ -35,18 +33,10 @@ type latencySample struct {
 
 type benchmarkResponse struct {
 	Direct benchmarkResult `json:"direct"`
-	Tmux   benchmarkResult `json:"tmux"`
 }
 
 func handlePTYBenchmark(w http.ResponseWriter, r *http.Request, opts *Options) {
-	if opts.Client == nil {
-		http.Error(w, "tmux not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	tmuxPath := opts.Client.TmuxPath()
-
-	var directRes, tmuxRes benchmarkResult
+	var directRes benchmarkResult
 
 	// ---- Direct PTY benchmark ----
 	for i := 0; i < benchmarkRuns; i++ {
@@ -63,32 +53,9 @@ func handlePTYBenchmark(w http.ResponseWriter, r *http.Request, opts *Options) {
 	}
 	avg(&directRes, benchmarkRuns)
 
-	// ---- Tmux PTY benchmark ----
-	benchSession := fmt.Sprintf("termyard-bench-%d", rand.Int63n(1<<30))
-	if err := opts.Client.NewSession(benchSession, "", ""); err != nil {
-		http.Error(w, fmt.Sprintf("create bench tmux session: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = opts.Client.KillSession("", benchSession) }()
-
-	for i := 0; i < benchmarkRuns; i++ {
-		res, err := runTmuxBenchmark(tmuxPath, benchSession)
-		if err != nil {
-			logrus.WithError(err).Warn("tmux benchmark failed")
-			http.Error(w, fmt.Sprintf("tmux benchmark failed: %v", err), http.StatusInternalServerError)
-			return
-		}
-		tmuxRes.ThroughputMbps += res.ThroughputMbps
-		tmuxRes.FirstByteLatencyUs += res.FirstByteLatencyUs
-		tmuxRes.TotalBytes += res.TotalBytes
-		tmuxRes.ElapsedMs += res.ElapsedMs
-	}
-	avg(&tmuxRes, benchmarkRuns)
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(benchmarkResponse{
 		Direct: directRes,
-		Tmux:   tmuxRes,
 	})
 }
 
@@ -107,17 +74,6 @@ func runDirectBenchmark() (benchmarkResult, error) {
 	sess, err := pty.NewDirectPTYSession("", 120, 40, "")
 	if err != nil {
 		return benchmarkResult{}, fmt.Errorf("create direct PTY: %w", err)
-	}
-	defer sess.Close()
-
-	return runThroughputBenchmark(sess)
-}
-
-// runTmuxBenchmark measures throughput and first-byte latency on a tmux-attached PTY.
-func runTmuxBenchmark(tmuxPath, session string) (benchmarkResult, error) {
-	sess, err := tmux.NewPTYSession(tmuxPath, session, 120, 40)
-	if err != nil {
-		return benchmarkResult{}, fmt.Errorf("create tmux PTY: %w", err)
 	}
 	defer sess.Close()
 

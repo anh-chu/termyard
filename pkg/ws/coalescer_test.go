@@ -2,17 +2,11 @@ package ws
 
 import (
 	"bytes"
-	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
-
-	"github.com/anh-chu/termyard/pkg/tmux"
-	"github.com/anh-chu/termyard/pkg/toolevents"
 )
 
 type recordedFrame struct {
@@ -273,70 +267,4 @@ func TestRequestPongBlocksWhenQueueFull(t *testing.T) {
 	coalescer.CloseAndFlush()
 }
 
-func TestArtifactScannerRecordsNormalOutputAndStopsOnCancellation(t *testing.T) {
-	directory := t.TempDir()
-	artifactPath := filepath.Join(directory, "artifact.txt")
-	if err := os.WriteFile(artifactPath, []byte("artifact"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	scanner := newArtifactScanner(ctx, &tmux.Client{}, toolevents.NewTracker(), "session")
-	scanner.Submit([]byte("\x1b]7;file://" + directory + "\x1b\\\n" + artifactPath + "\n"))
-	scanner.Close()
-	<-scanner.Done()
-
-	artifacts := scanner.tracker.GetArtifacts("", "session")
-	if len(artifacts) != 1 || artifacts[0].Path != artifactPath {
-		t.Fatalf("artifacts = %#v, want %q", artifacts, artifactPath)
-	}
-
-	scanner = newArtifactScanner(ctx, &tmux.Client{}, toolevents.NewTracker(), "session")
-	cancel()
-	<-scanner.Done()
-}
-
-func TestArtifactScannerCountsCancelledSubmissions(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	scanner := newArtifactScanner(ctx, &tmux.Client{}, toolevents.NewTracker(), "session")
-
-	// Submit some data normally.
-	scanner.Submit([]byte("before\n"))
-
-	// Cancel the context. Subsequent Submits must be counted as dropped.
-	cancel()
-
-	const cancelSubmissions = 5
-	for i := 0; i < cancelSubmissions; i++ {
-		scanner.Submit([]byte("after-cancel\n"))
-	}
-
-	scanner.Close()
-	<-scanner.Done()
-
-	dropped := scanner.DroppedChunks()
-	if dropped < int64(cancelSubmissions) {
-		t.Fatalf("dropped = %d, want >= %d (cancelled submissions not counted)", dropped, cancelSubmissions)
-	}
-}
-
-func TestArtifactScannerCountsAbandonedChunksOnCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	scanner := newArtifactScanner(ctx, &tmux.Client{}, toolevents.NewTracker(), "session")
-
-	// Fill the queue with chunks before the scanner processes them.
-	const queuedChunks = 5
-	for i := 0; i < queuedChunks; i++ {
-		scanner.Submit([]byte("queued\n"))
-	}
-
-	// Cancel without closing the channel. The scanner must drain and count
-	// the abandoned chunks.
-	cancel()
-	<-scanner.Done()
-
-	dropped := scanner.DroppedChunks()
-	if dropped < int64(queuedChunks) {
-		t.Fatalf("dropped = %d, want >= %d (abandoned queue chunks not counted)", dropped, queuedChunks)
-	}
-}

@@ -21,7 +21,7 @@ import (
 // distinct from the {"type":"tool-event",...} shape used for real hook events.
 func TestHubBroadcastArtifactEvent(t *testing.T) {
 	tracker := toolevents.NewTracker()
-	stateMgr := state.NewManager(nil)
+	stateMgr := state.NewManager()
 	hub := NewHub(stateMgr, tracker)
 	go hub.Run()
 

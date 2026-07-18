@@ -30,10 +30,10 @@ func newTestOpts(t *testing.T) *Options {
 	ps, _ := identity.NewPeerStore()
 	pStore, _ := auth.NewPasswordStore()
 	_ = pStore.SetPassword("supersecret")
-	mgr := peer.NewManager(id, ps, state.NewManager(nil))
+	mgr := peer.NewManager(id, ps, state.NewManager())
 	deps := peer.SessionDeps{
 		Manager:     mgr,
-		LocalMgr:    state.NewManager(nil),
+		LocalMgr:    state.NewManager(),
 		Identity:    id,
 		ActTracker:  activity.NewTracker(),
 		ToolTracker: toolevents.NewTracker(),

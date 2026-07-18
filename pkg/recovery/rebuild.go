@@ -43,27 +43,9 @@ func NewRebuilder(client rebuildClient, sm *state.Manager, attrs *sessionattrs.S
 }
 
 func (r *Rebuilder) Rebuild(ctx context.Context) error {
-	if r == nil || r.client == nil {
-		return nil
-	}
-	manifest, err := Load()
-	if err != nil {
-		return err
-	}
-	if len(manifest.Sessions) == 0 {
-		return nil
-	}
-	for _, session := range manifest.Sessions {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if session.Name == "" || r.client.HasSession(session.Name) {
-			continue
-		}
-		if err := r.rebuildSession(session); err != nil {
-			r.log.WithError(err).WithField("session", session.Name).Warn("failed to rebuild session")
-		}
-	}
+	// Daemon sessions survive server crashes on their own.
+	// No tmux rebuild needed.
+	_ = ctx
 	return nil
 }
 

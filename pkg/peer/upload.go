@@ -23,7 +23,7 @@ func handleOpenUpload(p OpenUploadPayload, pc *PeerConnection, deps SessionDeps,
 	log = log.WithFields(logrus.Fields{"stream": p.StreamID, "file": p.Filename})
 	dial := pc.Role == RoleDialer
 	var conn *websocket.Conn
-	if deps.Manager == nil || deps.Identity == nil || deps.TmuxClient == nil {
+	if deps.Manager == nil || deps.Identity == nil {
 		return
 	}
 	if dial {

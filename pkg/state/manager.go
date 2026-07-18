@@ -37,7 +37,6 @@ type SessionMetadata struct {
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*tmux.Session
-	client   *tmux.Client
 	meta     map[string]SessionMetadata
 	namer    *namer.Namer
 
@@ -91,10 +90,9 @@ type StateEvent struct {
 }
 
 // NewManager creates a new state manager
-func NewManager(client *tmux.Client) *Manager {
+func NewManager() *Manager {
 	m := &Manager{
 		sessions: make(map[string]*tmux.Session),
-		client:   client,
 		meta:     make(map[string]SessionMetadata),
 	}
 	if home, err := os.UserHomeDir(); err == nil {
@@ -320,35 +318,8 @@ func (m *Manager) UpdateSessions(sessions []*tmux.Session) {
 
 // loadSessionDetails fills in windows and panes for a session
 func (m *Manager) loadSessionDetails(session *tmux.Session) error {
-	if session.Backend == "daemon" {
-		m.loadDaemonSessionDetails(session)
-		return nil
-	}
-	windows, err := m.client.ListWindows(session.Name)
-	if err != nil {
-		return err
-	}
-
-	for _, win := range windows {
-		panes, err := m.client.ListPanes(win.ID)
-		if err != nil {
-			logrus.WithError(err).WithField("window", win.Name).Warn("failed to list panes")
-			continue
-		}
-		win.Panes = panes
-	}
-
-	session.Windows = windows
-	session.ProjectPath = tmux.ResolveProjectPath(windows, "")
-	session.AgentType = tmux.InferAgentType(windows, "")
-
-	if pane := tmux.PrimaryPane(windows); pane != nil {
-		if content, err := m.client.CapturePaneHistory(pane.ID, -200); err == nil {
-			session.PromptPreview = tmux.ExtractPromptPreview(content)
-		}
-	}
-
-	m.applyMetadata(session)
+	// All sessions are daemon-backed now.
+	m.loadDaemonSessionDetails(session)
 
 	// Detect linked git worktrees so the UI can offer cleanup on kill.
 	if session.ProjectPath != "" {
@@ -816,13 +787,7 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 		return
 	}
 
-	if err := m.client.RenameSession(sessionName, newName); err != nil {
-		m.notice("warn", "ai-naming", sessionName, fmt.Sprintf("tmux rename to %q failed: %v", newName, err))
-		m.saveNames()
-		m.broadcast(StateEvent{Type: "sessions-changed"})
-		return
-	}
-
+	// Daemon sessions don't need tmux rename — the DisplayName is sufficient.
 	// Migrate meta + sessions keys to the new name.
 	m.ApplyRename(sessionName, newName)
 	m.broadcast(StateEvent{Type: "sessions-changed"})
@@ -1054,20 +1019,8 @@ func (m *Manager) ApplyAIName(sessionName, name string) string {
 // foregroundCommands returns the active pane's foreground command for a
 // session, used as shell-naming context for a manual name refresh.
 func (m *Manager) foregroundCommands(session string) []string {
-	if m.client == nil {
-		return nil
-	}
-	fgs, err := m.client.ListForegroundCommands()
-	if err != nil {
-		return nil
-	}
-	for _, fg := range fgs {
-		if fg.Session == session {
-			if cmd := strings.TrimSpace(fg.Command); cmd != "" {
-				return []string{cmd}
-			}
-		}
-	}
+	// Daemon sessions don't have tmux foreground command tracking.
+	_ = session
 	return nil
 }
 
@@ -1114,56 +1067,15 @@ func (m *Manager) SessionForPane(paneID string) string {
 	return ""
 }
 
-// GetSessions returns all tracked sessions with full details
+// GetSessions returns all tracked sessions with full details.
 func (m *Manager) GetSessions() []*tmux.Session {
-	// Always refresh from tmux for accuracy
-	sessions, err := m.client.ListSessions()
-	if err != nil {
-		logrus.WithError(err).Warn("failed to list sessions")
-		m.mu.RLock()
-		defer m.mu.RUnlock()
-		result := make([]*tmux.Session, 0, len(m.sessions))
-		for _, s := range m.sessions {
-			result = append(result, s)
-		}
-		return result
-	}
-
-	// Filter out the control mode session
-	filtered := make([]*tmux.Session, 0, len(sessions))
-	for _, s := range sessions {
-		if s.Name != tmux.ControlSessionName() {
-			filtered = append(filtered, s)
-		}
-	}
-	sessions = filtered
-
-	for _, session := range sessions {
-		if err := m.loadSessionDetails(session); err != nil {
-			logrus.WithError(err).WithField("session", session.Name).Warn("failed to load session details")
-		}
-	}
-
-	m.mu.Lock()
-	// Preserve daemon sessions from the existing state (they aren't in tmux).
-	var daemonSessions []*tmux.Session
+	m.mu.RLock()
+	result := make([]*tmux.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		if s.Backend == "daemon" {
-			daemonSessions = append(daemonSessions, s)
-		}
+		result = append(result, s)
 	}
-
-	m.sessions = make(map[string]*tmux.Session, len(sessions)+len(daemonSessions))
-	for _, s := range sessions {
-		m.sessions[s.Name] = s
-	}
-	for _, s := range daemonSessions {
-		m.sessions[s.Name] = s
-		sessions = append(sessions, s)
-	}
-	m.mu.Unlock()
-
-	return sessions
+	m.mu.RUnlock()
+	return result
 }
 
 // SnapshotForManifest returns deep copies of current tracked sessions.
@@ -1173,7 +1085,7 @@ func (m *Manager) SnapshotForManifest() []*tmux.Session {
 
 	out := make([]*tmux.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		if s == nil || s.Name == tmux.ControlSessionName() {
+		if s == nil {
 			continue
 		}
 		out = append(out, deepCopySession(s))

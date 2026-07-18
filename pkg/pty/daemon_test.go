@@ -3,13 +3,11 @@ package pty_test
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/anh-chu/termyard/pkg/pty"
-	"github.com/anh-chu/termyard/pkg/tmux"
 )
 
 // simpleReader wraps a pty.Session with a single persistent read goroutine.
@@ -108,11 +106,6 @@ func (r *simpleReader) stop() {
 }
 
 func TestDaemonPTYComparison(t *testing.T) {
-	tp := tmuxPath()
-	if tp == "" {
-		t.Skip("tmux not found")
-	}
-
 	const throughputSeconds = 3
 	const latencyIters = 20
 
@@ -224,66 +217,18 @@ func TestDaemonPTYComparison(t *testing.T) {
 	}
 
 	// ============================================================
-	// Test 3: Tmux PTY
-	// ============================================================
-	t.Log("=== TMUX PTY ===")
-	benchName := fmt.Sprintf("termyard-bench-%d", os.Getpid())
-	cmd := exec.Command(tp, "new-session", "-d", "-s", benchName, "/bin/sh")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("create tmux session: %v", err)
-	}
-	defer exec.Command(tp, "kill-session", "-t", benchName).Run()
-	time.Sleep(1 * time.Second)
-
-	tSess, err := tmux.NewPTYSession(tp, benchName, 120, 40)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tr := newSimpleReader(tSess)
-
-	// Warmup
-	tSess.Write([]byte("\n"))
-	tr.drain(1 * time.Second)
-
-	tSess.Write([]byte("seq 1 1000000\n"))
-	time.Sleep(30 * time.Millisecond)
-	tBytes := tr.readFor(time.Duration(throughputSeconds) * time.Second)
-	tMBps := float64(tBytes) / float64(throughputSeconds) / (1024 * 1024)
-	t.Logf("  Throughput: %d bytes in %ds = %.2f MB/s", tBytes, throughputSeconds, tMBps)
-
-	// Latency
-	tSess.Write([]byte{0x03})
-	tr.drain(500 * time.Millisecond)
-	var tLats []time.Duration
-	for i := 0; i < latencyIters; i++ {
-		tr.drain(50 * time.Millisecond)
-		tSess.Write([]byte("echo x\n"))
-		if lat, ok := tr.readFirst(5 * time.Second); ok {
-			tLats = append(tLats, lat)
-		}
-		tr.drain(50 * time.Millisecond)
-	}
-	tr.stop()
-	tSess.Close()
-	tAvgLat := trimmedAvg(tLats)
-
-	// ============================================================
 	// Summary
 	// ============================================================
 	t.Log("")
 	t.Log("╔══════════════════════════════════════════════════════════════════════╗")
-	t.Log("║                PTY PERFORMANCE COMPARISON (3 modes)                 ║")
+	t.Log("║                PTY PERFORMANCE COMPARISON (2 modes)                 ║")
 	t.Log("╠══════════════════════════════════════════════════════════════════════╣")
-	if dMBps > 0.001 && daMBps > 0.001 && tMBps > 0.001 {
-		t.Logf("║  Throughput:  Direct=%-8.2f  Daemon=%-8.2f  Tmux=%-8.2f MB/s ║", dMBps, daMBps, tMBps)
-		t.Logf("║                Daemon is %.1fx faster than Tmux                      ║", daMBps/tMBps)
+	if dMBps > 0.001 && daMBps > 0.001 {
+		t.Logf("║  Throughput:  Direct=%-8.2f  Daemon=%-8.2f MB/s                ║", dMBps, daMBps)
 		t.Logf("║                Direct is %.1fx faster than Daemon                    ║", dMBps/daMBps)
 	}
-	if dAvgLat > 0 && daAvgLat > 0 && tAvgLat > 0 {
-		t.Logf("║  Latency:     Direct=%-10v  Daemon=%-10v  Tmux=%-10v   ║", dAvgLat, daAvgLat, tAvgLat)
-		if tAvgLat > daAvgLat {
-			t.Logf("║                Daemon is %.1fx faster latency than Tmux               ║", float64(tAvgLat)/float64(daAvgLat))
-		}
+	if dAvgLat > 0 && daAvgLat > 0 {
+		t.Logf("║  Latency:     Direct=%-10v  Daemon=%-10v                      ║", dAvgLat, daAvgLat)
 	}
 	t.Log("╚══════════════════════════════════════════════════════════════════════╝")
 }
