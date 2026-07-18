@@ -137,22 +137,28 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 	stateDir := DefaultStateDir()
 	args = append(args, "--state-dir", stateDir)
 
-	cmd := exec.Command(exe, args...)
-
-	// Wrap in a systemd user scope if systemd-run is available.
-	// This gives the daemon its own cgroup so a server OOM doesn't
-	// cascade to session daemons.  Use a unique unit name (PID suffix)
-	// so recovering a crashed session doesn't collide with the old scope.
+	// Try to wrap in a systemd user scope for cgroup isolation.
+	// Falls back to direct spawn if systemd-run is unavailable or
+	// the user session bus is not reachable.
+	var cmd *exec.Cmd
+	useSystemd := false
 	if systemdRun, err := exec.LookPath("systemd-run"); err == nil {
-		unitName := fmt.Sprintf("termyard-session-%s-%d.scope", name, time.Now().UnixMilli())
-		scopeArgs := []string{
-			"--user", "--scope",
-			"--unit", unitName,
-			"--",
+		// Verify user session bus is available (systemd-run --user needs it).
+		if os.Getenv("DBUS_SESSION_BUS_ADDRESS") != "" {
+			unitName := fmt.Sprintf("termyard-session-%s-%d.scope", name, time.Now().UnixMilli())
+			scopeArgs := []string{
+				"--user", "--scope",
+				"--unit", unitName,
+				"--",
+			}
+			fullArgs := append(scopeArgs, exe)
+			fullArgs = append(fullArgs, args...)
+			cmd = exec.Command(systemdRun, fullArgs...)
+			useSystemd = true
 		}
-		fullArgs := append(scopeArgs, exe)
-		fullArgs = append(fullArgs, args...)
-		cmd = exec.Command(systemdRun, fullArgs...)
+	}
+	if cmd == nil {
+		cmd = exec.Command(exe, args...)
 	}
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -168,7 +174,20 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 	cmd.Stderr = devNull
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start daemon process: %w", err)
+		if useSystemd {
+			// systemd-run failed; retry with direct spawn.
+			log.WithError(err).Warn("systemd-run failed, falling back to direct spawn")
+			cmd = exec.Command(exe, args...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			cmd.Stdin = devNull
+			cmd.Stdout = devNull
+			cmd.Stderr = devNull
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("start daemon process: %w", err)
+			}
+		} else {
+			return fmt.Errorf("start daemon process: %w", err)
+		}
 	}
 
 	// Release the process handle so the daemon is fully independent.
