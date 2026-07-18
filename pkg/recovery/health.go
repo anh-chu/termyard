@@ -14,9 +14,9 @@ type serverProbe interface {
 	ListSessions() ([]*model.Session, error)
 }
 
-// HealthPoller watches tmux server liveness and triggers recovery.
+// HealthPoller watches server liveness and triggers recovery.
 //
-// Recovery fires only on tmux server death (a crash). It deliberately does NOT
+// Recovery fires only on server death (a crash). It deliberately does NOT
 // rebuild individual sessions that go missing while the server is alive: those
 // are intentional kills, and resurrecting them is the auto-recovery respawn bug.
 type HealthPoller struct {
@@ -39,7 +39,7 @@ func NewHealthPoller(client serverProbe, interval time.Duration, onGone func()) 
 }
 
 func (h *HealthPoller) Run(ctx context.Context) {
-	// Daemon sessions survive server crashes. No tmux health polling needed.
+	// Daemon sessions survive server crashes. No health polling needed.
 	if h == nil {
 		return
 	}

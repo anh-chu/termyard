@@ -64,7 +64,7 @@ interface SidebarProps {
   // Pruning per-device ordering then would delete entries for sessions that
   // simply haven't reappeared yet.
   pruningSuspended?: boolean
-  // Direct PTY session keys currently in the pane tree (not tmux sessions)
+  // Direct PTY session keys currently in the pane tree
 
   onQuickShell?: () => void
 }
@@ -708,7 +708,7 @@ export function Sidebar({
     // for whether an agent is still running in the pane right now: while an
     // agent runs it shows as node/pi/claude/etc, and the moment it exits the
     // command reverts to the shell. Hook history (user_prompt/agent_message)
-    // persists on the session for its whole tmux lifetime, so it cannot tell us
+    // persists on the session for its whole lifetime, so it cannot tell us
     // the agent left — only the live command can.
     const activeCmd = (() => {
       for (const w of session.windows ?? []) {
@@ -1409,7 +1409,7 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={onQuickShell}
-                title="Quick Shell (direct PTY, no tmux)"
+                title="Quick Shell"
                 className="shrink-0 rounded-md border border-hairline bg-surface-elevated px-2 py-2 text-mute hover:text-ink transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

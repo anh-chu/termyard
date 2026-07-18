@@ -48,7 +48,7 @@ export interface Session {
   schedule_id?: string
 }
 
-// Label to show for a session: friendly display name if present, else tmux name.
+// Label to show for a session: friendly display name if present, else session name.
 export function sessionLabel(session: Session): string {
   return session.display_name && session.display_name.trim() !== ''
     ? session.display_name

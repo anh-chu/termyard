@@ -57,9 +57,9 @@ type Event struct {
 	Kind           string          `json:"kind,omitempty"`
 	Host           string          `json:"host,omitempty"`             // peer fingerprint (empty = local)
 	HostName       string          `json:"host_name,omitempty"`        // peer display name
-	Session        string          `json:"session"`                    // tmux session name
-	Window         int             `json:"window"`                     // tmux window index
-	Pane           string          `json:"pane,omitempty"`             // tmux pane ID (optional)
+	Session        string          `json:"session"`                    // session name
+	Window         int             `json:"window"`                     // window index
+	Pane           string          `json:"pane,omitempty"`             // pane ID (optional)
 	Message        string          `json:"message,omitempty"`          // human-readable detail
 	CWD            string          `json:"cwd,omitempty"`              // current working directory when provided by the agent hook
 	AgentSessionID string          `json:"agent_session_id,omitempty"` // upstream agent session/thread id when available
@@ -71,7 +71,7 @@ type Event struct {
 	Artifacts      []*FileArtifact `json:"artifacts,omitempty"`
 }
 
-// PaneKey uniquely identifies a tmux pane
+// PaneKey uniquely identifies a pane
 type PaneKey struct {
 	Host    string
 	Session string
@@ -97,7 +97,7 @@ var nativeWaitingTools = map[Tool]bool{
 	ToolPi:       true,
 }
 
-// Tracker tracks the latest status of AI tools per tmux pane
+// Tracker tracks the latest status of AI tools per pane
 type Tracker struct {
 	mu        sync.RWMutex
 	events    map[PaneKey]*Event

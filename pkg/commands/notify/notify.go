@@ -422,23 +422,12 @@ func parseCodexEventData(data string) (string, string, string, error) {
 	}
 }
 
-// detectTmuxContext auto-detects the current tmux session, window, and pane
-// from the environment. Returns session name, window index, pane ID.
-func detectTmuxContext() (string, int, string) {
-	paneID := os.Getenv("TMUX_PANE")
-
-	// If we have TMUX_PANE, query that specific pane's session and window
-	// instead of using display-message which returns the *active* pane's info.
-	if paneID != "" {
-		session, window := queryPaneContext(paneID)
-		if session != "" {
-			return session, window, paneID
-		}
-	}
-
-	// Daemon session fallback: TERMYARD_SESSION / TERMYARD_PANE are set by
-	// the session daemon so agents running inside daemon sessions can
-	// identify themselves without tmux.
+// detectSessionContext auto-detects the current session, window, and pane
+// from the environment. Checks TERMYARD_SESSION/TERMYARD_PANE first (daemon
+// sessions), then falls back to TMUX_PANE + tmux queries for legacy setups.
+// Returns session name, window index, pane ID.
+func detectSessionContext() (string, int, string) {
+	// Daemon sessions set TERMYARD_SESSION and TERMYARD_PANE.
 	if tySession := os.Getenv("TERMYARD_SESSION"); tySession != "" {
 		tyPane := os.Getenv("TERMYARD_PANE")
 		if tyPane == "" {
@@ -447,7 +436,16 @@ func detectTmuxContext() (string, int, string) {
 		return tySession, 0, tyPane
 	}
 
-	// Fallback: use display-message (returns active pane context)
+	// Legacy tmux fallback: use TMUX_PANE to query context.
+	paneID := os.Getenv("TMUX_PANE")
+	if paneID != "" {
+		session, window := queryPaneContext(paneID)
+		if session != "" {
+			return session, window, paneID
+		}
+	}
+
+	// Last resort: tmux display-message (returns active pane context).
 	session, _ := tmuxQuery("#{session_name}")
 	winStr, _ := tmuxQuery("#{window_index}")
 	winIdx, _ := strconv.Atoi(winStr)
@@ -580,13 +578,13 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("--status is required (or use --event-data/--stdin to read from agent hook input)")
 	}
 
-	// Auto-detect tmux context if not provided
+	// Auto-detect session context if not provided
 	if session == "" || pane == "" {
-		log.WithField("TMUX_PANE", os.Getenv("TMUX_PANE")).Trace("auto-detecting tmux context")
-		autoSession, autoWindow, autoPane := detectTmuxContext()
+		log.WithField("TERMYARD_SESSION", os.Getenv("TERMYARD_SESSION")).Trace("auto-detecting session context")
+		autoSession, autoWindow, autoPane := detectSessionContext()
 		log.WithFields(logrus.Fields{
 			"auto_session": autoSession, "auto_window": autoWindow, "auto_pane": autoPane,
-		}).Trace("tmux context detected")
+		}).Trace("session context detected")
 
 		if session == "" {
 			session = autoSession
@@ -600,7 +598,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}
 
 	if session == "" {
-		return fmt.Errorf("could not detect tmux session; pass --session explicitly")
+		return fmt.Errorf("could not detect session; pass --session explicitly")
 	}
 
 	evt := &toolevents.Event{
@@ -710,15 +708,15 @@ func init() {
 		},
 		&cli.StringFlag{
 			Name:  "session",
-			Usage: "tmux session name (auto-detected if omitted)",
+			Usage: "session name (auto-detected if omitted)",
 		},
 		&cli.IntFlag{
 			Name:  "window",
-			Usage: "tmux window index (auto-detected if omitted)",
+			Usage: "window index (auto-detected if omitted)",
 		},
 		&cli.StringFlag{
 			Name:  "pane",
-			Usage: "tmux pane ID (auto-detected if omitted)",
+			Usage: "pane ID (auto-detected if omitted)",
 		},
 		&cli.StringFlag{
 			Name:    "server",
@@ -743,7 +741,7 @@ Examples:
   termyard notify -t codex -s active
   termyard notify -t claude -s completed
 
-The tmux session, window, and pane are auto-detected when run inside tmux.`,
+The session, window, and pane are auto-detected when run inside a session.`,
 		Flags:  flags,
 		Action: Execute,
 	}

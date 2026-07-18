@@ -9,6 +9,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/pty"
 )
 
+// Optional tmux comparison benchmark (skipped if tmux not on PATH).
 func tmuxPath() string {
 	p, _ := exec.LookPath("tmux")
 	return p

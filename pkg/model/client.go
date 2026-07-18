@@ -13,20 +13,20 @@ type SessionForeground struct {
 }
 
 // ValidateSessionName returns an error if name contains characters that have
-// special meaning in tmux target syntax and would prevent reliable targeting.
+// special meaning and would prevent reliable targeting and would prevent reliable targeting.
 func ValidateSessionName(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("session name cannot be empty")
 	}
-	// These characters are reserved in tmux target syntax:
+	// These characters are reserved:
 	//   ~  last marked pane  (causes "no marked target" error)
 	//   !  last active session
 	//   :  window separator  (foo:1 targets window 1 of session foo)
 	const reserved = "~!:"
 	for _, r := range reserved {
 		if strings.ContainsRune(name, r) {
-			return fmt.Errorf("session name cannot contain %q (reserved by tmux target syntax)", r)
+			return fmt.Errorf("session name cannot contain %q (reserved character)", r)
 		}
 	}
 	return nil

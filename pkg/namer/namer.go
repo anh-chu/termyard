@@ -48,7 +48,7 @@ type Context struct {
 // GroupMember carries the current per-session signal the group namer reasons
 // over: its label plus whatever metadata exists for that session.
 type GroupMember struct {
-	Label   string `json:"label"`   // display name or tmux name
+	Label   string `json:"label"`   // display name or session name
 	Agent   string `json:"agent"`   // agent type, e.g. "claude"
 	Project string `json:"project"` // project path
 	Prompt  string `json:"prompt"`  // user prompt or prompt preview

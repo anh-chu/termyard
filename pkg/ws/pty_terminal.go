@@ -201,7 +201,7 @@ func SpliceConns(browser, data *websocket.Conn, log *logrus.Entry) {
 }
 
 // HandleDirectSession handles a WebSocket connection for a direct PTY session
-// (no tmux). Query params: cols=<cols>, rows=<rows>, cwd=<dir>
+// Query params: cols=<cols>, rows=<rows>, cwd=<dir>
 func (h *PTYTerminalHandler) HandleDirectSession(w http.ResponseWriter, r *http.Request) {
 	cols, _ := strconv.ParseUint(r.URL.Query().Get("cols"), 10, 16)
 	rows, _ := strconv.ParseUint(r.URL.Query().Get("rows"), 10, 16)

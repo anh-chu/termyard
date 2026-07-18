@@ -317,7 +317,7 @@ func sessionKey(host, name string) string {
 }
 
 // EnforceScheduleCap prunes the sessions owned by scheduleID until at most
-// keep remain, killing oldest first (by tmux creation time). For a pre-spawn
+// keep remain, killing oldest first (by creation time). For a pre-spawn
 // call pass max-1 to leave room for the incoming run; for an update-time prune
 // pass max. A negative keep is treated as unlimited and is a no-op.
 func EnforceScheduleCap(opts *Options, scheduleID string, keep int) {
@@ -1101,7 +1101,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				req.Path = strings.TrimSpace(req.Path)
 				req.Command = strings.TrimSpace(req.Command)
 
-				// Remote host — always forward via peer (tmux on the peer side).
+				// Remote host — always forward via peer.
 				if req.Host != "" && opts.PeerMgr != nil && !opts.PeerMgr.IsLocal(req.Host) {
 					req.Name = resolveNewSessionName(opts, req.Host, req.Name, req.Command, req.Path)
 					if req.Name == "" {
@@ -1123,35 +1123,6 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 						default:
 							http.Error(w, err.Error(), http.StatusInternalServerError)
 						}
-						return
-					}
-					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
-					return
-				}
-
-				// Local session — daemon backend (default).
-				// Only fall back to tmux when backend is explicitly "tmux".
-				if req.Backend == "tmux" {
-					req.Name = resolveNewSessionName(opts, req.Host, req.Name, req.Command, req.Path)
-					if req.Name == "" {
-						http.Error(w, "name or path is required", http.StatusBadRequest)
-						return
-					}
-					if err := model.ValidateSessionName(req.Name); err != nil {
-						http.Error(w, err.Error(), http.StatusBadRequest)
-						return
-					}
-					if err := CreateSession(opts, scheduler.CreateSessionReq{
-						Name:           req.Name,
-						Host:           req.Host,
-						Path:           req.Path,
-						Command:        req.Command,
-						AgentType:      req.AgentType,
-						WorktreeBranch: req.WorktreeBranch,
-						ScheduleID:     req.ScheduleID,
-					}); err != nil {
-						http.Error(w, err.Error(), http.StatusInternalServerError)
 						return
 					}
 					w.Header().Set("Content-Type", "application/json")
@@ -2225,7 +2196,7 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 			})
 		})
 
-		// PTY benchmark: compare direct vs tmux throughput and latency
+		// PTY benchmark: compare direct PTY throughput and latency
 		r.Get("/pty-benchmark", func(w http.ResponseWriter, r *http.Request) {
 			handlePTYBenchmark(w, r, opts)
 		})

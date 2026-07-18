@@ -9,7 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// DirectPTYSession spawns a shell directly in a PTY without tmux.
+// DirectPTYSession spawns a shell directly in a PTY.
 // It implements the Session interface.
 type DirectPTYSession struct {
 	cmd    *exec.Cmd
@@ -89,7 +89,7 @@ func (p *DirectPTYSession) Close() {
 }
 
 // directLocaleEnv returns os.Environ() with LANG, LC_ALL, and LC_CTYPE
-// stripped, and C.UTF-8 set. This mirrors tmux.localeEnv but lives here
+// stripped, and C.UTF-8 set.
 // to avoid a reverse dependency.
 func directLocaleEnv() []string {
 	var out []string

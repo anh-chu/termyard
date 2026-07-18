@@ -18,7 +18,7 @@ High-impact files (most imported, changes here affect many other files):
 
 Required environment variables (no defaults):
 - PATH (pkg/commands/install/install.go)
-- SHELL (pkg/tmux/client.go)
+- SHELL (pkg/model/client.go)
 - TMPDIR (pkg/socket/socket.go)
 - TMUX_PANE (pkg/commands/notify/notify.go)
 - XDG_DATA_HOME (pkg/webpush/vapid.go)

@@ -41,7 +41,7 @@ export class PredictiveEcho {
     if (data.length !== 1) return false
     const code = data.charCodeAt(0)
     if (code < 0x20 || code > 0x7e) return false
-    // Never predict inside alternate screen (vim, tmux control mode, fzf, …)
+    // Never predict inside alternate screen (vim, less, fzf, …)
     if (this.term.buffer.active.type !== 'normal') return false
     // Cursor at last column would wrap the echo — don't predict.
     // Also reject when accumulated pending chars have already consumed

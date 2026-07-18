@@ -6,9 +6,9 @@ import (
 	"unicode"
 )
 
-// Sanitize converts arbitrary model output into a tmux-safe, kebab-case slug.
+// Sanitize converts arbitrary model output into a safe, kebab-case slug.
 //
-// tmux treats '.' and ':' as window/pane target separators and reserves
+// Session names treat '.' and ':' as window/pane target separators and reserves
 // '~' and '!'; whitespace is also problematic for target syntax. We reduce to
 // [a-z0-9-], collapse repeats, and trim hyphens. Returns "" if nothing usable
 // remains.

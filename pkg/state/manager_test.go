@@ -35,7 +35,7 @@ func TestApplyRenameMigratesStateAndBroadcasts(t *testing.T) {
 	if !ok {
 		t.Fatalf("new meta key missing")
 	}
-	if !meta.TmuxRenamed {
+	if !meta.Renamed {
 		t.Fatalf("TmuxRenamed not set")
 	}
 

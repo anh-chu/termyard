@@ -323,7 +323,7 @@ export function Terminal({ sessionName, hostId, backend, fullscreen, onToggleFul
     return () => { observer.disconnect(); if (fitTimer !== null) clearTimeout(fitTimer) }
   }, [fit])
 
-  // Touch scroll -> wheel events for tmux mouse mode
+  // Touch scroll -> wheel events for terminal mouse mode
   useEffect(() => {
     const container = containerRef.current
     if (!container) return

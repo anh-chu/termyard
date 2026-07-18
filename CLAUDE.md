@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Termyard is a web dashboard for monitoring and interacting with coding agents running in tmux sessions. Go backend + React/Vite frontend embedded in a single binary. The binary name is `termyard`.
+Termyard is a web dashboard for monitoring and interacting with coding agent sessions. Go backend + React/Vite frontend embedded in a single binary. The binary name is `termyard`.
 
 ## Quick Reference
 
@@ -21,7 +21,7 @@ Termyard is a web dashboard for monitoring and interacting with coding agents ru
 
 ## Architecture
 
-- **PTY-based streaming:** Spawns `tmux attach-session` in a PTY per browser connection
+- **PTY-based streaming:** Each session runs as an independent daemon process with its own PTY
 - **WebSocket bridge:** Each browser tab gets its own PTY-to-WebSocket bridge
 - **Embedded frontend:** Vite builds to `pkg/server/dist/`, Go embeds via `//go:embed`
 - **Multi-host:** Star topology with hub/peer model using ed25519 identity and mTLS
@@ -38,7 +38,7 @@ pkg/
   server/                # Chi HTTP server + embedded frontend; POST /api/tool-event
   ws/                    # WebSocket hub (broadcast) + PTY terminal bridge
   state/                 # Central state tree with diff-based broadcasting
-  tmux/                  # tmux client, PTY, control mode, discovery
+  model/                 # Session types, validation, prompt utilities
   peer/                  # Multi-host peer protocol, manager, PTY relay
   identity/              # ed25519 keypair, peer store, pairing
   toolevents/            # Agent detection, event tracking, silence monitor, prompt parser

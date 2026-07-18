@@ -171,7 +171,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   const splitTargetRef = useRef<{ key: string; direction: 'h' | 'v'; newFirst?: boolean } | null>(null)
   const activeKeyRef = useRef(activeKey)
   activeKeyRef.current = activeKey
-  // True while the server is rebuilding sessions after a tmux-server crash.
+  // True while the server is rebuilding sessions after a crash.
   // Pruning of missing sessions is suspended until recovery finishes, so a
   // not-yet-rebuilt session is never mistaken for a deliberate kill.
   const [recovering, setRecovering] = useState(false)
@@ -663,7 +663,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
 
   // After a WS (re)connect — server restart, network blip, peer rejoin — the
   // session list is still converging: peer/remote sessions and freshly
-  // discovered tmux sessions trickle in over the next few seconds. Keep grace
+  // discovered sessions trickle in over the next few seconds. Keep grace
   // only for local projection / filters; synced group/order now live on server.
   // ponytail: fixed 12s grace; switch to "missing across N stable snapshots" if peers reconnect slower.
   const [reconnectGrace, setReconnectGrace] = useState(true)
@@ -1072,7 +1072,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
       splitTargetRef.current = splitTarget
     }
     const { host } = key ? parseSessionKey(key) : { host: undefined }
-    // Inherit the target pane's cwd so drop-to-split opens "here", like tmux split-window.
+    // Inherit the target pane's cwd so drop-to-split opens "here".
     const sess = key ? sessionsRef.current.find(s => sessionKey(s) === key) : undefined
     const panes = sess?.windows.flatMap(w => w.panes) ?? []
     const cwd = panes.find(p => p.active)?.current_path || sess?.project_path || '~'

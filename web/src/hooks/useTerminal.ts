@@ -55,7 +55,7 @@ function execCommandCopy(text: string): boolean {
 
 // xterm.js includes trailing pad spaces up to the selection column on rows
 // shorter than the terminal width (e.g. triple-click line select), and hard
-// line breaks that tmux baked into the scrollback during a pane reflow can
+// line breaks baked into the scrollback during a pane reflow can
 // leave short trailing-space runs at wrap points. Strip trailing whitespace
 // from each line before it hits the clipboard.
 export function normalizeSelection(text: string): string {
@@ -285,7 +285,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
       rightClickSelectsWord: true,
       macOptionClickForcesSelection: true,
       // Send Option/Alt as Meta (ESC-prefix) so Alt+key bindings reach the
-      // terminal app (tmux/vim/readline) on macOS too. No-op on Linux (already
+      // terminal app (vim/readline) on macOS too. No-op on Linux (already
       // ESC-prefix by default).
       macOptionIsMeta: true,
     })
@@ -359,7 +359,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
 
     // Cmd/Ctrl+C: copy selection to clipboard if text is selected,
     // otherwise let it pass through as SIGINT.
-    // Cmd/Ctrl+B: force-send tmux prefix so browser shortcuts can't steal it.
+    // Cmd/Ctrl+B: force-send Ctrl+B so browser shortcuts can't steal it.
     // Also flush any pending clipboard on every keydown (user gesture context).
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown') {
@@ -455,7 +455,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     const onMouseDown = (e: MouseEvent) => {
       flushPendingClipboard()
       // Right-click on an existing xterm selection: keep it local (our menu),
-      // don't let xterm forward the button-2 mouse report to tmux. Capture
+      // don't let xterm forward the button-2 mouse report to the terminal. Capture
       // phase runs before xterm's own .xterm-screen listener.
       if (e.button === 2 && term.getSelection()) {
         e.preventDefault()
@@ -493,7 +493,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     }
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
-      // With tmux mouse mode on, plain drag goes to tmux; only a Shift+drag
+      // With terminal mouse mode on, plain drag goes to the terminal; only a Shift+drag
       // leaves an xterm-owned selection here. No selection -> pass through.
       const sel = term.getSelection()
       if (sel) setSelectionMenu({ x: e.clientX, y: e.clientY, text: normalizeSelection(sel) })
@@ -504,7 +504,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     window.addEventListener('keydown', onWindowKeyDownCapture, true)
     helperTextarea?.addEventListener('paste', onPaste)
 
-    // Suppress browser's native context menu so right-click passes through to tmux
+    // Suppress browser's native context menu so right-click passes through to the terminal
     container.addEventListener('contextmenu', onContextMenu)
     listenerCleanupRef.current = () => {
       container.removeEventListener('mousedown', onMouseDown, true)
@@ -899,7 +899,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
           fitAddonRef.current.fit()
           // ponytail: repaint from buffer clears ghost rows left by the
           // CSS-stretched canvas during a debounced/no-net-change resize
-          // (tmux only redraws on a net SIGWINCH, so xterm must self-clear).
+          // (terminal only redraws on a net SIGWINCH, so xterm must self-clear).
           term.refresh(0, term.rows - 1)
         }
       } catch {}

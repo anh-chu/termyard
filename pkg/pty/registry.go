@@ -360,7 +360,7 @@ func (r *Registry) Capture(name string) (string, error) {
 	}
 
 	// Strip ANSI escape sequences and control chars so callers get clean text
-	// (like tmux capture-pane).
+	// (like capture-pane).
 	clean := ansiRe.ReplaceAllString(string(payload), "")
 	clean = ctrlRe.ReplaceAllString(clean, "")
 	return clean, nil

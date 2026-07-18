@@ -46,7 +46,7 @@ export function Login({ mode, error, onSubmit }: LoginProps) {
           <h1 className="text-2xl font-bold text-ink tracking-tight uppercase tracking-[0.2em]">Termyard</h1>
           <div className="flex flex-col gap-1 mt-4">
             <p className="text-xs font-bold text-mute/60 uppercase tracking-widest leading-relaxed">
-              All tmux sessions
+              All sessions
             </p>
             <p className="text-xs font-bold text-mute/60 uppercase tracking-widest leading-relaxed">
               All AI agents

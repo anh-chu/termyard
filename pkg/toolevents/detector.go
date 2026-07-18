@@ -8,7 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Detector periodically scans tmux panes for known agent processes by
+// Detector periodically scans session panes for known agent processes by
 // inspecting the process tree. When an agent is detected in a pane that
 // doesn't already have a tracked event, a synthetic "active" event is
 // recorded. This provides passive agent detection for tools that may not

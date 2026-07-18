@@ -294,7 +294,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	}
 	if schedulerStore != nil {
 		runner := scheduler.NewRunner(schedulerStore, stateMgr, peerMgr, func(req scheduler.CreateSessionReq) error {
-			// Remote sessions still go through peer/tmux path.
+			// Remote sessions still go through peer path.
 			if req.Host != "" && peerMgr != nil && !peerMgr.IsLocal(req.Host) {
 				return server.CreateSession(opts, req)
 			}

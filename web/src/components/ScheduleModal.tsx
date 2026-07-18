@@ -274,7 +274,7 @@ export function ScheduleModal({ onClose }: Props) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-hairline">
           <div>
             <h2 className="text-sm font-bold text-ink tracking-tight">Schedules</h2>
-            <p className="text-xs text-mute mt-0.5">Cron runs spawn fresh tmux sessions</p>
+            <p className="text-xs text-mute mt-0.5">Cron runs spawn fresh sessions</p>
           </div>
           <button
             onClick={onClose}

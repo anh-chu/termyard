@@ -31,7 +31,7 @@ func main() {
 
 		app := &cli.Command{
 			Name:    common.AppVersion.Name,
-			Usage:   "web dashboard for monitoring AI coding agents running in tmux sessions",
+			Usage:   "web dashboard for monitoring AI coding agents",
 			Version: common.AppVersion.Summary,
 			Authors: []any{
 				"Erik Kristensen <erik@erikkristensen.com>",

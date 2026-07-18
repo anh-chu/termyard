@@ -4,7 +4,7 @@
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
-// Sets the friendly display label only; the underlying tmux session name is
+// Sets the friendly display label only; the underlying session name is
 // left untouched (renaming it would break session keys, attachment, and agent
 // hooks). clear=false marks it user-set so the AI namer never overwrites it.
 // The new label arrives via the websocket state update.

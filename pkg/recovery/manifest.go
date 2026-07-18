@@ -13,7 +13,7 @@ import (
 
 const CurrentVersion = 1
 
-// PaneSnapshot is manifest view of one tmux pane.
+// PaneSnapshot is manifest view of one pane.
 type PaneSnapshot struct {
 	ID             string `json:"id"`
 	Index          int    `json:"index"`
@@ -24,7 +24,7 @@ type PaneSnapshot struct {
 	AgentType      string `json:"agent_type,omitempty"`
 }
 
-// WindowSnapshot is manifest view of one tmux window.
+// WindowSnapshot is manifest view of one window.
 type WindowSnapshot struct {
 	Index  int            `json:"index"`
 	Name   string         `json:"name"`
@@ -33,7 +33,7 @@ type WindowSnapshot struct {
 	Panes  []PaneSnapshot `json:"panes"`
 }
 
-// SessionSnapshot is manifest view of one tmux session.
+// SessionSnapshot is manifest view of one session.
 type SessionSnapshot struct {
 	Name           string           `json:"name"`
 	ProjectPath    string           `json:"project_path,omitempty"`
@@ -87,7 +87,7 @@ func Load() (*Manifest, error) {
 //
 // Call this on an intentional kill so the crash-recovery rebuilder cannot
 // resurrect it. The periodic Snapshotter would eventually drop it (~8s), but a
-// faster recovery probe (or a last-session kill that takes the tmux server down
+// faster recovery probe (or a last-session kill that takes the server down
 // with it) can rebuild from a stale manifest before that. Removing it here
 // closes that race.
 func ForgetSession(name string) error {

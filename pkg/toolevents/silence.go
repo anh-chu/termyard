@@ -30,8 +30,8 @@ const staleWaitingGrace = 8 * time.Second
 // monitoredPane tracks state for a single monitored pane
 type monitoredPane struct {
 	tool          Tool
-	session       string    // tmux session name (captured at sync time)
-	window        int       // tmux window index (captured at sync time)
+	session       string    // session name (captured at sync time)
+	window        int       // window index (captured at sync time)
 	lastOutput    time.Time // last time we saw output for this pane
 	prompted      bool      // true if we already recorded a waiting event
 	silenceChecks int       // how many times we've checked since going silent

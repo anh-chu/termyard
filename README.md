@@ -1,14 +1,14 @@
 # Termyard
 
-Every tmux session and every coding agent, in one browser tab.
+Every coding agent session, in one browser tab.
 
 Know the moment an agent needs you.
 
 ---
 
-You run coding agents in tmux. One window has Claude churning through a refactor, another has Codex waiting on a tool approval you forgot about, a third finished ten minutes ago and you never noticed. The work is spread across panes, windows, and sometimes machines, and you find out what each agent is doing by switching to it and looking.
+You run coding agents. One session has Claude churning through a refactor, another has Codex waiting on a tool approval you forgot about, a third finished ten minutes ago and you never noticed. The work is spread across sessions and sometimes machines, and you find out what each agent is doing by switching to it and looking.
 
-Termyard parks all of that in one place. It renders your live tmux sessions in the browser and watches the agents running inside them, so a glance tells you which ones are working, which are stuck waiting, and which are done. When one needs your attention, it tells you, even if the tab is in the background.
+Termyard parks all of that in one place. It renders your live sessions in the browser and watches the agents running inside them, so a glance tells you which ones are working, which are stuck waiting, and which are done. When one needs your attention, it tells you, even if the tab is in the background.
 
 <!-- TODO: drop a dashboard screenshot or GIF here once captured, e.g. ![Termyard dashboard](docs/brand/dashboard.png) -->
 
@@ -19,7 +19,7 @@ Termyard parks all of that in one place. It renders your live tmux sessions in t
 - **Push notifications.** Get a browser or desktop alert when an agent needs you, including when the tab is closed or you are signed out.
 - **Multi-machine.** Connect any number of Termyard nodes through the dashboard. Sessions on every machine show up in one view.
 - **The real terminal, in the browser.** PTY-backed xterm.js rendering means you get the exact terminal: borders, splits, colors, scrollback. Type, scroll, and resize like you are local.
-- **Live session discovery.** Sessions, windows, and panes update in real time through tmux control mode.
+- **Live session discovery.** Sessions update in real time through daemon process scanning.
 - **Quick switcher.** `Ctrl+K` to jump between sessions and windows. Your hands never leave the keyboard.
 - **One binary.** Go backend with the React frontend embedded. No separate processes, no Node runtime in production.
 
@@ -55,8 +55,6 @@ make build
 ## Quickstart
 
 ### 1. Start the server
-
-Make sure [tmux](https://github.com/tmux/tmux) is running with at least one session, then:
 
 ```bash
 termyard server
@@ -114,24 +112,21 @@ See [docs/multi-host.md](docs/multi-host.md) for reachability tips (NAT, Tailsca
 ## How it works
 
 ```
-Browser  <──WebSocket──>  Go Server  <──PTY──>  tmux attach-session
+Browser  <──WebSocket──>  Go Server  <──Unix socket──>  Session Daemon (PTY)
                               │
-                              ├── Control mode (real-time state changes)
-                              ├── Session discovery (polling fallback)
+                              ├── Session discovery (daemon registry scan)
                               ├── Tool event tracker (agent status)
                               └── Unix socket (local CLI notifications)
 ```
 
-Each browser tab gets its own PTY process running `tmux attach-session`. tmux does all the rendering natively, and Termyard bridges the PTY output to xterm.js over a WebSocket. Switching windows runs tmux `select-window`, and tmux re-renders through the existing connection.
-
-State changes (new sessions, window renames, pane activity) come in over tmux control mode and broadcast to every connected client on a separate WebSocket.
+Each session runs as an independent daemon process with its own PTY. Daemon processes are fully detached (`Setsid`) and survive server crashes, restarts, and OOM events. The server discovers sessions by scanning Unix sockets and connects to them on demand. Multiple browser tabs can attach to the same session simultaneously, with output replayed from a 1MB ring buffer on reconnect.
 
 ### Session status
 
-Sessions show as **active** or **idle**, driven by tmux's `pane_current_command`:
+Sessions show as **active** or **idle**, driven by the foreground process:
 
 - **Active**: at least one pane has a foreground process that is not a shell, for example `vim`, `claude`, `node`, `python`, or `go build`.
-- **Idle**: every pane sits at a shell prompt (`bash`, `zsh`, `fish`, `sh`, `dash`, `ksh`, `csh`, `tcsh`, `tmux`, `login`).
+- **Idle**: the session sits at a shell prompt (`bash`, `zsh`, `fish`, `sh`, `dash`, `ksh`, `csh`, `tcsh`, `login`).
 
 ### Alerts
 
@@ -152,21 +147,16 @@ Alerts are live server state. They always reflect the current status and survive
 | `TERMYARD_PORT`               | `7654`                  | HTTP server port                   |
 | `TERMYARD_SOCKET`             | auto                    | Unix socket path for local CLI     |
 | `TERMYARD_DISCOVERY_INTERVAL` | `2`                     | Session polling interval (seconds) |
-| `TERMYARD_NO_CONTROL_MODE`    | `false`                 | Disable tmux control mode          |
 | `TERMYARD_URL`                | `http://localhost:7654` | Server URL for notify/agent-setup  |
 | `TERMYARD_NO_AUTH`            | `false`                 | Disable authentication             |
-| `TERMYARD_NO_RECOVERY`        | `false`                 | Disable tmux crash recovery loops  |
 
 ### CLI flags
 
 ```
 termyard server [flags]
   -p, --port int                  HTTP server port (default 7654)
-      --discovery-interval int    Session discovery interval in seconds (default 2)
-      --no-control-mode           Disable tmux control mode (use polling only)
       --socket string             Unix socket path (auto-detected if omitted)
       --no-auth                   Disable authentication (not recommended for remote access)
-      --no-recovery               Disable tmux crash recovery loops
 ```
 
 Multi-host peering is configured in the dashboard (**Settings → Machines**). Peer records live in `~/.config/termyard/peers.json` and are managed entirely by the UI. There are no `--hub` or `--tls-*` flags and no `termyard pair` or `termyard peers` commands. See [docs/multi-host.md](docs/multi-host.md).
@@ -204,7 +194,7 @@ Press `Ctrl+/` (or `Cmd+/` on macOS) for the full list, or click the `?` in the 
 
 ### Manual notifications
 
-Send status updates from scripts or the command line. Session, window, and pane are auto-detected when run inside tmux:
+Send status updates from scripts or the command line. Session and pane are auto-detected from `TERMYARD_SESSION`/`TERMYARD_PANE` environment variables:
 
 ```bash
 termyard notify -t claude -s waiting -m "Needs approval"
@@ -212,11 +202,11 @@ termyard notify -t codex -s active
 termyard notify -t claude -s completed
 ```
 
-More flags carry session context for hooks: `--user-prompt` (the user's first message, set once, becomes the task label), `--agent-message` (the agent's latest reply), `--stdin` and `--event-data` (read a hook payload as JSON), `--agent-session-id`, plus `--session` / `--window` / `--pane` to override tmux auto-detection.
+More flags carry session context for hooks: `--user-prompt` (the user's first message, set once, becomes the task label), `--agent-message` (the agent's latest reply), `--stdin` and `--event-data` (read a hook payload as JSON), `--agent-session-id`, plus `--session` / `--window` / `--pane` to override auto-detection.
 
 ### Copying text from the terminal
 
-The terminal captures mouse events, so a normal click and drag selects text inside tmux instead of copying. Hold a modifier while selecting to copy to the system clipboard:
+The terminal captures mouse events, so a normal click and drag selects text inside the terminal instead of copying. Hold a modifier while selecting to copy to the system clipboard:
 
 | Platform         | Select to copy                                                                                                              |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -224,7 +214,7 @@ The terminal captures mouse events, so a normal click and drag selects text insi
 | **Linux**        | Hold `Shift` and drag to select, then `Ctrl+Shift+C` to copy                                                                |
 | **iOS (Safari)** | Touch-select does not work in the terminal. Connect a mouse or trackpad, use `Option`+drag, then copy from the context menu |
 
-This is standard xterm.js behavior. The modifier tells the browser to handle the selection instead of sending mouse events to tmux.
+This is standard xterm.js behavior. The modifier tells the browser to handle the selection instead of sending mouse events to the terminal.
 
 ### Lock and sign out
 
@@ -257,7 +247,7 @@ Open **Settings → Machines**, find the machine, and click **Forget**. The forg
 
 - **Multi-user.** Termyard is single-user. One person, one dashboard. No accounts, roles, or shared access controls.
 - **Agent orchestration.** Termyard does not start, stop, or control your agents. It watches and reports. You run agents however you like.
-- **tmux management.** Termyard does not configure your tmux. Your `.tmux.conf`, layouts, and workflows stay yours.
+- **Session management.** Termyard manages session daemon processes. You control what runs inside them.
 
 ## Development
 
@@ -265,7 +255,7 @@ Open **Settings → Machines**, find the machine, and click **Forget**. The forg
 # Frontend dev server (hot reload)
 cd web && npm install && npm run dev
 
-# Go server (watches for tmux changes)
+# Go server
 go run . server
 ```
 

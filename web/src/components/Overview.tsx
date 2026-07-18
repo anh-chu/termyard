@@ -481,7 +481,7 @@ export function Overview({ sessions, hosts, hiddenSet, backgroundSet, scheduleID
       {foregroundSessions.length === 0 && (
         <div className="mb-10">
           <div className="text-mute text-[13px] font-medium mb-4 ml-1">
-            {sessions.length === 0 ? 'No tmux sessions found. Start a tmux session to get started.' : 'All sessions are hidden or backgrounded.'}
+            {sessions.length === 0 ? 'No sessions found. Create a session to get started.' : 'All sessions are hidden or backgrounded.'}
             {hiddenCount > 0 && <span className="text-mute/50"> {' '}({hiddenCount} hidden/backgrounded)</span>}
           </div>
           <div className="grid grid-cols-3 gap-2 max-w-3xl">

@@ -25,7 +25,7 @@ type rebuildClient interface {
 	SetScheduleID(name, scheduleID string) error
 }
 
-// Rebuilder recreates sessions from manifest after tmux loss.
+// Rebuilder recreates sessions from manifest after data loss.
 type Rebuilder struct {
 	client   rebuildClient
 	stateMgr *state.Manager
@@ -44,7 +44,7 @@ func NewRebuilder(client rebuildClient, sm *state.Manager, attrs *sessionattrs.S
 
 func (r *Rebuilder) Rebuild(ctx context.Context) error {
 	// Daemon sessions survive server crashes on their own.
-	// No tmux rebuild needed.
+	// No rebuild needed.
 	_ = ctx
 	return nil
 }
@@ -68,7 +68,7 @@ func (r *Rebuilder) rebuildSession(session SessionSnapshot) error {
 		r.stateMgr.SetSessionAgentType(session.Name, session.AgentType)
 	}
 	// Restore schedule ownership so the rebuilt session rejoins its schedule
-	// group and stays subject to the concurrency cap. The tmux user-option is the
+	// group and stays subject to the concurrency cap. The user-option is the
 	// durable source of truth; the attr write is the one-release fallback.
 	if session.ScheduleID != "" {
 		if err := r.client.SetScheduleID(session.Name, session.ScheduleID); err != nil {

@@ -152,7 +152,7 @@ func (pc *PeerConnection) Close() {
 	close(pc.done)
 }
 
-// Manager aggregates state from local tmux and remote peers
+// Manager aggregates state from local sessions and remote peers
 type Manager struct {
 	mu    sync.RWMutex
 	hosts map[string]*HostState // keyed by peer fingerprint
@@ -368,7 +368,7 @@ func (m *Manager) PeerStore() *identity.PeerStore {
 	return m.peerStore
 }
 
-// LocalManager returns the local tmux state manager.
+// LocalManager returns the local state manager.
 func (m *Manager) LocalManager() *state.Manager {
 	return m.localMgr
 }

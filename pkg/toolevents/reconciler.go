@@ -7,7 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// PaneState describes the current state of a tmux pane for reconciliation
+// PaneState describes the current state of a pane for reconciliation
 type PaneState struct {
 	Exists         bool
 	CurrentCommand string
@@ -18,7 +18,7 @@ type PaneState struct {
 // If the pane does not exist, it should return PaneState{Exists: false}.
 type PaneLookupFunc func(paneID string) PaneState
 
-// PaneInfo contains identifying information for a tmux pane, used by the
+// PaneInfo contains identifying information for a pane, used by the
 // agent detector to scan panes for running agents.
 type PaneInfo struct {
 	PaneID  string
@@ -30,7 +30,7 @@ type PaneInfo struct {
 // PaneListFunc returns all currently known panes.
 type PaneListFunc func() []PaneInfo
 
-// Reconciler periodically checks tracked tool events against actual tmux pane
+// Reconciler periodically checks tracked tool events against actual pane
 // state, clearing events whose agent process is no longer running.
 type Reconciler struct {
 	tracker  *Tracker
