@@ -1,5 +1,34 @@
 # Changelog
 
+## [4.0.0] — Breaking Changes
+
+### ⚠ BREAKING CHANGES
+
+- **backend:** tmux is no longer required. The daemon PTY backend is now the only session backend. All sessions run as independent daemon processes that survive server crashes, restarts, and OOM events.
+
+### Features
+
+- **daemon:** daemon is now the default and only backend for all sessions
+- **daemon:** sessions survive server crashes — each session runs as an independent process with its own process group (`Setsid`)
+- **daemon:** automatic session rediscovery on server restart via socket directory scanning
+- **daemon:** ring buffer replay — reconnecting clients receive the last 1MB of terminal output
+
+### Session Reliability
+
+- **registry:** verify daemon process is alive (PID check via `/proc`) before removing stale sockets — prevents accidentally orphaning running sessions
+- **registry:** increase liveness failure threshold from 3 to 5 consecutive failures for more tolerance under load
+- **registry:** mass-removal protection — if all sessions appear stale simultaneously, skip cleanup (likely transient system event)
+- **state:** mass-removal guard — refuse to remove >50% of tracked sessions in one update cycle
+- **state:** refuse to clear all sessions when discovery returns empty (likely transient failure)
+- **daemon:** panic recovery in all daemon goroutines (`pumpPTY`, `handleClient`, accept loop) — a panic in one client connection doesn't crash the daemon
+- **daemon:** cap DaemonSession client buffer at 4MB to prevent server OOM from output flooding
+
+### Removed
+
+- **tmux:** removed tmux dependency entirely (2,794 lines deleted)
+- **tmux:** removed tmux control mode, session creation, and all tmux-specific code paths
+- **recovery:** removed tmux session rebuilder (no longer needed — daemon sessions persist independently)
+
 ## [2.2.2](https://github.com/anh-chu/termyard/compare/v2.2.1...v2.2.2)
 
 ### Bug Fixes
