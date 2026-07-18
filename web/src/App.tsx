@@ -1021,16 +1021,23 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
         body: JSON.stringify({ name, path: '', command: '', backend: 'daemon' }),
       })
       if (res.ok) {
-        // Refresh first so session data (with backend field) is available
+        // Session key must include the local host ID (if multi-host is active)
+        // so it matches the key the API returns. Without this, the pruning
+        // effect clears singleView because the key doesn't match.
+        const sk = localHostId ? `${localHostId}/${name}` : name
+        // Guard against prune effect clearing singleView before
+        // the session appears in the sessions list.
+        pendingSessionRef.current = sk
+        // Refresh so session data (with backend field) is available
         // before Terminal mounts and connects to the WebSocket.
         await refresh()
-        selectSession(name)
+        selectSession(sk)
         setTimeout(() => refocusTerminal(), 300)
       }
     } catch (err) {
       console.error('Failed to create daemon session:', err)
     }
-  }, [selectSession, refresh, refocusTerminal])
+  }, [selectSession, refresh, refocusTerminal, localHostId])
 
 
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,14 +30,16 @@ type SessionInfo struct {
 
 // Registry manages session daemon lifecycle: create, list, kill, capture.
 type Registry struct {
-	dir string // socket directory
+	dir       string // socket directory
+	failMu    sync.Mutex
+	failCount map[string]int // consecutive liveness failures per session
 }
 
 // NewRegistry creates a session registry using the given socket directory.
 // The directory is created with 0700 if it does not exist.
 func NewRegistry(dir string) *Registry {
 	os.MkdirAll(dir, 0700)
-	return &Registry{dir: dir}
+	return &Registry{dir: dir, failCount: make(map[string]int)}
 }
 
 // Dir returns the registry's socket directory.
@@ -142,14 +145,31 @@ func (r *Registry) List() []SessionInfo {
 		name := sockPath[:len(sockPath)-len(".sock")]
 		name = filepath.Base(name)
 
-		// Check liveness.
-		conn, err := net.DialTimeout("unix", sockPath, 100*time.Millisecond)
+		// Check liveness with generous timeout; under load a daemon
+		// may be slow to accept. Require 3 consecutive failures before
+		// declaring the socket dead and cleaning up.
+		conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 		if err != nil {
-			// Dead socket — clean up.
-			r.removeStale(name)
+			r.failMu.Lock()
+			r.failCount[name]++
+			fails := r.failCount[name]
+			r.failMu.Unlock()
+			if fails >= 3 {
+				r.removeStale(name)
+				r.failMu.Lock()
+				delete(r.failCount, name)
+				r.failMu.Unlock()
+			} else {
+				logrus.WithFields(logrus.Fields{"name": name, "fails": fails}).Debug("daemon liveness check failed, will retry")
+			}
 			continue
 		}
 		conn.Close()
+
+		// Reset failure counter on successful connect.
+		r.failMu.Lock()
+		delete(r.failCount, name)
+		r.failMu.Unlock()
 
 		info := SessionInfo{
 			ID:     name,
