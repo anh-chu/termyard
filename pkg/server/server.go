@@ -92,6 +92,7 @@ type Options struct {
 	SchedulerStore   *scheduler.Store
 	SchedulerRunner  *scheduler.Runner
 	DaemonReg        *pty.Registry
+	RefreshSessions  func() // triggers merged tmux+daemon state refresh
 	Hub              *ws.Hub
 }
 
@@ -1115,10 +1116,9 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 						return
 					}
 					// Trigger state refresh so WebSocket clients get notified.
-					if opts.StateMgr != nil {
-						if fresh, err := opts.Client.ListSessions(); err == nil {
-							opts.StateMgr.UpdateSessions(fresh)
-						}
+					// Must merge daemon + tmux sessions, same as discovery.
+					if opts.StateMgr != nil && opts.RefreshSessions != nil {
+						opts.RefreshSessions()
 					}
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(map[string]string{"name": req.Name})

@@ -327,6 +327,11 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		PortForwardStore: portforward.NewStore(),
 		SchedulerStore:   schedulerStore,
 		DaemonReg:        daemonReg,
+		RefreshSessions: func() {
+			if fresh, err := client.ListSessions(); err == nil {
+				mergedRefresh(fresh)
+			}
+		},
 		OnPrefsChanged:   applyNamerFromPrefs,
 	}
 	if schedulerStore != nil {
