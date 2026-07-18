@@ -48,6 +48,9 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	// mergedRefresh combines tmux sessions with daemon sessions before updating state.
 	mergedRefresh := func(tmuxSessions []*tmux.Session) {
 		daemonInfos := daemonReg.List()
+		if len(daemonInfos) > 0 {
+			logrus.WithField("count", len(daemonInfos)).Info("mergedRefresh: found daemon sessions")
+		}
 		for _, d := range daemonInfos {
 			var created time.Time
 			if t, err := time.Parse(time.RFC3339, d.Created); err == nil {
@@ -328,9 +331,12 @@ func Execute(ctx context.Context, c *cli.Command) error {
 		SchedulerStore:   schedulerStore,
 		DaemonReg:        daemonReg,
 		RefreshSessions: func() {
-			if fresh, err := client.ListSessions(); err == nil {
-				mergedRefresh(fresh)
+			fresh, err := client.ListSessions()
+			if err != nil {
+				logrus.WithError(err).Debug("tmux list-sessions failed during refresh")
+				fresh = nil // still merge daemon sessions
 			}
+			mergedRefresh(fresh)
 		},
 		OnPrefsChanged:   applyNamerFromPrefs,
 	}

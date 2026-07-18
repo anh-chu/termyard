@@ -1058,9 +1058,21 @@ func (m *Manager) GetSessions() []*tmux.Session {
 	}
 
 	m.mu.Lock()
-	m.sessions = make(map[string]*tmux.Session, len(sessions))
+	// Preserve daemon sessions from the existing state (they aren't in tmux).
+	var daemonSessions []*tmux.Session
+	for _, s := range m.sessions {
+		if s.Backend == "daemon" {
+			daemonSessions = append(daemonSessions, s)
+		}
+	}
+
+	m.sessions = make(map[string]*tmux.Session, len(sessions)+len(daemonSessions))
 	for _, s := range sessions {
 		m.sessions[s.Name] = s
+	}
+	for _, s := range daemonSessions {
+		m.sessions[s.Name] = s
+		sessions = append(sessions, s)
 	}
 	m.mu.Unlock()
 

@@ -95,9 +95,16 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Open /dev/null explicitly so the daemon doesn't inherit parent's
+	// fds (which may be pipes that close when the server restarts).
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("open /dev/null: %w", err)
+	}
+	defer devNull.Close()
+	cmd.Stdin = devNull
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start daemon process: %w", err)
