@@ -648,6 +648,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
         totalBytes += evt.data.byteLength
         const head = new Uint8Array(evt.data.slice(0, 48))
         const sample = Array.from(head).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0')).join('')
+        const isReplay = !sawFirstByte
         if (!sawFirstByte) {
           sawFirstByte = true
         }
@@ -658,6 +659,10 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
         // binary frame, before term.write.  An older async callback must
         // never erase a prediction created by a newer keystroke.
         predictiveEchoRef.current?.clear()
+
+        // Scroll to bottom after replay data finishes writing so the user
+        // isn't stranded mid-buffer when revisiting a session.
+        const scrollAfterWrite = isReplay ? () => term.scrollToBottom() : undefined
 
         // Phase 0 telemetry: measure input-to-output and input-to-paint
         if (pendingInputTs !== null) {
@@ -672,9 +677,10 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
               latencySamples.shift()
             }
             writePending = false
+            scrollAfterWrite?.()
           })
         } else {
-          term.write(data)
+          term.write(data, scrollAfterWrite)
         }
         const now = Date.now()
         if (now - lastSummary > 500) {
@@ -913,6 +919,9 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
           // CSS-stretched canvas during a debounced/no-net-change resize
           // (terminal only redraws on a net SIGWINCH, so xterm must self-clear).
           term.refresh(0, term.rows - 1)
+          // Reflow during resize can displace the viewport scroll position.
+          // Snap back to the bottom so the user isn't stranded mid-buffer.
+          term.scrollToBottom()
         }
       } catch {}
     }
