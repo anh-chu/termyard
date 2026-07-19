@@ -41,29 +41,29 @@ import (
 	"github.com/anh-chu/termyard/pkg/git"
 	"github.com/anh-chu/termyard/pkg/groupsync"
 	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/namer"
 	"github.com/anh-chu/termyard/pkg/peer"
 	"github.com/anh-chu/termyard/pkg/portforward"
-	"github.com/anh-chu/termyard/pkg/pty"
 	"github.com/anh-chu/termyard/pkg/preferences"
+	"github.com/anh-chu/termyard/pkg/pty"
 	"github.com/anh-chu/termyard/pkg/scheduler"
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
 	"github.com/anh-chu/termyard/pkg/sessionorder"
 	"github.com/anh-chu/termyard/pkg/socket"
 	"github.com/anh-chu/termyard/pkg/state"
 	"github.com/anh-chu/termyard/pkg/stats"
-	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 	"github.com/anh-chu/termyard/pkg/webpush"
 	"github.com/anh-chu/termyard/pkg/ws"
 )
 
 type Options struct {
-	Port             int
-	SocketPath       string
-	TLSCert          string
-	TLSKey           string
-	TLSAuto          bool
+	Port       int
+	SocketPath string
+	TLSCert    string
+	TLSKey     string
+	TLSAuto    bool
 
 	StateMgr         *state.Manager
 	Tracker          *toolevents.Tracker
@@ -92,7 +92,7 @@ type Options struct {
 	SchedulerRunner  *scheduler.Runner
 	DaemonReg        *pty.Registry
 	CWDResolver      toolevents.CWDResolver
-	RefreshSessions  func() // triggers daemon state refresh
+	RefreshSessions  func()              // triggers daemon state refresh
 	OnDaemonOutput   func(paneID string) // called on PTY output for daemon sessions (silence monitor)
 	Hub              *ws.Hub
 }
@@ -1655,13 +1655,13 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				json.NewEncoder(w).Encode(map[string]any{"artifacts": artifacts})
 			})
 
-		// Dedicated file upload — streams a browser-supplied file into
-		// private temp storage on the session's host and returns the
-		// shell-quoted path for PTY injection. No product size cap.
-		// Route: POST /api/upload?session=<name>&host=<id>&filename=<name>
-		r.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
-			handleUpload(w, r, opts)
-		})
+			// Dedicated file upload — streams a browser-supplied file into
+			// private temp storage on the session's host and returns the
+			// shell-quoted path for PTY injection. No product size cap.
+			// Route: POST /api/upload?session=<name>&host=<id>&filename=<name>
+			r.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
+				handleUpload(w, r, opts)
+			})
 
 			// Authoritative set of in-progress hook-based agent turns. The frontend
 			// reconciles its "working" badge against this on each periodic refresh so
@@ -3081,6 +3081,15 @@ func handleDaemonSession(w http.ResponseWriter, r *http.Request, opts *Options) 
 		onOutput = func() { opts.OnDaemonOutput(paneID) }
 	}
 	ws.BridgeDirectPTY(conn, sess, name, opts.ActivityTracker, log, onOutput)
+
+	// The bridge returned: either this tab disconnected (daemon still alive)
+	// or the daemon/shell exited (Ctrl+D, kill, crash). Reconcile discovery now
+	// instead of waiting up to 2s for the ticker, so a dead session disappears
+	// from the sidebar and its terminal view unmounts promptly. A live daemon
+	// simply stays in the list, so this is a no-op for tab disconnects.
+	if opts.RefreshSessions != nil {
+		opts.RefreshSessions()
+	}
 }
 
 func ensureUniqueSessionName(name string, existing []string) string {

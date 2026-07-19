@@ -199,6 +199,19 @@ func RunDaemon(cfg DaemonConfig) error {
 		clients:        make(map[net.Conn]chan []byte),
 		shellDone:      make(chan struct{}),
 	}
+
+	// Handle SIGTERM from `systemctl --user stop <scope>` (KillMode=
+	// control-group sends SIGTERM to the whole cgroup). Without this the
+	// daemon ignores it and gets SIGKILLed after the 90s stop timeout,
+	// leaving a lingering `failed` scope. shutdown() is idempotent.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		log.Debug("received SIGTERM, shutting down")
+		d.shutdown()
+	}()
+
 	return d.run()
 }
 

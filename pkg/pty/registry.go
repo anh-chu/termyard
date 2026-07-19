@@ -249,6 +249,17 @@ func (r *Registry) List() []SessionInfo {
 
 		conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 		if err != nil {
+			// If the daemon process is provably gone, remove now instead of
+			// waiting out the 5-tick (~10s) grace window. This matters when a
+			// crash/SIGKILL leaves the .sock file behind: without this, the
+			// session lingers unreachable and the frontend shows its
+			// "Disconnected — Reconnecting" overlay for ~10s. A live-but-
+			// unreachable daemon still falls through to the grace below.
+			if pid := r.readDaemonPID(name); pid > 0 && !processAlive(pid) {
+				stale = append(stale, removal{name: name, reason: "daemon process dead"})
+				continue
+			}
+
 			r.failMu.Lock()
 			r.failCount[name]++
 			fails := r.failCount[name]
