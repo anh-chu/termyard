@@ -514,12 +514,33 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
       container.removeEventListener('contextmenu', onContextMenu)
     }
 
-    // Fit terminal to container — retry a few times to handle layout settling
+    // Fit terminal to container — retry a few times to handle layout settling.
+    // Uses the same scroll-preserving logic as the exported fit() callback
+    // because font-load and layout-settle refits fire AFTER replay data has
+    // populated the scrollback buffer, and a raw fitAddon.fit() would
+    // displace the viewport.
     const doFit = () => {
       try {
         if (container.clientWidth > 0 && container.clientHeight > 0) {
+          const buf = term.buffer.active
+          const distFromBottom = Math.max(0, buf.baseY - buf.viewportY)
+          const wasAtBottom = distFromBottom === 0
+
           neutralizeXtermScrollbarFallback(term)
           fitAddon.fit()
+
+          // Restore scroll (same as the exported fit() callback)
+          const restoreScroll = () => {
+            try {
+              if (wasAtBottom) { term.scrollToBottom(); return }
+              const after = term.buffer.active
+              if (distFromBottom > after.baseY) { term.scrollToBottom(); return }
+              const delta = (after.baseY - distFromBottom) - after.viewportY
+              if (delta !== 0) term.scrollLines(delta)
+            } catch {}
+          }
+          restoreScroll()
+          requestAnimationFrame(restoreScroll)
         }
       } catch {}
     }
