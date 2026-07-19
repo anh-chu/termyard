@@ -908,25 +908,31 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     }
   }, [])
 
+  // Pending scroll-restore rAF so we can cancel on rapid successive fits.
+  const scrollRestoreRaf = useRef<number | null>(null)
+
   const fit = useCallback(() => {
     const term = termRef.current
     if (fitAddonRef.current && containerRef.current && term) {
       if (containerRef.current.clientWidth <= 0 || containerRef.current.clientHeight <= 0) return
 
-      // Snapshot distance-from-bottom before reflow. fit() calls
-      // terminal.resize() which reflows the buffer when columns change —
-      // lines wrap/unwrap and total row count shifts. xterm.js does NOT
-      // preserve the viewport's distance from the bottom across that
-      // reflow, so the scroll position visibly jumps.
+      // Cancel any pending scroll restore from a previous fit — a new
+      // reflow invalidates the old anchor.
+      if (scrollRestoreRaf.current !== null) {
+        cancelAnimationFrame(scrollRestoreRaf.current)
+        scrollRestoreRaf.current = null
+      }
+
+      // Snapshot distance-from-bottom before reflow (localterm pattern).
+      // fit() calls terminal.resize() which reflows the buffer when
+      // columns change — lines wrap/unwrap, total row count shifts.
+      // xterm.js does NOT preserve the viewport's distance from the
+      // bottom, and its viewport update fires ASYNCHRONOUSLY after fit()
+      // returns, so a synchronous scrollLines() gets overridden.
       //
-      // Before v4, tmux managed scrollback server-side and sent fresh
-      // screen content on resize. Now xterm.js holds the full 50k-line
-      // buffer, so the displacement is massive.
-      //
-      // Strategy (from localterm): snapshot distance-from-bottom, run
-      // fit(), then use scrollLines(delta) to compensate for wherever
-      // xterm.js left the viewport. scrollLines is relative, so it
-      // handles the post-reflow viewportY correctly.
+      // Two-phase restore:
+      //  1. Synchronous restore right after fit() — handles most cases
+      //  2. rAF restore — catches xterm.js async viewport updates
       const beforeBuf = term.buffer.active
       const distFromBottom = Math.max(0, beforeBuf.baseY - beforeBuf.viewportY)
       const wasAtBottom = distFromBottom === 0
@@ -938,26 +944,36 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
         return
       }
 
-      try {
-        // ponytail: repaint from buffer clears ghost rows left by the
-        // CSS-stretched canvas during a debounced/no-net-change resize.
-        term.refresh(0, term.rows - 1)
+      // ponytail: repaint from buffer clears ghost rows left by the
+      // CSS-stretched canvas during a debounced/no-net-change resize.
+      try { term.refresh(0, term.rows - 1) } catch {}
 
-        if (wasAtBottom) {
-          term.scrollToBottom()
-        } else {
+      // Phase 1: synchronous restore
+      const restoreScroll = () => {
+        try {
+          if (wasAtBottom) {
+            term.scrollToBottom()
+            return
+          }
           const afterBuf = term.buffer.active
-          // If reflow shrank buffer below saved distance, snap to bottom
-          // rather than jumping to the very top of scrollback.
           if (distFromBottom > afterBuf.baseY) {
             term.scrollToBottom()
-          } else {
-            const targetViewportY = afterBuf.baseY - distFromBottom
-            const delta = targetViewportY - afterBuf.viewportY
-            if (delta !== 0) term.scrollLines(delta)
+            return
           }
-        }
-      } catch { /* renderer dispose race — resize already succeeded */ }
+          const targetViewportY = afterBuf.baseY - distFromBottom
+          const delta = targetViewportY - afterBuf.viewportY
+          if (delta !== 0) term.scrollLines(delta)
+        } catch { /* renderer dispose race */ }
+      }
+
+      restoreScroll()
+
+      // Phase 2: rAF restore — xterm.js may async-update the viewport
+      // after fit() returns, overriding the synchronous restore above.
+      scrollRestoreRaf.current = requestAnimationFrame(() => {
+        scrollRestoreRaf.current = null
+        restoreScroll()
+      })
     }
   }, [])
 
