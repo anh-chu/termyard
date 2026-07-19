@@ -1403,8 +1403,8 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 					return
 				}
 
-				// Daemon sessions can't be renamed at the OS level; just update display name.
-				opts.StateMgr.ApplyRename(req.OldName, req.NewName)
+				// Daemon sessions can't be renamed at the OS level; update display name only.
+				opts.StateMgr.SetDisplayName(req.OldName, req.NewName, true)
 				if opts.RefreshSessions != nil {
 					opts.RefreshSessions()
 				}
