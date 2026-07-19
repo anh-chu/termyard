@@ -569,6 +569,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
     let sawFirstByte = false
+    let replaySettleTimer: number | null = null
     let msgCount = 0
     let totalBytes = 0
     let lastSummary = 0
@@ -648,9 +649,21 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
         totalBytes += evt.data.byteLength
         const head = new Uint8Array(evt.data.slice(0, 48))
         const sample = Array.from(head).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0')).join('')
-        const isReplay = !sawFirstByte
         if (!sawFirstByte) {
           sawFirstByte = true
+          // Mark the start of the replay burst. We'll scroll to bottom
+          // once the burst settles (no new binary message for 150ms).
+          replaySettleTimer = window.setTimeout(() => {
+            replaySettleTimer = null
+            term.scrollToBottom()
+          }, 150)
+        } else if (replaySettleTimer !== null) {
+          // Still in the replay burst — reset the settle timer.
+          clearTimeout(replaySettleTimer)
+          replaySettleTimer = window.setTimeout(() => {
+            replaySettleTimer = null
+            term.scrollToBottom()
+          }, 150)
         }
         const data = new Uint8Array(evt.data)
         const before = term.buffer.active.length
@@ -659,10 +672,6 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
         // binary frame, before term.write.  An older async callback must
         // never erase a prediction created by a newer keystroke.
         predictiveEchoRef.current?.clear()
-
-        // Scroll to bottom after replay data finishes writing so the user
-        // isn't stranded mid-buffer when revisiting a session.
-        const scrollAfterWrite = isReplay ? () => term.scrollToBottom() : undefined
 
         // Phase 0 telemetry: measure input-to-output and input-to-paint
         if (pendingInputTs !== null) {
@@ -677,10 +686,9 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
               latencySamples.shift()
             }
             writePending = false
-            scrollAfterWrite?.()
           })
         } else {
-          term.write(data, scrollAfterWrite)
+          term.write(data)
         }
         const now = Date.now()
         if (now - lastSummary > 500) {
@@ -699,6 +707,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     }
 
     ws.onclose = (evt) => {
+      if (replaySettleTimer !== null) { clearTimeout(replaySettleTimer); replaySettleTimer = null }
       const detail = `connId=${connId} code=${evt.code} reason=${evt.reason || ''} clean=${evt.wasClean} msgs=${msgCount} hidden=${document.hidden} +${(performance.now() - tConnect).toFixed(0)}ms ${sawFirstByte ? 'painted' : 'never-painted'}`
       // Only handle if this is still the active connection
       if (activeConnId.current !== connId) {
