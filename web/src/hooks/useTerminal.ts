@@ -913,15 +913,29 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     if (fitAddonRef.current && containerRef.current && term) {
       try {
         if (containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
+          // Snapshot scroll state before reflow: if the user was at the
+          // bottom, restore that after fit. If they'd scrolled up to read,
+          // preserve distance-from-bottom so they stay in the same spot.
+          // This matches iTerm2/native terminal behavior.
+          const buf = term.buffer.active
+          const wasAtBottom = buf.viewportY >= buf.baseY
+          const distFromBottom = wasAtBottom ? 0 : buf.baseY - buf.viewportY
+
           neutralizeXtermScrollbarFallback(term)
           fitAddonRef.current.fit()
           // ponytail: repaint from buffer clears ghost rows left by the
           // CSS-stretched canvas during a debounced/no-net-change resize
           // (terminal only redraws on a net SIGWINCH, so xterm must self-clear).
           term.refresh(0, term.rows - 1)
-          // Reflow during resize can displace the viewport scroll position.
-          // Snap back to the bottom so the user isn't stranded mid-buffer.
-          term.scrollToBottom()
+
+          // Restore scroll position after reflow.
+          if (wasAtBottom) {
+            term.scrollToBottom()
+          } else {
+            // After reflow, baseY may have changed. Restore distance from bottom.
+            const newTarget = term.buffer.active.baseY - distFromBottom
+            term.scrollToLine(Math.max(0, newTarget))
+          }
         }
       } catch {}
     }
