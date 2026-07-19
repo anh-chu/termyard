@@ -748,6 +748,18 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
       }
       suppressedInputRef.current = null
       if (ws.readyState === WebSocket.OPEN) {
+        // Force bracket paste wrapping for multiline pastes when the
+        // application hasn't enabled bracket paste mode (DECSET 2004).
+        // Before v4 tmux handled this transparently; with direct PTY
+        // sessions, apps like Pi that don't enable bracket paste mode
+        // would see each pasted line as a separate Enter.
+        if (
+          data.length > 1 &&
+          !data.startsWith('\x1b[200~') &&
+          (data.includes('\r') || data.includes('\n'))
+        ) {
+          data = '\x1b[200~' + data + '\x1b[201~'
+        }
         const encoder = new TextEncoder()
         // Phase 0 telemetry: arm latency measurement on eligible printable
         // ASCII input only when the WebSocket is open and no sample is pending.

@@ -253,35 +253,37 @@ func (r *Registry) List() []SessionInfo {
 					"name":      name,
 					"fails":     fails,
 				}).Debug("daemon liveness check failed, will retry")
-				continue
+				// Still include the session so it is not removed from
+				// state during the grace window. Metadata sidecar is
+				// readable regardless of socket health.
+			} else {
+				// Threshold reached. Before removing, verify the daemon
+				// process is actually dead (not just slow/overloaded).
+				pid := r.readDaemonPID(name)
+				if pid > 0 && processAlive(pid) {
+					logrus.WithFields(logrus.Fields{
+						"component": "registry",
+						"name":      name,
+						"pid":       pid,
+						"fails":     fails,
+					}).Warn("daemon process is alive but socket unreachable — keeping session")
+					r.failMu.Lock()
+					delete(r.failCount, name)
+					r.failMu.Unlock()
+				} else {
+					// Process is dead — safe to clean up.
+					stale = append(stale, removal{name: name, reason: "daemon process dead"})
+					continue
+				}
 			}
+		} else {
+			conn.Close()
 
-			// Threshold reached. Before removing, verify the daemon
-			// process is actually dead (not just slow/overloaded).
-			pid := r.readDaemonPID(name)
-			if pid > 0 && processAlive(pid) {
-				logrus.WithFields(logrus.Fields{
-					"component": "registry",
-					"name":      name,
-					"pid":       pid,
-					"fails":     fails,
-				}).Warn("daemon process is alive but socket unreachable — keeping session")
-				r.failMu.Lock()
-				delete(r.failCount, name)
-				r.failMu.Unlock()
-				continue
-			}
-
-			// Process is dead — safe to clean up.
-			stale = append(stale, removal{name: name, reason: "daemon process dead"})
-			continue
+			// Reset failure counter on successful connect.
+			r.failMu.Lock()
+			delete(r.failCount, name)
+			r.failMu.Unlock()
 		}
-		conn.Close()
-
-		// Reset failure counter on successful connect.
-		r.failMu.Lock()
-		delete(r.failCount, name)
-		r.failMu.Unlock()
 
 		info := SessionInfo{
 			ID:     name,

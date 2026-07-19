@@ -638,7 +638,6 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 	n := m.namer
 	meta := m.meta[sessionName]
 	sess := m.sessions[sessionName]
-	attached := sess != nil && sess.Attached
 	projectPath := meta.ProjectPath
 	if sess != nil && sess.ProjectPath != "" {
 		projectPath = sess.ProjectPath
@@ -677,7 +676,7 @@ func (m *Manager) triggerAgentNaming(sessionName string) {
 	}
 	logrus.WithFields(logrus.Fields{"session": sessionName, "name": name}).Info("agent session named")
 
-	m.applyGeneratedName(sessionName, name, !attached)
+	m.applyGeneratedName(sessionName, name)
 }
 
 // otherDisplayNames returns the labels of every session except exclude, so the
@@ -782,9 +781,9 @@ func (m *Manager) SetRenameHook(fn func(oldName, newName string)) {
 
 // applyGeneratedName stores displayName for sessionName. The DisplayName is
 // refreshed on every call (unless the user manually set it) so the label tracks
-// the evolving work. The underlying session rename is one-shot, guarded by
-// meta.Renamed, to avoid churning session keys/URLs on every refresh.
-func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRename bool) {
+// the evolving work. All sessions are daemon-backed, so only the DisplayName
+// is changed; the underlying session key (socket ID) is never renamed.
+func (m *Manager) applyGeneratedName(sessionName, displayName string) {
 	if displayName == "" {
 		return
 	}
@@ -801,40 +800,18 @@ func (m *Manager) applyGeneratedName(sessionName, displayName string, allowRenam
 	nameChanged := meta.DisplayName != displayName
 	meta.DisplayName = displayName
 	meta.NameAssigned = true
-	alreadyRenamed := meta.Renamed
 	m.meta[sessionName] = meta
 	if sess := m.sessions[sessionName]; sess != nil {
 		sess.DisplayName = displayName
 	}
-
-	// Decide rename inside the lock to avoid collision races.
-	newName := ""
-	if allowRename && !alreadyRenamed && displayName != sessionName {
-		if model.ValidateSessionName(displayName) == nil {
-			taken := make(map[string]bool, len(m.sessions))
-			for n := range m.sessions {
-				taken[n] = true
-			}
-			cand := namer.Dedup(displayName, taken)
-			if model.ValidateSessionName(cand) == nil && !taken[cand] {
-				newName = cand
-			}
-		}
-	}
 	m.mu.Unlock()
 
-	if newName == "" {
-		if nameChanged {
-			m.saveNames()
-			m.broadcast(StateEvent{Type: "sessions-changed"})
-		}
-		return
+	// All sessions are daemon-backed now — the session key is the socket ID
+	// and must not change. DisplayName is sufficient for the UI label.
+	if nameChanged {
+		m.saveNames()
+		m.broadcast(StateEvent{Type: "sessions-changed"})
 	}
-
-	// Daemon sessions don't need rename — the DisplayName is sufficient.
-	// Migrate meta + sessions keys to the new name.
-	m.ApplyRename(sessionName, newName)
-	m.broadcast(StateEvent{Type: "sessions-changed"})
 }
 
 // TriggerShellNaming runs the AI namer for a non-agent shell session and stores
@@ -936,9 +913,9 @@ func (m *Manager) RemoveSession(name string) {
 
 // RegenerateName forces an AI name refresh for a session on demand (manual
 // button), bypassing the one-shot NameAssigned guard and clearing any prior
-// manual UserSetName lock. Agent sessions also rename the underlying
-// session when detached; shell sessions only update the DisplayName. Returns
-// the new name, or namer.ErrDisabled when AI naming is off.
+// manual UserSetName lock. Updates DisplayName only; the underlying session
+// key is never changed. Returns the new name, or namer.ErrDisabled when AI
+// naming is off.
 func (m *Manager) RegenerateName(sessionName string) (string, error) {
 	m.mu.RLock()
 	n := m.namer
@@ -1011,9 +988,9 @@ func (m *Manager) GenerateName(ctx context.Context, nc namer.Context) (string, e
 }
 
 // ApplyAIName stores an already-generated AI name for a session, bypassing the
-// one-shot guard and clearing any prior manual lock so the name applies. Agent
-// sessions also rename the underlying session when detached; shell
-// sessions only update the DisplayName. Returns the applied name.
+// one-shot guard and clearing any prior manual lock so the name applies.
+// Updates DisplayName only; the underlying session key is never changed.
+// Returns the applied name.
 func (m *Manager) ApplyAIName(sessionName, name string) string {
 	if name == "" {
 		return ""
@@ -1022,13 +999,11 @@ func (m *Manager) ApplyAIName(sessionName, name string) string {
 	meta := m.meta[sessionName]
 	agentType := meta.AgentType
 	sess := m.sessions[sessionName]
-	attached := sess != nil && sess.Attached
 	if sess != nil && sess.AgentType != "" {
 		agentType = sess.AgentType
 	}
 	// Reset guards + manual lock so the forced name applies even when the
-	// session was already named or user-set. Clearing Renamed lets the
-	// action rename the session again when detached.
+	// session was already named or user-set.
 	meta.NameAssigned = false
 	meta.Renamed = false
 	meta.UserSetName = false
@@ -1039,9 +1014,8 @@ func (m *Manager) ApplyAIName(sessionName, name string) string {
 	m.mu.Unlock()
 
 	if agentType != "" {
-		// applyGeneratedName re-checks the (now-cleared) guard, stores the name,
-		// and renames the session when detached.
-		m.applyGeneratedName(sessionName, name, !attached)
+		// applyGeneratedName re-checks the (now-cleared) guard and stores the name.
+		m.applyGeneratedName(sessionName, name)
 		return name
 	}
 
