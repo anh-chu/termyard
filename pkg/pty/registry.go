@@ -104,6 +104,12 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 		"cwd":       cwd,
 	})
 
+	// Guard against duplicate names — the socket file would be overwritten,
+	// causing two terminals to share a single daemon.
+	if _, err := os.Stat(r.SocketPath(name)); err == nil {
+		return fmt.Errorf("session %q already exists", name)
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("get executable: %w", err)

@@ -1131,9 +1131,9 @@ func registerAPIRoutes(r chi.Router, opts *Options, hub *ws.Hub) {
 				}
 
 				// Daemon backend (default for all local sessions).
-				if req.Name == "" {
-					req.Name = resolveNewSessionName(opts, "", req.Name, req.Command, req.Path)
-				}
+				// Always deduplicate — even when the caller supplies a name
+				// (e.g. drag-to-split sends "shell" every time).
+				req.Name = resolveNewSessionName(opts, "", req.Name, req.Command, req.Path)
 				if req.Name == "" {
 					req.Name = fmt.Sprintf("shell-%d", time.Now().UnixMilli())
 				}
