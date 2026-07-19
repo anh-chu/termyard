@@ -42,9 +42,21 @@ if [ -f web/package.json ]; then
   sed -i -E "s/(\"version\": \"?)[^\"]+/\\1${NEW_VERSION}/" web/package.json
 fi
 
-# 3. web/package-lock.json
-if [ -f web/package-lock.json ]; then
-  sed -i -E "s/(\"version\": \"?)[^\"]+/\\1${NEW_VERSION}/g" web/package-lock.json
+# 3. web/package-lock.json — sync ONLY the root version fields (top-level
+#    "version" and packages[""].version). A global sed would clobber every
+#    dependency's recorded version; use node to patch the two root fields
+#    precisely and leave all dependency versions untouched.
+if [ -f web/package-lock.json ] && command -v node >/dev/null 2>&1; then
+  node -e '
+    const fs = require("fs");
+    const p = "web/package-lock.json";
+    const lock = JSON.parse(fs.readFileSync(p, "utf8"));
+    lock.version = process.argv[1];
+    if (lock.packages && lock.packages[""]) lock.packages[""].version = process.argv[1];
+    fs.writeFileSync(p, JSON.stringify(lock, null, 2) + "\n");
+  ' "$NEW_VERSION"
+elif [ -f web/package-lock.json ]; then
+  echo "WARN: node not found; skipping web/package-lock.json sync (reconcile manually)" >&2
 fi
 
 # 4. .release-please-manifest.json
@@ -75,12 +87,12 @@ if [ -f web/package.json ]; then
 fi
 
 if [ -f web/package-lock.json ]; then
-  LOCK_VER=$(grep -m1 -oP '"version": "\K[^"]+' web/package-lock.json)
+  LOCK_VER=$(node -e 'console.log(require("./web/package-lock.json").version)' 2>/dev/null || true)
   if [ "$LOCK_VER" != "$NEW_VERSION" ]; then
-    echo "  FAIL: web/package-lock.json still has $LOCK_VER (expected $NEW_VERSION)" >&2
+    echo "  FAIL: web/package-lock.json root version still $LOCK_VER (expected $NEW_VERSION)" >&2
     ERRORS=$((ERRORS + 1))
   else
-    echo "  OK: web/package-lock.json = $NEW_VERSION"
+    echo "  OK: web/package-lock.json root version = $NEW_VERSION"
   fi
 fi
 
