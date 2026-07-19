@@ -36,6 +36,7 @@ type LifecycleRecord struct {
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	DaemonPID     int       `json:"daemon_pid"`
+	SystemdUnit   string    `json:"systemd_unit,omitempty"` // systemd scope unit name (for cleanup)
 	Generation    string    `json:"generation"`
 	ProcStartTime int64     `json:"proc_start_time,omitempty"` // /proc/pid/stat field 22 (starttime in clock ticks)
 }

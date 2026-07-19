@@ -58,6 +58,11 @@ type Registry struct {
 
 	recoveryMu     sync.Mutex      // serializes recover/dismiss operations
 	lifecycleStore *LifecycleStore // durable lifecycle state (may be nil)
+
+	// stopUnitFn is a test hook that, when non-nil, is called instead of
+	// spawning a real systemctl process. The unit argument is the systemd
+	// scope unit name to stop.
+	stopUnitFn func(unit string)
 }
 
 // NewRegistry creates a session registry using the given socket directory.
@@ -148,13 +153,14 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 	// the user session bus is not reachable.
 	var cmd *exec.Cmd
 	useSystemd := false
+	var systemdUnit string
 	if systemdRun, err := exec.LookPath("systemd-run"); err == nil {
 		// Verify user session bus is available (systemd-run --user needs it).
 		if os.Getenv("DBUS_SESSION_BUS_ADDRESS") != "" {
-			unitName := fmt.Sprintf("termyard-session-%s-%d.scope", name, time.Now().UnixMilli())
+			systemdUnit = fmt.Sprintf("termyard-session-%s-%d.scope", name, time.Now().UnixMilli())
 			scopeArgs := []string{
 				"--user", "--scope",
-				"--unit", unitName,
+				"--unit", systemdUnit,
 				"--",
 			}
 			fullArgs := append(scopeArgs, exe)
@@ -165,6 +171,12 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 	}
 	if cmd == nil {
 		cmd = exec.Command(exe, args...)
+	}
+
+	// Append --systemd-unit so the daemon stores it in metadata/lifecycle
+	// for later cleanup.
+	if systemdUnit != "" {
+		cmd.Args = append(cmd.Args, "--systemd-unit", systemdUnit)
 	}
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -229,9 +241,9 @@ func (r *Registry) List() []SessionInfo {
 	}
 
 	var (
-		out      []SessionInfo
-		stale    []removal
-		total    = len(entries)
+		out   []SessionInfo
+		stale []removal
+		total = len(entries)
 	)
 	// Track which entries we saw for later failure-count cleanup.
 	seen := make(map[string]bool, total)
@@ -372,6 +384,9 @@ func processAlive(pid int) bool {
 // daemon exited intentionally (cleanly_ended, termination_requested, dismissed)
 // or crashed (active state with dead process).  Crashed sessions are NOT
 // deleted — they are left on disk for recovery.
+// In all cleanup paths (including crash preservation), the associated
+// systemd scope is stopped as a best-effort cleanup to prevent orphaned
+// cgroups.
 func (r *Registry) removeStale(name, reason string) {
 	sockPath := r.SocketPath(name)
 	metaPath := r.metadataPath(name)
@@ -393,6 +408,9 @@ func (r *Registry) removeStale(name, reason string) {
 				if transErr := r.lifecycleStore.Transition(name, LifecycleActive, LifecycleCrashed); transErr != nil {
 					logrus.WithError(transErr).WithField("name", name).Warn("failed to transition to crashed")
 				}
+				// Stop the systemd scope even though we preserve files.
+				// Use the exact unit from the record we already read.
+				r.stopSystemdUnit(rec.SystemdUnit)
 				// Do NOT delete socket/metadata — they are needed for recovery.
 				return
 
@@ -401,6 +419,7 @@ func (r *Registry) removeStale(name, reason string) {
 
 			case LifecycleCrashed:
 				// Already marked as crashed, keep preserved.
+				r.stopSystemdUnit(rec.SystemdUnit)
 				return
 
 			default:
@@ -410,6 +429,9 @@ func (r *Registry) removeStale(name, reason string) {
 		// If no lifecycle record exists (pre-lifecycle daemon),
 		// fall through to normal cleanup.
 	}
+
+	// Stop systemd scope before removing files.
+	r.stopSystemdScope(name)
 
 	os.Remove(sockPath)
 	os.Remove(metaPath)
@@ -423,6 +445,8 @@ func (r *Registry) removeStale(name, reason string) {
 // Kill sends a FrameClose to the daemon via its socket.
 // It marks the session as intentionally terminated in the lifecycle store
 // so the registry can distinguish explicit kills from crashes.
+// If a systemd scope unit was recorded, it is stopped as a best-effort
+// cleanup (in case the daemon process doesn't exit cleanly).
 func (r *Registry) Kill(name string) error {
 	// Record intentional kill before sending FrameClose.
 	// If the daemon process dies without transitioning to cleanly_ended,
@@ -433,17 +457,29 @@ func (r *Registry) Kill(name string) error {
 		_ = r.lifecycleStore.Transition(name, LifecycleActive, LifecycleTerminationRequested)
 	}
 
+	// Read the systemd unit once for cleanup, regardless of the path taken.
+	unit := r.readSystemdUnit(name)
+
 	socketPath := r.SocketPath(name)
 	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
 	if err != nil {
+		// Socket unreachable — try to stop the systemd scope anyway.
+		r.stopSystemdUnit(unit)
 		return fmt.Errorf("dial daemon socket %s: %w", socketPath, err)
 	}
 	defer conn.Close()
 
 	frame := encodeFrame(FrameClose, nil)
 	if _, err := conn.Write(frame); err != nil {
+		// FrameClose failed — try to force-stop the systemd scope.
+		r.stopSystemdUnit(unit)
 		return fmt.Errorf("send close frame: %w", err)
 	}
+
+	// Best-effort: stop the systemd scope so it doesn't linger.
+	// The daemon should exit on its own after receiving FrameClose, but
+	// systemd scope cleanup is an extra safety net.
+	r.stopSystemdUnit(unit)
 	return nil
 }
 
@@ -503,6 +539,24 @@ func (r *Registry) CrashedSessions() []LifecycleRecord {
 	return r.lifecycleStore.ListByState(LifecycleCrashed)
 }
 
+// DetectAndCleanupCrashes calls DetectCrashes on the lifecycle store and
+// stops the systemd scope for each newly discovered crashed session.
+// This prevents orphaned cgroups from accumulating across server restarts.
+// Returns the list of newly crashed records (in "crashed" state).
+func (r *Registry) DetectAndCleanupCrashes() []LifecycleRecord {
+	if r.lifecycleStore == nil {
+		return nil
+	}
+	crashed := r.lifecycleStore.DetectCrashes()
+	for _, rec := range crashed {
+		// Stop the exact unit from the crashed record — do NOT re-read
+		// lifecycle state via stopSystemdScope, which could pick up a
+		// concurrently-recovered record and kill the replacement scope.
+		r.stopSystemdUnit(rec.SystemdUnit)
+	}
+	return crashed
+}
+
 // RecoverSession re-spawns a daemon for a previously crashed session.
 // It reads the saved shell/cwd from the lifecycle record, starts a new daemon,
 // and transitions the state to "recovered".  The old stale socket and metadata
@@ -535,6 +589,12 @@ func (r *Registry) RecoverSession(id string, shellOverride ...string) error {
 	if len(shellOverride) > 1 && shellOverride[1] != "" {
 		cwd = shellOverride[1]
 	}
+
+	// Stop the old systemd scope before removing files and spawning
+	// the replacement.  The crashed session's scope may still have
+	// orphaned child processes (shell, background jobs).
+	// Use the exact unit from the crashed record — do not re-read.
+	r.stopSystemdUnit(rec.SystemdUnit)
 
 	// Transition to recovered BEFORE spawning — the new daemon will
 	// overwrite the lifecycle record with a fresh "active" state on
@@ -577,6 +637,7 @@ func (r *Registry) DismissSession(id string) error {
 // dismissSessionLocked is the inner implementation; caller must hold recoveryMu.
 func (r *Registry) dismissSessionLocked(id string) error {
 	if r.lifecycleStore == nil {
+		// No lifecycle store — clean up files only (no scope to stop).
 		os.Remove(r.SocketPath(id))
 		os.Remove(r.metadataPath(id))
 		return nil
@@ -584,14 +645,23 @@ func (r *Registry) dismissSessionLocked(id string) error {
 
 	rec, err := r.lifecycleStore.Get(id)
 	if err != nil {
+		// No lifecycle record — clean up files only (pre-lifecycle daemon).
 		os.Remove(r.SocketPath(id))
 		os.Remove(r.metadataPath(id))
 		return nil
 	}
 
+	// Guard: only crashed sessions can be dismissed.  Do NOT stop the
+	// scope before this check — a live session must not be killed just
+	// because someone asked to dismiss it.
 	if rec.State != LifecycleCrashed {
 		return fmt.Errorf("session %s is in state %q, not crashed", id, rec.State)
 	}
+
+	// Stop the exact systemd unit from the crashed record before
+	// cleaning up files.  We use the unit from the already-read record
+	// to avoid re-reading mutable lifecycle state.
+	r.stopSystemdUnit(rec.SystemdUnit)
 
 	if err := r.lifecycleStore.Transition(id, LifecycleCrashed, LifecycleDismissed); err != nil {
 		return fmt.Errorf("transition to dismissed: %w", err)
@@ -627,7 +697,84 @@ func (r *Registry) CleanupCrashedIfDead(id string) {
 	}
 	if !processAlive(rec.DaemonPID) {
 		// Process long dead — safe to clean up.
+		// Use the exact unit from the already-read crashed record.
+		r.stopSystemdUnit(rec.SystemdUnit)
 		os.Remove(r.SocketPath(id))
 		os.Remove(r.metadataPath(id))
 	}
+}
+
+// stopSystemdUnit stops a specific systemd user scope unit by name.
+// This helper does NOT re-read lifecycle state — the caller is responsible
+// for passing the correct unit (e.g., from an already-read lifecycle record).
+// It is best-effort: failures are logged but not returned.
+func (r *Registry) stopSystemdUnit(unit string) {
+	// Test hook: if set, delegate to the injected function instead of
+	// spawning a real systemctl process.
+	if r.stopUnitFn != nil {
+		r.stopUnitFn(unit)
+		return
+	}
+	if unit == "" {
+		return
+	}
+
+	log := logrus.WithFields(logrus.Fields{
+		"component": "registry",
+		"unit":      unit,
+	})
+
+	systemctl, err := exec.LookPath("systemctl")
+	if err != nil {
+		log.Debug("systemctl not found, skipping scope stop")
+		return
+	}
+
+	// Run with a short timeout so we never block the caller.
+	stop := exec.Command(systemctl, "--user", "stop", unit)
+	// Detach from parent's stdin/stdout.
+	stop.Stdin = nil
+	stop.Stdout = nil
+	stop.Stderr = nil
+
+	if err := stop.Start(); err != nil {
+		log.WithError(err).Debug("failed to start systemctl stop")
+		return
+	}
+
+	// Don't wait — systemctl stop on a dead scope may hang briefly.
+	// Release the process handle so it runs independently.
+	_ = stop.Process.Release()
+	log.Debug("requested systemd scope stop")
+}
+
+// stopSystemdScope reads the unit name for a session and stops it.
+// Prefer stopSystemdUnit when you already have the unit name from an
+// already-read lifecycle record, to avoid re-reading mutable state.
+func (r *Registry) stopSystemdScope(name string) {
+	unit := r.readSystemdUnit(name)
+	r.stopSystemdUnit(unit)
+}
+
+// readSystemdUnit returns the systemd unit name from the lifecycle record
+// or, as a fallback, from the metadata JSON sidecar.
+func (r *Registry) readSystemdUnit(name string) string {
+	// Try lifecycle record first.
+	if r.lifecycleStore != nil {
+		if rec, err := r.lifecycleStore.Get(name); err == nil && rec.SystemdUnit != "" {
+			return rec.SystemdUnit
+		}
+	}
+
+	// Fallback: read from metadata sidecar.
+	metaPath := r.metadataPath(name)
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return ""
+	}
+	var meta sessionMeta
+	if json.Unmarshal(data, &meta) != nil {
+		return ""
+	}
+	return meta.SystemdUnit
 }

@@ -34,17 +34,17 @@ echo "Bumping: $CURRENT -> $NEW_VERSION ($BUMP)"
 
 # Update all version files
 # 1. pkg/common/version.go
-sed -i "s/var SUMMARY = \"v${CURRENT}\"/var SUMMARY = \"v${NEW_VERSION}\"/" pkg/common/version.go
-sed -i "s/var VERSION = \"${CURRENT}\"/var VERSION = \"${NEW_VERSION}\"/" pkg/common/version.go
+sed -i -E "s/(var SUMMARY = \"v)[^\"]+/\\1${NEW_VERSION}/" pkg/common/version.go
+sed -i -E "s/(var VERSION = \"?)[^\"]+/\\1${NEW_VERSION}/" pkg/common/version.go
 
 # 2. web/package.json
 if [ -f web/package.json ]; then
-  sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/" web/package.json
+  sed -i -E "s/(\"version\": \"?)[^\"]+/\\1${NEW_VERSION}/" web/package.json
 fi
 
 # 3. web/package-lock.json
 if [ -f web/package-lock.json ]; then
-  sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" web/package-lock.json
+  sed -i -E "s/(\"version\": \"?)[^\"]+/\\1${NEW_VERSION}/g" web/package-lock.json
 fi
 
 # 4. .release-please-manifest.json

@@ -31,13 +31,14 @@ const (
 
 // DaemonConfig configures a session daemon.
 type DaemonConfig struct {
-	ID         string // unique session identifier
-	Shell      string // shell to spawn (default: $SHELL or /bin/bash)
-	Cols, Rows uint16 // initial terminal size
-	Cwd        string // working directory
-	SocketDir  string // directory for Unix sockets (default: /tmp/termyard-sessions-{uid}/)
-	StateDir   string // directory for lifecycle state (default: XDG_STATE_HOME/termyard/sessions/)
-	BufferSize int    // ring buffer size in bytes (default: 8MB)
+	ID          string // unique session identifier
+	Shell       string // shell to spawn (default: $SHELL or /bin/bash)
+	Cols, Rows  uint16 // initial terminal size
+	Cwd         string // working directory
+	SocketDir   string // directory for Unix sockets (default: /tmp/termyard-sessions-{uid}/)
+	StateDir    string // directory for lifecycle state (default: XDG_STATE_HOME/termyard/sessions/)
+	SystemdUnit string // systemd scope unit name for cleanup (empty if not using systemd)
+	BufferSize  int    // ring buffer size in bytes (default: 8MB)
 }
 
 // RunDaemon is the entry point for a session daemon process.
@@ -45,14 +46,15 @@ type DaemonConfig struct {
 // and serves clients until the shell exits or Close is received.
 // sessionMeta is written as a JSON sidecar file alongside the socket.
 type sessionMeta struct {
-	ID       string `json:"id"`
-	Pid      int    `json:"pid"`
-	ShellPid int    `json:"shell_pid"`
-	Shell    string `json:"shell"`
-	Cwd      string `json:"cwd"`
-	Created  string `json:"created"`
-	Cols     uint16 `json:"cols"`
-	Rows     uint16 `json:"rows"`
+	ID          string `json:"id"`
+	Pid         int    `json:"pid"`
+	ShellPid    int    `json:"shell_pid"`
+	Shell       string `json:"shell"`
+	Cwd         string `json:"cwd"`
+	Created     string `json:"created"`
+	Cols        uint16 `json:"cols"`
+	Rows        uint16 `json:"rows"`
+	SystemdUnit string `json:"systemd_unit,omitempty"`
 }
 
 func RunDaemon(cfg DaemonConfig) error {
@@ -112,13 +114,23 @@ func RunDaemon(cfg DaemonConfig) error {
 		cmd.Process.Kill()
 		return fmt.Errorf("create socket dir: %w", err)
 	}
+
+	// Check whether a live daemon is already bound to this socket.
+	// If we can connect to it, refuse to start — we must not steal an
+	// active session.  If the socket file exists but nobody is listening,
+	// it is a stale leftover and we can safely remove it.
+	if isDaemonAlive(socketPath) {
+		ptyFd.Close()
+		killProcessGroup(cmd.Process.Pid)
+		return fmt.Errorf("session %q is already active (socket %s is live)", cfg.ID, socketPath)
+	}
 	os.Remove(socketPath)   // remove stale socket
 	os.Remove(metadataPath) // remove stale metadata
 
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		ptyFd.Close()
-		cmd.Process.Kill()
+		killProcessGroup(cmd.Process.Pid)
 		return fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
 	defer os.Remove(socketPath)
@@ -126,19 +138,20 @@ func RunDaemon(cfg DaemonConfig) error {
 
 	// Write metadata sidecar so Registry.List can discover sessions.
 	meta := sessionMeta{
-		ID:       cfg.ID,
-		Pid:      os.Getpid(),
-		ShellPid: cmd.Process.Pid,
-		Shell:    cfg.Shell,
-		Cwd:      cfg.Cwd,
-		Created:  time.Now().Format(time.RFC3339),
-		Cols:     cfg.Cols,
-		Rows:     cfg.Rows,
+		ID:          cfg.ID,
+		Pid:         os.Getpid(),
+		ShellPid:    cmd.Process.Pid,
+		Shell:       cfg.Shell,
+		Cwd:         cfg.Cwd,
+		Created:     time.Now().Format(time.RFC3339),
+		Cols:        cfg.Cols,
+		Rows:        cfg.Rows,
+		SystemdUnit: cfg.SystemdUnit,
 	}
 	metaBytes, _ := json.Marshal(meta)
 	if err := os.WriteFile(metadataPath, metaBytes, 0600); err != nil {
 		ptyFd.Close()
-		cmd.Process.Kill()
+		killProcessGroup(cmd.Process.Pid)
 		ln.Close()
 		return fmt.Errorf("write metadata: %w", err)
 	}
@@ -160,6 +173,7 @@ func RunDaemon(cfg DaemonConfig) error {
 			Cols:          cfg.Cols,
 			Rows:          cfg.Rows,
 			DaemonPID:     pid,
+			SystemdUnit:   cfg.SystemdUnit,
 			Generation:    NewGeneration(),
 			ProcStartTime: procStartTime(pid),
 		}
@@ -455,7 +469,12 @@ func (d *daemon) shutdown() {
 			}
 		}
 		d.ptyFd.Close()
-		d.cmd.Process.Kill()
+		// Kill the shell's entire process group so child processes
+		// (background jobs, pipelines, etc.) are not leaked as orphans.
+		// The shell is a session leader (pty.StartWithSize uses Setsid),
+		// so its PID equals its process group ID.  Negative PID targets
+		// the process group.  If the shell already exited this is a no-op.
+		killProcessGroup(d.cmd.Process.Pid)
 		d.ln.Close()
 		close(d.shellDone)
 		d.log.Debug("daemon shutdown complete")
@@ -469,4 +488,26 @@ func encodeFrame(ftype byte, payload []byte) []byte {
 	binary.BigEndian.PutUint32(frame[1:5], uint32(len(payload)))
 	copy(frame[5:], payload)
 	return frame
+}
+
+// isDaemonAlive returns true if a daemon is currently listening on socketPath.
+// Used by RunDaemon to avoid stealing a live daemon's socket.
+func isDaemonAlive(socketPath string) bool {
+	conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// killProcessGroup sends SIGKILL to the process group identified by pgid.
+// If the process group no longer exists (e.g. shell already exited),
+// this is silently ignored.
+func killProcessGroup(pgid int) {
+	if pgid <= 0 {
+		return
+	}
+	// Negative PID sends the signal to the entire process group.
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 }

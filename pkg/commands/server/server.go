@@ -15,6 +15,7 @@ import (
 	"github.com/anh-chu/termyard/pkg/common"
 	"github.com/anh-chu/termyard/pkg/groupsync"
 	"github.com/anh-chu/termyard/pkg/identity"
+	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/namer"
 	"github.com/anh-chu/termyard/pkg/peer"
 	"github.com/anh-chu/termyard/pkg/portforward"
@@ -25,7 +26,6 @@ import (
 	"github.com/anh-chu/termyard/pkg/sessionattrs"
 	"github.com/anh-chu/termyard/pkg/sessionorder"
 	"github.com/anh-chu/termyard/pkg/state"
-	"github.com/anh-chu/termyard/pkg/model"
 	"github.com/anh-chu/termyard/pkg/toolevents"
 	"github.com/anh-chu/termyard/pkg/webpush"
 )
@@ -45,7 +45,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 	} else {
 		daemonReg.SetLifecycleStore(lcStore)
 		// Detect any sessions that crashed while the server was down.
-		if crashed := lcStore.DetectCrashes(); len(crashed) > 0 {
+		if crashed := daemonReg.DetectAndCleanupCrashes(); len(crashed) > 0 {
 			logrus.WithField("count", len(crashed)).Warn("detected crashed sessions from previous run")
 		}
 	}
@@ -81,7 +81,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 
 		// Run crash detection on each refresh cycle.
 		if lcStore := daemonReg.LifecycleStore(); lcStore != nil {
-			if crashed := lcStore.DetectCrashes(); len(crashed) > 0 {
+			if crashed := daemonReg.DetectAndCleanupCrashes(); len(crashed) > 0 {
 				logrus.WithField("count", len(crashed)).Warn("detected newly crashed sessions")
 			}
 		}
@@ -309,7 +309,7 @@ func Execute(ctx context.Context, c *cli.Command) error {
 			silenceMonitor.RecordOutput(paneID)
 		},
 		RefreshSessions: refreshSessions,
-		OnPrefsChanged:   applyNamerFromPrefs,
+		OnPrefsChanged:  applyNamerFromPrefs,
 	}
 	if schedulerStore != nil {
 		runner := scheduler.NewRunner(schedulerStore, stateMgr, peerMgr, func(req scheduler.CreateSessionReq) error {
@@ -489,8 +489,6 @@ func runShellNameWatcher(ctx context.Context, mgr *state.Manager, daemonReg *pty
 	}
 }
 
-
-
 // recentCommands extracts up to a handful of recent input lines from captured
 // pane content as a hint for naming. Falls back to [foreground] if nothing
 // useful is found.
@@ -544,7 +542,7 @@ type peerDaemonAdapter struct {
 func (a *peerDaemonAdapter) Create(name, shell, cwd string, cols, rows uint16) error {
 	return a.reg.Create(name, shell, cwd, cols, rows)
 }
-func (a *peerDaemonAdapter) Kill(name string) error    { return a.reg.Kill(name) }
+func (a *peerDaemonAdapter) Kill(name string) error              { return a.reg.Kill(name) }
 func (a *peerDaemonAdapter) Capture(name string) (string, error) { return a.reg.Capture(name) }
 func (a *peerDaemonAdapter) SocketPath(name string) string       { return a.reg.SocketPath(name) }
 func (a *peerDaemonAdapter) List() []peer.DaemonSessionInfo {

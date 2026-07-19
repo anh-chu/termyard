@@ -24,12 +24,13 @@ func defaultSessionDir() string {
 // executeSessionDaemon is the action for the hidden "session-daemon" command.
 func executeSessionDaemon(ctx context.Context, c *cli.Command) error {
 	cfg := pty.DaemonConfig{
-		ID:        c.String("id"),
-		Shell:     c.String("shell"),
-		Cwd:       c.String("cwd"),
-		SocketDir: c.String("socket-dir"),
-		StateDir:  c.String("state-dir"),
-		BufferSize: int(c.Int("buffer-size")),
+		ID:          c.String("id"),
+		Shell:       c.String("shell"),
+		Cwd:         c.String("cwd"),
+		SocketDir:   c.String("socket-dir"),
+		StateDir:    c.String("state-dir"),
+		SystemdUnit: c.String("systemd-unit"),
+		BufferSize:  int(c.Int("buffer-size")),
 	}
 
 	// Parse terminal size.
@@ -216,6 +217,10 @@ func init() {
 			&cli.StringFlag{
 				Name:  "state-dir",
 				Usage: "lifecycle state directory",
+			},
+			&cli.StringFlag{
+				Name:  "systemd-unit",
+				Usage: "systemd scope unit name (for cleanup on exit)",
 			},
 			&cli.IntFlag{
 				Name:  "buffer-size",
