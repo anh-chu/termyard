@@ -37,7 +37,7 @@ type DaemonConfig struct {
 	Cwd        string // working directory
 	SocketDir  string // directory for Unix sockets (default: /tmp/termyard-sessions-{uid}/)
 	StateDir   string // directory for lifecycle state (default: XDG_STATE_HOME/termyard/sessions/)
-	BufferSize int    // ring buffer size in bytes (default: 1MB)
+	BufferSize int    // ring buffer size in bytes (default: 8MB)
 }
 
 // RunDaemon is the entry point for a session daemon process.
@@ -72,7 +72,7 @@ func RunDaemon(cfg DaemonConfig) error {
 		cfg.SocketDir = fmt.Sprintf("/tmp/termyard-sessions-%d", os.Getuid())
 	}
 	if cfg.BufferSize <= 0 {
-		cfg.BufferSize = 1 << 20 // 1 MB
+		cfg.BufferSize = 8 << 20 // 8 MB
 	}
 
 	log := logrus.WithFields(logrus.Fields{
