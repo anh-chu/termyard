@@ -911,33 +911,53 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
   const fit = useCallback(() => {
     const term = termRef.current
     if (fitAddonRef.current && containerRef.current && term) {
+      if (containerRef.current.clientWidth <= 0 || containerRef.current.clientHeight <= 0) return
+
+      // Snapshot distance-from-bottom before reflow. fit() calls
+      // terminal.resize() which reflows the buffer when columns change —
+      // lines wrap/unwrap and total row count shifts. xterm.js does NOT
+      // preserve the viewport's distance from the bottom across that
+      // reflow, so the scroll position visibly jumps.
+      //
+      // Before v4, tmux managed scrollback server-side and sent fresh
+      // screen content on resize. Now xterm.js holds the full 50k-line
+      // buffer, so the displacement is massive.
+      //
+      // Strategy (from localterm): snapshot distance-from-bottom, run
+      // fit(), then use scrollLines(delta) to compensate for wherever
+      // xterm.js left the viewport. scrollLines is relative, so it
+      // handles the post-reflow viewportY correctly.
+      const beforeBuf = term.buffer.active
+      const distFromBottom = Math.max(0, beforeBuf.baseY - beforeBuf.viewportY)
+      const wasAtBottom = distFromBottom === 0
+
       try {
-        if (containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
-          // Snapshot scroll state before reflow: if the user was at the
-          // bottom, restore that after fit. If they'd scrolled up to read,
-          // preserve distance-from-bottom so they stay in the same spot.
-          // This matches iTerm2/native terminal behavior.
-          const buf = term.buffer.active
-          const wasAtBottom = buf.viewportY >= buf.baseY
-          const distFromBottom = wasAtBottom ? 0 : buf.baseY - buf.viewportY
+        neutralizeXtermScrollbarFallback(term)
+        fitAddonRef.current.fit()
+      } catch {
+        return
+      }
 
-          neutralizeXtermScrollbarFallback(term)
-          fitAddonRef.current.fit()
-          // ponytail: repaint from buffer clears ghost rows left by the
-          // CSS-stretched canvas during a debounced/no-net-change resize
-          // (terminal only redraws on a net SIGWINCH, so xterm must self-clear).
-          term.refresh(0, term.rows - 1)
+      try {
+        // ponytail: repaint from buffer clears ghost rows left by the
+        // CSS-stretched canvas during a debounced/no-net-change resize.
+        term.refresh(0, term.rows - 1)
 
-          // Restore scroll position after reflow.
-          if (wasAtBottom) {
+        if (wasAtBottom) {
+          term.scrollToBottom()
+        } else {
+          const afterBuf = term.buffer.active
+          // If reflow shrank buffer below saved distance, snap to bottom
+          // rather than jumping to the very top of scrollback.
+          if (distFromBottom > afterBuf.baseY) {
             term.scrollToBottom()
           } else {
-            // After reflow, baseY may have changed. Restore distance from bottom.
-            const newTarget = term.buffer.active.baseY - distFromBottom
-            term.scrollToLine(Math.max(0, newTarget))
+            const targetViewportY = afterBuf.baseY - distFromBottom
+            const delta = targetViewportY - afterBuf.viewportY
+            if (delta !== 0) term.scrollLines(delta)
           }
         }
-      } catch {}
+      } catch { /* renderer dispose race — resize already succeeded */ }
     }
   }, [])
 
