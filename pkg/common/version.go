@@ -10,7 +10,7 @@ var SUMMARY = "v4.0.0" // x-release-please-version
 var BRANCH = "dev"
 
 // VERSION of Release
-var VERSION = "4.0.0" // x-release-please-version
+var VERSION = "4.0.1" // x-release-please-version
 
 var COMMIT = "dirty"
 
