@@ -540,7 +540,26 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
             } catch {}
           }
           restoreScroll()
-          requestAnimationFrame(restoreScroll)
+          // Double-rAF to fire after xterm.js's own syncScrollArea rAF
+          requestAnimationFrame(() => {
+            restoreScroll()
+            requestAnimationFrame(restoreScroll)
+          })
+          // For large buffers (20k+ lines), reflow can take seconds.
+          // DOM failsafe at staggered intervals.
+          const forceDOMFit = () => {
+            const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
+            if (!vp) return
+            if (wasAtBottom && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
+              vp.scrollTop = vp.scrollHeight
+            }
+          }
+          setTimeout(forceDOMFit, 50)
+          setTimeout(forceDOMFit, 200)
+          setTimeout(forceDOMFit, 500)
+          setTimeout(forceDOMFit, 1000)
+          setTimeout(forceDOMFit, 2000)
+          setTimeout(forceDOMFit, 4000)
         }
       } catch {}
     }
@@ -670,21 +689,39 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
         totalBytes += evt.data.byteLength
         const head = new Uint8Array(evt.data.slice(0, 48))
         const sample = Array.from(head).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0')).join('')
+        // Scroll-to-bottom helper for replay settle. Uses `container`
+        // (closure) not containerRef.current in case the ref is nulled
+        // before the timer fires.
         if (!sawFirstByte) {
           sawFirstByte = true
-          // Mark the start of the replay burst. We'll scroll to bottom
-          // once the burst settles (no new binary message for 150ms).
-          replaySettleTimer = window.setTimeout(() => {
-            replaySettleTimer = null
+          // Start a scroll guard that reliably keeps the viewport at
+          // the bottom for 10 seconds after connect. Font-load and
+          // layout reflows can reset scrollTop at unpredictable times.
+          // The guard checks every 200ms and forces bottom. It stops
+          // immediately if the user scrolls up (wheel/touch/keyboard).
+          let userScrolled = false
+          const onUserScroll = () => { userScrolled = true }
+          container.addEventListener('wheel', onUserScroll, { passive: true })
+          container.addEventListener('touchmove', onUserScroll, { passive: true })
+          const guardInterval = window.setInterval(() => {
+            if (userScrolled) {
+              clearInterval(guardInterval)
+              container.removeEventListener('wheel', onUserScroll)
+              container.removeEventListener('touchmove', onUserScroll)
+              return
+            }
             term.scrollToBottom()
-          }, 150)
-        } else if (replaySettleTimer !== null) {
-          // Still in the replay burst — reset the settle timer.
-          clearTimeout(replaySettleTimer)
-          replaySettleTimer = window.setTimeout(() => {
-            replaySettleTimer = null
-            term.scrollToBottom()
-          }, 150)
+            const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
+            if (vp && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
+              vp.scrollTop = vp.scrollHeight
+            }
+          }, 200)
+          // Auto-stop after 10s
+          setTimeout(() => {
+            clearInterval(guardInterval)
+            container.removeEventListener('wheel', onUserScroll)
+            container.removeEventListener('touchmove', onUserScroll)
+          }, 10000)
         }
         const data = new Uint8Array(evt.data)
         const before = term.buffer.active.length
@@ -998,12 +1035,37 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
 
       restoreScroll()
 
-      // Phase 2: rAF restore — xterm.js may async-update the viewport
-      // after fit() returns, overriding the synchronous restore above.
+      // Phase 2: async restores. xterm.js's Viewport.syncScrollArea()
+      // uses rAF internally, and for large buffers (20k+ lines) the
+      // reflow spans multiple frames. Double-rAF alone isn't enough;
+      // setTimeout failsafes catch the tail end of heavy reflows.
+      const forceDOM = () => {
+        const vp = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null
+        if (!vp) return
+        if (wasAtBottom) {
+          if (vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
+            vp.scrollTop = vp.scrollHeight
+          }
+        }
+        // For scrolled-up case, restoreScroll already handled it via
+        // the xterm API; the DOM should follow. Only force for at-bottom.
+      }
       scrollRestoreRaf.current = requestAnimationFrame(() => {
-        scrollRestoreRaf.current = null
         restoreScroll()
+        scrollRestoreRaf.current = requestAnimationFrame(() => {
+          scrollRestoreRaf.current = null
+          restoreScroll()
+          forceDOM()
+        })
       })
+      // Timeout failsafe for heavy reflows that outlast rAF.
+      // Large buffers (20k+ lines) can take seconds to reflow.
+      setTimeout(() => { restoreScroll(); forceDOM() }, 50)
+      setTimeout(() => { restoreScroll(); forceDOM() }, 200)
+      setTimeout(() => { restoreScroll(); forceDOM() }, 500)
+      setTimeout(() => { restoreScroll(); forceDOM() }, 1000)
+      setTimeout(() => { restoreScroll(); forceDOM() }, 2000)
+      setTimeout(() => { restoreScroll(); forceDOM() }, 4000)
     }
   }, [])
 
