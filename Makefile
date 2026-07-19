@@ -1,4 +1,6 @@
-.PHONY: build frontend dev clean
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+.PHONY: build frontend dev clean install
 
 # Build the frontend and embed it in the Go binary
 build: frontend
@@ -11,6 +13,16 @@ frontend:
 # Development mode - run Go server with live reload
 dev:
 	go run . server --no-tls
+
+# Install built binary — handles "text file busy" from running daemons.
+# rm unlinks the old inode; running processes keep their handle, but the
+# path is freed so cp can write a new file.
+install: build
+	@mkdir -p $(INSTALL_DIR)
+	@rm -f $(INSTALL_DIR)/termyard
+	cp dist/termyard $(INSTALL_DIR)/termyard
+	@echo "Installed to $(INSTALL_DIR)/termyard"
+	@echo "Restart the service: systemctl --user restart termyard"
 
 # Clean build artifacts
 clean:

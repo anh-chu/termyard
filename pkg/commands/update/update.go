@@ -328,11 +328,15 @@ func applyRelease(ctx context.Context, rel *release, archiveURL, checksumURL, ar
 	backupPath = binPath + ".bak"
 	_ = os.Remove(backupPath)
 	if err := os.Rename(binPath, backupPath); err != nil {
-		// Old binary couldn't be moved (e.g. running with locked text segment
-		// on macOS). On most unixes the running file can be renamed away. If
-		// we hit this, surface the error so the user can rerun with sudo.
-		os.Remove(newPath)
-		return "", "", "", "", fmt.Errorf("move old binary aside: %w (you may need sudo, or your filesystem is read-only)", err)
+		// Rename can fail if daemon sessions hold the binary open and the
+		// filesystem doesn't support renaming busy executables (rare, but
+		// possible on some FUSE mounts). Fall back to rm + rename which
+		// unlinks the inode and lets running processes keep their handles.
+		if err2 := os.Remove(binPath); err2 != nil {
+			os.Remove(newPath)
+			return "", "", "", "", fmt.Errorf("move old binary aside: rename: %w, remove: %w (you may need sudo)", err, err2)
+		}
+		backupPath = "" // no backup available when we had to rm
 	}
 	if err := os.Rename(newPath, binPath); err != nil {
 		// Try to restore the backup before bailing.
