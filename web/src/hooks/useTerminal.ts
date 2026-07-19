@@ -141,6 +141,60 @@ async function sendPastedImage(ws: WebSocket, file: File, fallbackType: string):
   }))
 }
 
+// Shared scroll-preserving fit used by both doFit (initial layout) and
+// the exported fit() callback (ResizeObserver / pane drag). Before fit it
+// snapshots the distance from the bottom; after fit it restores the
+// viewport position with a synchronous pass + double-rAF (catches xterm.js
+// async viewport updates) + DOM failsafes at 50ms / 200ms for at-bottom.
+function fitPreservingScroll(
+  term: Terminal,
+  fitAddon: FitAddon,
+  container: HTMLElement,
+  opts?: { refreshAfter?: boolean },
+): void {
+  if (container.clientWidth <= 0 || container.clientHeight <= 0) return
+
+  const buf = term.buffer.active
+  const distFromBottom = Math.max(0, buf.baseY - buf.viewportY)
+  const wasAtBottom = distFromBottom === 0
+
+  neutralizeXtermScrollbarFallback(term)
+  fitAddon.fit()
+
+  if (opts?.refreshAfter) {
+    try { term.refresh(0, term.rows - 1) } catch { /* renderer dispose race */ }
+  }
+
+  const restoreScroll = () => {
+    try {
+      if (wasAtBottom) { term.scrollToBottom(); return }
+      const after = term.buffer.active
+      if (distFromBottom > after.baseY) { term.scrollToBottom(); return }
+      const target = after.baseY - distFromBottom
+      const delta = target - after.viewportY
+      if (delta !== 0) term.scrollLines(delta)
+    } catch { /* renderer dispose race */ }
+  }
+  const forceDOM = () => {
+    if (!wasAtBottom) return
+    const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
+    if (vp && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
+      vp.scrollTop = vp.scrollHeight
+    }
+  }
+
+  restoreScroll()
+  requestAnimationFrame(() => {
+    restoreScroll()
+    requestAnimationFrame(() => {
+      restoreScroll()
+      forceDOM()
+    })
+  })
+  setTimeout(() => { restoreScroll(); forceDOM() }, 50)
+  setTimeout(() => { restoreScroll(); forceDOM() }, 200)
+}
+
 export function useTerminal(sessionName: string, hostId?: string, backend?: string) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -520,48 +574,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     // populated the scrollback buffer, and a raw fitAddon.fit() would
     // displace the viewport.
     const doFit = () => {
-      try {
-        if (container.clientWidth > 0 && container.clientHeight > 0) {
-          const buf = term.buffer.active
-          const distFromBottom = Math.max(0, buf.baseY - buf.viewportY)
-          const wasAtBottom = distFromBottom === 0
-
-          neutralizeXtermScrollbarFallback(term)
-          fitAddon.fit()
-
-          // Restore scroll (same as the exported fit() callback)
-          const restoreScroll = () => {
-            try {
-              if (wasAtBottom) { term.scrollToBottom(); return }
-              const after = term.buffer.active
-              if (distFromBottom > after.baseY) { term.scrollToBottom(); return }
-              const delta = (after.baseY - distFromBottom) - after.viewportY
-              if (delta !== 0) term.scrollLines(delta)
-            } catch {}
-          }
-          restoreScroll()
-          // Double-rAF to fire after xterm.js's own syncScrollArea rAF
-          requestAnimationFrame(() => {
-            restoreScroll()
-            requestAnimationFrame(restoreScroll)
-          })
-          // For large buffers (20k+ lines), reflow can take seconds.
-          // DOM failsafe at staggered intervals.
-          const forceDOMFit = () => {
-            const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
-            if (!vp) return
-            if (wasAtBottom && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
-              vp.scrollTop = vp.scrollHeight
-            }
-          }
-          setTimeout(forceDOMFit, 50)
-          setTimeout(forceDOMFit, 200)
-          setTimeout(forceDOMFit, 500)
-          setTimeout(forceDOMFit, 1000)
-          setTimeout(forceDOMFit, 2000)
-          setTimeout(forceDOMFit, 4000)
-        }
-      } catch {}
+      try { fitPreservingScroll(term, fitAddon, container) } catch {}
     }
     doFit()
     requestAnimationFrame(doFit)
@@ -609,7 +622,6 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
     let sawFirstByte = false
-    let replaySettleTimer: number | null = null
     let msgCount = 0
     let totalBytes = 0
     let lastSummary = 0
@@ -687,9 +699,7 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
       if (evt.data instanceof ArrayBuffer) {
         msgCount++
         totalBytes += evt.data.byteLength
-        const head = new Uint8Array(evt.data.slice(0, 48))
-        const sample = Array.from(head).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0')).join('')
-        // Scroll-to-bottom helper for replay settle. Uses `container`
+        // Scroll guard: reliably keeps viewport at the bottom for 10s Uses `container`
         // (closure) not containerRef.current in case the ref is nulled
         // before the timer fires.
         if (!sawFirstByte) {
@@ -765,7 +775,6 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     }
 
     ws.onclose = (evt) => {
-      if (replaySettleTimer !== null) { clearTimeout(replaySettleTimer); replaySettleTimer = null }
       const detail = `connId=${connId} code=${evt.code} reason=${evt.reason || ''} clean=${evt.wasClean} msgs=${msgCount} hidden=${document.hidden} +${(performance.now() - tConnect).toFixed(0)}ms ${sawFirstByte ? 'painted' : 'never-painted'}`
       // Only handle if this is still the active connection
       if (activeConnId.current !== connId) {
@@ -975,98 +984,11 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     }
   }, [])
 
-  // Pending scroll-restore rAF so we can cancel on rapid successive fits.
-  const scrollRestoreRaf = useRef<number | null>(null)
-
   const fit = useCallback(() => {
     const term = termRef.current
-    if (fitAddonRef.current && containerRef.current && term) {
-      if (containerRef.current.clientWidth <= 0 || containerRef.current.clientHeight <= 0) return
-
-      // Cancel any pending scroll restore from a previous fit — a new
-      // reflow invalidates the old anchor.
-      if (scrollRestoreRaf.current !== null) {
-        cancelAnimationFrame(scrollRestoreRaf.current)
-        scrollRestoreRaf.current = null
-      }
-
-      // Snapshot distance-from-bottom before reflow (localterm pattern).
-      // fit() calls terminal.resize() which reflows the buffer when
-      // columns change — lines wrap/unwrap, total row count shifts.
-      // xterm.js does NOT preserve the viewport's distance from the
-      // bottom, and its viewport update fires ASYNCHRONOUSLY after fit()
-      // returns, so a synchronous scrollLines() gets overridden.
-      //
-      // Two-phase restore:
-      //  1. Synchronous restore right after fit() — handles most cases
-      //  2. rAF restore — catches xterm.js async viewport updates
-      const beforeBuf = term.buffer.active
-      const distFromBottom = Math.max(0, beforeBuf.baseY - beforeBuf.viewportY)
-      const wasAtBottom = distFromBottom === 0
-
-      try {
-        neutralizeXtermScrollbarFallback(term)
-        fitAddonRef.current.fit()
-      } catch {
-        return
-      }
-
-      // ponytail: repaint from buffer clears ghost rows left by the
-      // CSS-stretched canvas during a debounced/no-net-change resize.
-      try { term.refresh(0, term.rows - 1) } catch {}
-
-      // Phase 1: synchronous restore
-      const restoreScroll = () => {
-        try {
-          if (wasAtBottom) {
-            term.scrollToBottom()
-            return
-          }
-          const afterBuf = term.buffer.active
-          if (distFromBottom > afterBuf.baseY) {
-            term.scrollToBottom()
-            return
-          }
-          const targetViewportY = afterBuf.baseY - distFromBottom
-          const delta = targetViewportY - afterBuf.viewportY
-          if (delta !== 0) term.scrollLines(delta)
-        } catch { /* renderer dispose race */ }
-      }
-
-      restoreScroll()
-
-      // Phase 2: async restores. xterm.js's Viewport.syncScrollArea()
-      // uses rAF internally, and for large buffers (20k+ lines) the
-      // reflow spans multiple frames. Double-rAF alone isn't enough;
-      // setTimeout failsafes catch the tail end of heavy reflows.
-      const forceDOM = () => {
-        const vp = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null
-        if (!vp) return
-        if (wasAtBottom) {
-          if (vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
-            vp.scrollTop = vp.scrollHeight
-          }
-        }
-        // For scrolled-up case, restoreScroll already handled it via
-        // the xterm API; the DOM should follow. Only force for at-bottom.
-      }
-      scrollRestoreRaf.current = requestAnimationFrame(() => {
-        restoreScroll()
-        scrollRestoreRaf.current = requestAnimationFrame(() => {
-          scrollRestoreRaf.current = null
-          restoreScroll()
-          forceDOM()
-        })
-      })
-      // Timeout failsafe for heavy reflows that outlast rAF.
-      // Large buffers (20k+ lines) can take seconds to reflow.
-      setTimeout(() => { restoreScroll(); forceDOM() }, 50)
-      setTimeout(() => { restoreScroll(); forceDOM() }, 200)
-      setTimeout(() => { restoreScroll(); forceDOM() }, 500)
-      setTimeout(() => { restoreScroll(); forceDOM() }, 1000)
-      setTimeout(() => { restoreScroll(); forceDOM() }, 2000)
-      setTimeout(() => { restoreScroll(); forceDOM() }, 4000)
-    }
+    const container = containerRef.current
+    if (!term || !fitAddonRef.current || !container) return
+    fitPreservingScroll(term, fitAddonRef.current, container, { refreshAfter: true })
   }, [])
 
   const focus = useCallback(() => {
