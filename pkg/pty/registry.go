@@ -209,21 +209,16 @@ func (r *Registry) Create(name, shell, cwd string, cols, rows uint16) error {
 	}
 
 	// Release the process handle so the daemon is fully independent.
+	// Don't wait for the socket to appear here — the terminal connects
+	// via NewDaemonSession, which retries the dial until the daemon is
+	// ready. Returning immediately lets the UI mount in parallel with
+	// the daemon's cold-start (and the systemd-run DBus round-trip).
 	if err := cmd.Process.Release(); err != nil {
 		log.WithError(err).Warn("failed to release daemon process handle")
 	}
 
-	// Wait up to 2s for the socket file to appear.
-	socketPath := r.SocketPath(name)
-	for i := 0; i < 40; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
-			log.WithField("socket", socketPath).Info("session daemon created")
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	return fmt.Errorf("daemon socket %s did not appear within 2s", socketPath)
+	log.WithField("socket", r.SocketPath(name)).Info("session daemon created")
+	return nil
 }
 
 // List scans the socket directory for *.sock files, reads their sidecar JSON,

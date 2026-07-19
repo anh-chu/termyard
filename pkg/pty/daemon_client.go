@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -32,10 +33,26 @@ type DaemonSession struct {
 
 // NewDaemonSession connects to a session daemon at the given socket path.
 // It receives the initial Replay message and makes it available via Read().
+// daemonDialTimeout caps how long NewDaemonSession waits for a just-spawned
+// daemon to bind its socket. Registry.Create returns immediately after
+// starting the daemon process (which may still be cold-starting or waiting
+// on the systemd-run DBus round-trip), so the terminal's WS connect lands
+// here and retries until the socket is ready.
+const daemonDialTimeout = 2 * time.Second
+
 func NewDaemonSession(socketPath string) (*DaemonSession, error) {
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		return nil, fmt.Errorf("dial daemon socket %s: %w", socketPath, err)
+	var conn net.Conn
+	var err error
+	deadline := time.Now().Add(daemonDialTimeout)
+	for attempt := 0; ; attempt++ {
+		conn, err = net.Dial("unix", socketPath)
+		if err == nil {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("dial daemon socket %s: %w (after %d attempts)", socketPath, err, attempt+1)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	d := &DaemonSession{conn: conn}
