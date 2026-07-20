@@ -610,12 +610,25 @@ export function useTerminal(sessionName: string, hostId?: string, backend?: stri
     // Connect WebSocket for this session
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     let wsUrl: string
+    // A daemon session living on a REMOTE peer host must be attached via
+    // the hub's peer-relay route with the host param, even though its
+    // backend is "daemon". The daemon-backend branch below carried over
+    // from the local-only era and omits &host=, so the hub's daemonWS
+    // handler falls through to handleDaemonSession (LOCAL), dials a local
+    // socket for a remote session name, fails, and the tab loops
+    // "disconnected — reconnecting" forever. On a fresh page load the
+    // sessions list is still fetching when connect() first fires, so
+    // backend is undefined and the else branch (with &host=) is used,
+    // which is why cmd+R reattaches but an in-app switch (list already
+    // loaded, backend="daemon" known) gets stuck. Include &host= for
+    // remote daemon sessions; local daemon sessions keep host empty and
+    // hit the same handler's local path as before.
+    const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
     if (backend === 'daemon') {
-      wsUrl = `${protocol}//${window.location.host}/ws/daemon-session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}`
+      wsUrl = `${protocol}//${window.location.host}/ws/daemon-session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
     } else if (sessionName.startsWith('direct-pty:')) {
       wsUrl = `${protocol}//${window.location.host}/ws/direct-session?cols=${cols}&rows=${rows}`
     } else {
-      const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
       wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
     }
     const ws = new WebSocket(wsUrl)
