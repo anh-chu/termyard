@@ -81,7 +81,7 @@ func TestSpliceConns(t *testing.T) {
 		_ = browserClient.Close()
 	})
 
-	t.Run("ping answered locally", func(t *testing.T) {
+	t.Run("ping answered locally and forwarded", func(t *testing.T) {
 		browserClient, browserServer := mustWSConnPair(t)
 		dataClient, dataServer := mustWSConnPair(t)
 		done := make(chan struct{})
@@ -95,15 +95,16 @@ func TestSpliceConns(t *testing.T) {
 		if err := browserClient.WriteMessage(websocket.TextMessage, []byte(`{"type":"ping"}`)); err != nil {
 			t.Fatal(err)
 		}
+		// Fast local ack reaches the browser immediately.
 		mt, got := mustReadWSMessage(t, browserClient)
 		if mt != websocket.TextMessage || !bytes.Equal(got, pongFrame) {
 			t.Fatalf("browser got %d %q, want pong", mt, got)
 		}
-		if err := dataClient.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := dataClient.ReadMessage(); err == nil {
-			t.Fatal("ping forwarded to data conn")
+		// The ping is also forwarded to the peer data conn so the host echoes
+		// a pong back, keeping the hub<->host link alive on idle terminals.
+		mt, got = mustReadWSMessage(t, dataClient)
+		if mt != websocket.TextMessage || !bytes.Equal(got, []byte(`{"type":"ping"}`)) {
+			t.Fatalf("data conn got %d %q, want forwarded ping", mt, got)
 		}
 
 		_ = browserClient.Close()

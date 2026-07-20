@@ -78,6 +78,7 @@ type DaemonRegistry interface {
 	List() []DaemonSessionInfo
 	Capture(name string) (string, error)
 	CrashedSessions() []CrashedSessionInfo
+	IsSessionDead(name string) bool
 }
 
 // DaemonSessionInfo carries the daemon session metadata the state manager needs.
@@ -300,11 +301,30 @@ func (m *Manager) UpdateSessions(sessions []*model.Session) {
 	// from state, violating the "sessions must not disappear without explicit
 	// user action" guarantee.
 
-	// Guard 1: if ALL sessions vanished from discovery, skip this cycle entirely.
+	// Guard 1: if ALL sessions vanished from discovery, this is almost always a
+	// transient discovery failure, so skip the cycle — UNLESS every vanished
+	// session is individually confirmed dead (clean exit, intentional kill, or
+	// dismiss). That exception covers the "killed the last session" case: the
+	// daemon removes its socket on exit, discovery returns empty, and without
+	// this the dead session would linger in the sidebar forever as
+	// "disconnected — reconnecting".
+	allDead := false
 	if len(m.sessions) > 0 && len(newMap) == 0 {
-		logrus.Warn("state: all sessions disappeared from discovery — skipping removal (likely transient)")
-		m.mu.Unlock()
-		return
+		allDead = m.daemonReg != nil
+		if allDead {
+			for name := range m.sessions {
+				if !m.daemonReg.IsSessionDead(name) {
+					allDead = false
+					break
+				}
+			}
+		}
+		if !allDead {
+			logrus.Warn("state: all sessions disappeared from discovery — skipping removal (likely transient)")
+			m.mu.Unlock()
+			return
+		}
+		logrus.Info("state: all sessions disappeared from discovery and are confirmed dead — removing")
 	}
 
 	// Compute which sessions would be removed (deferred action so we can guard).
@@ -318,8 +338,9 @@ func (m *Manager) UpdateSessions(sessions []*model.Session) {
 	// Guard 2: don't remove more than 50% of sessions in one cycle (unless we
 	// only had 2 or fewer — a single intentional kill would look like 50%).
 	// Removing 1-2 sessions is fine; removing MOST sessions is almost certainly
-	// a discovery bug, not real session death.
-	if len(removed) > len(m.sessions)/2 && len(m.sessions) > 2 {
+	// a discovery bug, not real session death. Skip when Guard 1 already
+	// confirmed every vanished session is genuinely dead.
+	if !allDead && len(removed) > len(m.sessions)/2 && len(m.sessions) > 2 {
 		logrus.WithFields(logrus.Fields{
 			"current":      len(m.sessions),
 			"would_remove": len(removed),

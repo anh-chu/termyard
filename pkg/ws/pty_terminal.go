@@ -135,6 +135,15 @@ func BridgeDirectPTY(conn *websocket.Conn, sess pty.Session, session string, act
 
 // SpliceConns pumps bytes between an upgraded browser WS and a peer data conn.
 // Teardown nudges both read deadlines and callers own Close.
+//
+// Heartbeat: the browser sends an app-level {"type":"ping"} every 10s. We
+// answer locally for a fast ack AND forward the ping to the peer data conn
+// so the host echoes a pong back through this splice. The round trip keeps
+// the hub<->host data connection bidirectionally busy, defeating NAT/proxy
+// idle timeouts that would otherwise silently kill an idle remote terminal
+// and force a visible reconnect flap (the browser watchdog then never gets a
+// host pong and tears down). Without the forward, a half-open data conn is
+// only detected when output stops flowing, by which point the tab is stuck.
 func SpliceConns(browser, data *websocket.Conn, log *logrus.Entry) {
 	browser.SetReadLimit(model.MaxPTYControlMessageBytes)
 	data.SetReadLimit(model.MaxPTYControlMessageBytes)
@@ -176,12 +185,24 @@ func SpliceConns(browser, data *websocket.Conn, log *logrus.Entry) {
 			break
 		}
 		if mt == websocket.TextMessage && isPing(msg) {
+			// Fast local ack so the browser watchdog never false-fires.
 			browserMu.Lock()
 			_ = browser.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			werr := browser.WriteMessage(websocket.TextMessage, pongFrame)
 			_ = browser.SetWriteDeadline(time.Time{})
 			browserMu.Unlock()
 			if werr != nil {
+				closeBoth()
+				break
+			}
+			// Forward the ping to the peer data conn so the host echoes a
+			// pong back through the data->browser pump. This keeps the
+			// hub<->host link alive on idle terminals and surfaces
+			// half-open peer connections as write errors here.
+			_ = data.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			derr := data.WriteMessage(websocket.TextMessage, msg)
+			_ = data.SetWriteDeadline(time.Time{})
+			if derr != nil {
 				closeBoth()
 				break
 			}

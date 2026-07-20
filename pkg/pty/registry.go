@@ -364,6 +364,31 @@ func (r *Registry) List() []SessionInfo {
 	return out
 }
 
+// IsSessionDead reports whether a session is confirmed to have terminated
+// (cleanly exited, intentionally killed, or dismissed) according to the
+// durable lifecycle store. The state manager uses this to distinguish a
+// genuinely empty discovery (all sessions dead) from a transient discovery
+// failure, so the last session can be removed instead of lingering in the
+// sidebar as "disconnected — reconnecting" forever.
+//
+// Returns false when no lifecycle store is configured or no record exists —
+// conservative, so the mass-removal guards keep protecting against transients
+// in the pre-lifecycle / no-store cases.
+func (r *Registry) IsSessionDead(name string) bool {
+	if r.lifecycleStore == nil {
+		return false
+	}
+	rec, err := r.lifecycleStore.Get(name)
+	if err != nil {
+		return false
+	}
+	switch rec.State {
+	case LifecycleCleanlyEnded, LifecycleTerminationRequested, LifecycleDismissed:
+		return true
+	}
+	return false
+}
+
 // readDaemonPID reads the metadata JSON sidecar and returns the daemon PID,
 // or 0 if the file cannot be read or parsed.
 func (r *Registry) readDaemonPID(name string) int {

@@ -133,6 +133,61 @@ func TestStopSystemdScope_NoUnit(t *testing.T) {
 	reg.stopSystemdScope("nonexistent")
 }
 
+func TestIsSessionDead(t *testing.T) {
+	stateDir := t.TempDir()
+	store, err := NewLifecycleStore(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(t.TempDir())
+	reg.SetLifecycleStore(store)
+
+	if err := store.RecordActive(LifecycleRecord{ID: "alive", DaemonPID: 999999}); err != nil {
+		t.Fatal(err)
+	}
+	// RecordActive forces state=active, so write terminal-state records directly
+	// via the atomic writer to set the exact state we need to exercise.
+	for _, s := range []string{LifecycleCleanlyEnded, LifecycleTerminationRequested, LifecycleDismissed, LifecycleCrashed} {
+		id := "ended"
+		switch s {
+		case LifecycleTerminationRequested:
+			id = "killed"
+		case LifecycleDismissed:
+			id = "dismissed"
+		case LifecycleCrashed:
+			id = "crashed"
+		}
+		if err := store.writeAtomic(LifecycleRecord{ID: id, State: s}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"alive", false},
+		{"ended", true},
+		{"killed", true},
+		{"dismissed", true},
+		{"crashed", false}, // preserved for recovery, not dead
+		{"missing", false}, // no record
+	}
+	for _, tc := range tests {
+		if got := reg.IsSessionDead(tc.name); got != tc.want {
+			t.Errorf("IsSessionDead(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestIsSessionDead_NoLifecycleStore(t *testing.T) {
+	reg := NewRegistry(t.TempDir())
+	// Conservative: no store configured → never claim dead.
+	if reg.IsSessionDead("anything") {
+		t.Errorf("expected false with no lifecycle store")
+	}
+}
+
 // TestDetectAndCleanupCrashes verifies that crashed sessions are detected and
 // their systemd scopes are stopped (best-effort). The scope-stop is a fire-and-
 // forget operation; this test confirms the lifecycle transition is correct.

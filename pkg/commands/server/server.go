@@ -622,6 +622,10 @@ func (a *daemonRegAdapter) Capture(name string) (string, error) {
 	return a.reg.Capture(name)
 }
 
+func (a *daemonRegAdapter) IsSessionDead(name string) bool {
+	return a.reg.IsSessionDead(name)
+}
+
 func (a *daemonRegAdapter) CrashedSessions() []state.CrashedSessionInfo {
 	recs := a.reg.CrashedSessions()
 	out := make([]state.CrashedSessionInfo, len(recs))

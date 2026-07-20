@@ -686,9 +686,14 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   // Prune leaves whose session is gone from the live list. While the server is
   // alive the list is authoritative, so a missing session is a genuine kill and
   // its pane is removed at once. Recovery (full-server rebuild) is the only time
-  // a live session is transiently absent; pruning is suspended then.
+  // a live session is transiently absent; pruning is suspended then. We do NOT
+  // bail when sessions is empty: killing the last session makes the list empty,
+  // and its pane must still be pruned so the terminal unmounts instead of
+  // sitting on "disconnected — reconnecting" forever. Transient empties are
+  // already handled server-side (the state manager refuses to clear confirmed-
+  // alive sessions) and by pruningSuspended during the reconnect grace window.
   useEffect(() => {
-    if (sessionsLoading || sessions.length === 0 || pruningSuspended) return
+    if (sessionsLoading || pruningSuspended) return
     const validKeys = new Set(sessions.map(s => sessionKey(s)))
     if (pendingSessionRef.current) validKeys.add(pendingSessionRef.current)
 
