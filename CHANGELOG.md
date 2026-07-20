@@ -1,5 +1,44 @@
 # Changelog
 
+## [4.0.5] — Bug Fixes
+
+### Bug Fixes
+
+- **peer:** keep the hub<->host data connection alive on idle remote terminals. `SpliceConns` answered the browser heartbeat ping locally but never forwarded it to the peer data conn, so NAT/proxy idle timeouts silently killed idle remote tabs and forced a visible reconnect flap. The ping is now replied to locally (fast ack) AND forwarded to the peer conn so the host echoes a pong back through the data->browser pump, keeping the link bidirectionally busy.
+- **state:** unblock killing the last session on non-systemd hosts (e.g. macbook). `UpdateSessions` Guard 1 skipped every refresh where discovery returned empty while sessions were tracked, assuming all empty discoveries are transient — so a genuinely dead last session lingered as "disconnected — reconnecting" forever. Added `pty.Registry.IsSessionDead` (true for cleanly_ended / termination_requested / dismissed from the durable LifecycleStore) and taught Guard 1 to remove sessions when every vanished session is individually confirmed dead.
+- **frontend:** prune dead session panes when the live session list becomes empty. The prune effect bailed on `sessions.length === 0`, so the dead pane stayed mounted and showed "disconnected — reconnecting". Safe because the backend Guard 1 keeps `/api/sessions` populated during transient empties.
+
+## [4.0.4] — Bug Fixes
+
+### Bug Fixes
+
+- **frontend:** route remote daemon sessions through the peer relay on switch. `useTerminal` built the terminal WS URL from the session `backend` field; the `backend === "daemon"` branch used `/ws/daemon-session?name=...` without `&host=`, so remote daemon sessions hit the hub's LOCAL daemon handler, dialed a local socket for a remote name, failed, and the tab looped "disconnected — reconnecting". Why cmd+R reattached but in-app switch did not: on a fresh page load the sessions list was still fetching when `connect()` first fired, so `backend` was undefined and the else branch (with `&host=`) picked the correct peer-relay route. The WS stayed attached (effect dep is `[sessionName]`). On in-app switch the list was already loaded, `backend="daemon"` was known, and the wrong route was selected. Include `&host=` in the daemon-backend branch when `hostId` is set.
+
+## [4.0.1] – [4.0.3] — Bug Fixes & Performance
+
+### Bug Fixes
+
+- **pty:** clean up orphaned session scopes when their daemon exits out of band. `cleanUpOrphanedSessionScopes_no_function` (best-effort) now runs alongside socket-scan discovery so a crash + later restart does not leave systemd scopes holding zombie processes.
+- **session:** reflect daemon death instantly instead of lagging up to 10s. `bridgeSessionWithCB` now calls `RefreshSessions` on teardown so a dead session disappears from the sidebar and its terminal view unmounts promptly.
+- **namer:** use `SetDisplayName` for manual rename instead of `ApplyRename`, fixing the AI-name button silently no-oping on remote peer sessions.
+- **terminal:** force bracket paste wrapping for multiline pastes when the application hasn't enabled bracket paste mode (DECSET 2004). Before v4 tmux handled this transparently; with direct PTY sessions, apps like Pi that don't enable bracket paste would see each pasted line as a separate Enter.
+- **pty:** deduplicate session names on every create, fixing a split-view mirroring bug from missing session name dedup.
+- **session:** make new session creation non-blocking — the viewer returns immediately while the daemon cold-starts, instead of stalling on the socket dial.
+- **update:** handle "text file busy" (ETXTBSY) when replacing the binary during a self-update by retrying the rename.
+
+### Performance
+
+- **terminal:** increase scrollback to an 8MB ring buffer / 50k line xterm default.
+
+### Frontend Scroll Fixes (v4.0.1 – v4.0.3)
+
+- **terminal:** preserve scroll position on resize instead of forcing `scrollToBottom`; snap to bottom after replay and resize.
+- **terminal:** two-phase scroll restore — `requestAnimationFrame` catches xterm async viewport updates the synchronous pass misses.
+- **terminal:** settle-timer replay scroll — all panes scroll to bottom after replay.
+- **terminal:** scroll-preserve `doFit` and font-load refits now route through the shared `fit()` callback (was bypassing it).
+- **terminal:** scroll guard interval reliably keeps terminals at the bottom for ~10s after connect.
+- **terminal:** extract shared `fitPreservingScroll`, remove dead scroll code.
+
 ## [4.0.0] — Breaking Changes
 
 ### ⚠ BREAKING CHANGES

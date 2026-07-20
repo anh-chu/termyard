@@ -1,6 +1,6 @@
 # ADR: per-terminal connections for remote sessions
 
-Status: proposed
+Status: accepted
 Date: 2026-06-18
 Owners: Anh
 
@@ -101,3 +101,26 @@ The trace and pprof instrumentation stays until we have confidence in production
 - The blank on switch and the firehose starvation are removed by construction, not by tuning.
 - The peer protocol shrinks: control plane only, plus a thin per-stream data channel.
 - A future hub deployment slots in cleanly, satellites dial the hub on 443 for both control and data connections.
+
+## Routing invariant (learned the hard way, v4.0.5)
+
+Remote daemon sessions advertise `backend = "daemon"` over peer state, the
+same field local daemon sessions use. The hub's browser-side WS endpoint
+(`/ws/session` and `/ws/daemon-session` both dispatch to the same `daemonWS`
+handler) routes by the `host` query param: empty hits the LOCAL
+`handleDaemonSession` (dials a local socket), non-empty hits
+`handleRemoteSession` (peer relay). So the frontend terminal hook MUST carry
+`&host=<hostId>` in the WS URL for every remote session regardless of
+`backend`, including `backend = "daemon"`. Omitting it (the v4.0.4 bug) routes
+a remote daemon session to the local handler, which dials a local socket for
+a remote name, fails, and the tab loops "disconnected — reconnecting".
+
+The `useTerminal` WS URL construction keeps a single `hostParam` computed
+once and appended to every branch (daemon, direct-pty, and generic) so the
+remote route is selected uniformly. Do not re-introduce a branch that omits
+it. The reason a hard refresh (cmd+R) masked the bug: on a fresh page load the
+sessions list is still fetching when `connect()` first fires, `backend` is
+`undefined`, and the generic branch (with `&host=`) picks the correct route;
+the WS then never re-evaluates because the `useEffect` dep is `[sessionName]`.
+On an in-app switch the list is already loaded, `backend` is known, and the
+wrong branch was selected.
