@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 export interface Pane {
   id: string
@@ -71,16 +71,70 @@ export function parseSessionKey(key: string): { host: string; name: string } {
   return { host: key.substring(0, idx), name: key.substring(idx + 1) }
 }
 
+// Build an optimistic session stub for instant sidebar/terminal rendering
+// while the backend daemon cold-starts. Fields are minimal but valid so the
+// sidebar and pool identity checks do not crash before /api/sessions confirms.
+export function optimisticSession(name: string, hostId?: string, hostName?: string, cwd = ''): Session {
+  const now = new Date().toISOString()
+  return {
+    id: name,
+    name,
+    host: hostId || undefined,
+    host_name: hostName,
+    host_online: true,
+    backend: 'daemon',
+    created: now,
+    attached: false,
+    last_activity: now,
+    project_path: cwd || undefined,
+    windows: [{
+      id: `daemon-${name}`,
+      session_id: name,
+      name: 'shell',
+      index: 0,
+      active: true,
+      layout: 'tiled',
+      panes: [{
+        id: name + ':0.0',
+        window_id: `daemon-${name}`,
+        session_id: name,
+        index: 0,
+        active: true,
+        width: 120,
+        height: 40,
+        current_command: '',
+        pid: 0,
+      }],
+    }],
+  }
+}
+
 export function useSessions() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  // Names inserted optimistically before the server confirms them. Tracked so
+  // a real /api/sessions refresh does not flicker the stub out before the
+  // daemon appears in discovery. Cleared once the server's list contains the
+  // name for the first time, or on explicit removeSession.
+  const pendingOptimistic = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch('/api/sessions')
       if (res.ok) {
-        const data = await res.json()
-        setSessions(data || [])
+        const data = (await res.json()) as Session[] || []
+        const confirmed = new Set(data.map(s => s.name))
+        // Drop optimistic stubs whose serverside name has now appeared — the
+        // real record replaces them. Keep stubs still pending confirmation.
+        setSessions(prev => {
+          if (pendingOptimistic.current.size === 0) return data
+          const kept = prev.filter(s =>
+            pendingOptimistic.current.has(s.name) && !confirmed.has(s.name))
+          return kept.length ? [...kept, ...data] : data
+        })
+        for (const name of [...pendingOptimistic.current]) {
+          if (confirmed.has(name)) pendingOptimistic.current.delete(name)
+        }
       }
     } catch (err) {
       console.error('Failed to fetch sessions:', err)
@@ -89,11 +143,32 @@ export function useSessions() {
     }
   }, [])
 
+  // Insert (or replace) an optimistic session stub by name so the sidebar and
+  // terminal view render instantly while the backend daemon cold-starts. The
+  // next successful refresh reconciles it with the real server record.
+  const upsertSession = useCallback((session: Session) => {
+    pendingOptimistic.current.add(session.name)
+    setSessions(prev => {
+      const idx = prev.findIndex(s => s.name === session.name)
+      if (idx === -1) return [session, ...prev]
+      const copy = prev.slice()
+      copy[idx] = session
+      return copy
+    })
+  }, [])
+
+  // Remove an optimistic stub (e.g. create failed). Leaves any real server
+  // record untouched.
+  const removeSession = useCallback((name: string) => {
+    pendingOptimistic.current.delete(name)
+    setSessions(prev => prev.filter(s => s.name !== name))
+  }, [])
+
   useEffect(() => {
     refresh()
     const interval = setInterval(refresh, 5000)
     return () => clearInterval(interval)
   }, [refresh])
 
-  return { sessions, loading, refresh }
+  return { sessions, loading, refresh, upsertSession, removeSession }
 }

@@ -14,7 +14,7 @@ import { HelpModal } from './components/HelpModal'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { Login } from './components/Login'
 import { Setup } from './components/Setup'
-import { useSessions, Session, sessionKey, parseSessionKey } from './hooks/useSessions'
+import { useSessions, Session, sessionKey, parseSessionKey, optimisticSession } from './hooks/useSessions'
 import { useHosts } from './hooks/useHosts'
 import { useToolEvents } from './hooks/useToolEvents'
 import { useActivity } from './hooks/useActivity'
@@ -68,7 +68,7 @@ function getViewFromPath(): { view: View; sessionKey: string | null } {
 }
 
 function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenticated: boolean }) {
-  const { sessions, loading: sessionsLoading, refresh } = useSessions()
+  const { sessions, loading: sessionsLoading, refresh, upsertSession, removeSession } = useSessions()
   const { events: allToolEvents, handleEvent: handleToolEvent, getSessionEvents, sessionNeedsAttention, isSessionInActiveTurn, dismissEvent, dismissAll: dismissAllEvents } = useToolEvents()
   const { getSessionActivity, handleActivityEvent } = useActivity()
   const { pushState, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications()
@@ -141,7 +141,9 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     return () => window.clearTimeout(id)
   }, [authenticated, groupsLoaded, activeGroup, activeGroupId, currentView, paneTree, singleView, setGroupTree])
   const hasMultipleHosts = hosts.length > 1
-  const localHostId = hosts.find(h => h.local)?.id
+  const localHost = hosts.find(h => h.local)
+  const localHostId = localHost?.id
+  const localHostName = localHost?.name
   const [serverVersion, setServerVersion] = useState<string | null>(null)
   const [binaryUpdate, setBinaryUpdate] = useState<UpdateStatus | null>(null)
   const loadedVersionRef = useRef<string | null>(null)
@@ -979,6 +981,42 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   ): Promise<string | null> => {
     // For worktree sessions keep the modal open until we confirm success.
     if (!worktreeBranch) setNewSessionModalOpen(false)
+
+    // Optimistic: render sidebar stub + mount terminal instantly. Resolved
+    // name may differ from the requested name if the server dedups, so we
+    // migrate the session key once the POST resolves.
+    const optimisticKey = hostId ? `${hostId}/${name}` : name
+    if (!worktreeBranch) {
+      pendingSessionRef.current = optimisticKey
+      const fallbackPending = optimisticKey
+      window.setTimeout(() => {
+        if (pendingSessionRef.current === fallbackPending) pendingSessionRef.current = null
+      }, 15000)
+      upsertSession(optimisticSession(name, hostId || localHostId, localHostName, path))
+    }
+
+    // Apply the split/single layout with the optimistic key now, so the pane
+    // mounts in parallel with the backend create.
+    const target = splitTarget ?? splitTargetRef.current
+    splitTargetRef.current = null
+    if (!worktreeBranch) {
+      if (target) {
+        setPaneTree(prev => {
+          if (prev === null) return popOut(optimisticKey)
+          if (findLeaf(prev, target.key)) {
+            return target.newFirst
+              ? insertBesideLeaf(prev, target.key, target.direction, optimisticKey, true)
+              : splitLeaf(prev, target.key, target.direction, optimisticKey)
+          }
+          return prev
+        })
+        setActiveKey(optimisticKey)
+      } else {
+        selectSession(optimisticKey)
+      }
+      setTimeout(() => refocusTerminal(), 0)
+    }
+
     try {
       const res = await fetch('/api/session/new', {
         method: 'POST',
@@ -986,6 +1024,10 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
         body: JSON.stringify({ name, path, command, host: hostId || undefined, agent_type: agentType || undefined, worktree_branch: worktreeBranch || undefined }),
       })
       if (!res.ok) {
+        if (!worktreeBranch) {
+          removeSession(name)
+          if (pendingSessionRef.current === optimisticKey) pendingSessionRef.current = null
+        }
         if (worktreeBranch) {
           const msg = await res.text().catch(() => 'Failed to create worktree')
           return msg
@@ -993,74 +1035,57 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
         return null
       }
       if (worktreeBranch) setNewSessionModalOpen(false)
-      {
-        const payload = await res.json().catch(() => null)
-        const resolvedName = payload?.name || name
-        const sessKey = hostId ? `${hostId}/${resolvedName}` : resolvedName
-        pendingSessionRef.current = sessKey
-        // Remote creates round-trip through the peer, so the session is not in
-        // hub state right after refresh(). Keep the pending key protected from
-        // the prune effect until it materializes (cleared by the effect below);
-        // fall back to a timeout so a failed create can't pin it forever.
-        const pendingKey = sessKey
-        window.setTimeout(() => {
-          if (pendingSessionRef.current === pendingKey) pendingSessionRef.current = null
-        }, 15000)
-        // Direct parameter takes priority over ref (avoids race when drag fires twice)
-        const target = splitTarget ?? splitTargetRef.current
-        splitTargetRef.current = null
-        if (target) {
-          setPaneTree(prev => {
-            if (prev === null) return popOut(sessKey)
-            if (findLeaf(prev, target.key)) {
-              return target.newFirst
-                ? insertBesideLeaf(prev, target.key, target.direction, sessKey, true)
-                : splitLeaf(prev, target.key, target.direction, sessKey)
-            }
-            return prev
-          })
-          setActiveKey(sessKey)
-          await refresh()
-          setTimeout(() => refocusTerminal(), 300)
-        } else {
-          selectSession(sessKey)
-          await refresh()
-          setTimeout(() => refocusTerminal(), 300)
-        }
+      const payload = await res.json().catch(() => null)
+      const resolvedName = payload?.name || name
+      if (resolvedName !== name && !worktreeBranch) {
+        // Server deduped the name — migrate the optimistic key to the real one.
+        // Don't upsert a fresh stub: the real record is already on its way via
+        // the server's session-added broadcast; just protect it from pruning.
+        const resolvedKey = hostId ? `${hostId}/${resolvedName}` : resolvedName
+        removeSession(name)
+        migrateSessionKey(optimisticKey, resolvedKey)
+        pendingSessionRef.current = resolvedKey
       }
+      // Reconcile with the real server record; clears the optimistic stub.
+      refresh()
     } catch (err) {
       console.error('Failed to create session:', err)
-      pendingSessionRef.current = null
+      if (!worktreeBranch) {
+        removeSession(name)
+        if (pendingSessionRef.current === optimisticKey) pendingSessionRef.current = null
+      }
     }
     return null
-  }, [selectSession, refresh, refocusTerminal])
+  }, [selectSession, refresh, refocusTerminal, localHostId, localHostName, upsertSession, removeSession, migrateSessionKey])
 
-  const handleQuickShell = useCallback(async () => {
+  const handleQuickShell = useCallback(() => {
     const name = `shell-${Date.now()}`
-    try {
-      const res = await fetch('/api/session/new', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, path: '', command: '', backend: 'daemon' }),
-      })
-      if (res.ok) {
-        // Session key must include the local host ID (if multi-host is active)
-        // so it matches the key the API returns. Without this, the pruning
-        // effect clears singleView because the key doesn't match.
-        const sk = localHostId ? `${localHostId}/${name}` : name
-        // Guard against prune effect clearing singleView before
-        // the session appears in the sessions list.
-        pendingSessionRef.current = sk
-        // Refresh so session data (with backend field) is available
-        // before Terminal mounts and connects to the WebSocket.
-        await refresh()
-        selectSession(sk)
-        setTimeout(() => refocusTerminal(), 300)
+    const sk = localHostId ? `${localHostId}/${name}` : name
+    // Optimistic: fire the backend create first (non-awaited) so the daemon
+    // starts spawning immediately, then render the sidebar stub + mount the
+    // terminal. The Terminal pool's WS connect retries while NewDaemonSession
+    // (server-side) retries the dial until the socket is ready.
+    fetch('/api/session/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, path: '', command: '', backend: 'daemon' }),
+    }).then(res => {
+      if (!res.ok) {
+        removeSession(name)
+        if (pendingSessionRef.current === sk) pendingSessionRef.current = null
+      } else {
+        // Reconcile with the real server record as soon as the daemon is up.
+        refresh()
       }
-    } catch (err) {
-      console.error('Failed to create daemon session:', err)
-    }
-  }, [selectSession, refresh, refocusTerminal, localHostId])
+    }).catch(() => {
+      removeSession(name)
+      if (pendingSessionRef.current === sk) pendingSessionRef.current = null
+    })
+    pendingSessionRef.current = sk
+    upsertSession(optimisticSession(name, localHostId, localHostName))
+    selectSession(sk)
+    setTimeout(() => refocusTerminal(), 0)
+  }, [selectSession, refresh, refocusTerminal, localHostId, localHostName, upsertSession, removeSession])
 
 
 
