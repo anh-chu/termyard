@@ -975,6 +975,11 @@ export class TerminalPool {
 
   private connect(entry: PoolEntryState): void {
     const term = entry.terminal
+    // Re-arm the scrollback-replay scroll-to-bottom guard on every
+    // (re)connection. sawFirstByte is set-once per connect; without this
+    // reset, reconnects replay scrollback but the guard never fires, so
+    // the terminal lands mid-history instead of pinned to the bottom.
+    entry.sawFirstByte = false
     const cols = term.cols || 80
     const rows = term.rows || 24
 
