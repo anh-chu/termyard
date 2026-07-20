@@ -177,14 +177,14 @@ export function TiledView({
 
   // --------------- render pane ---------------
 
-  const renderPane = (sessionKey: string) => {
+  const renderPane = (sessionKey: string, path: string) => {
     const { host, name } = parseSessionKey(sessionKey)
     const isActive = sessionKey === activeKey
     const isDropTarget = dropTarget?.key === sessionKey
 
     return (
       <div
-        key={sessionKey}
+        key={path}
         className={cn(
           'flex-1 flex flex-col overflow-hidden min-h-0 relative',
         )}
@@ -477,7 +477,7 @@ export function TiledView({
 
   const renderNode = (node: PaneTree, path: string): React.ReactNode => {
     if (node.type === 'leaf') {
-      return renderPane(node.sessionKey)
+      return renderPane(node.sessionKey, path || '0')
     }
 
     // Split node

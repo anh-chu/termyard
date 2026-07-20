@@ -33,6 +33,7 @@ import { useSelfUpdate, type UpdateStatus } from './hooks/useSelfUpdate'
 import { applyTheme } from './theme'
 import { sessionSignal } from './lib/sessionState'
 import { generateKeyBetween } from 'fractional-indexing'
+import { terminalPool, keyFor as poolKeyFor } from './lib/terminalPool'
 
 type View = 'overview' | 'session' | 'settings' | 'setup'
 
@@ -339,7 +340,9 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   const removeSessionFromLayout = useCallback((sessKey: string) => {
     closePane(sessKey)
     setSingleView(prev => prev === sessKey ? null : prev)
-
+    // Explicit kill: dispose the pool entry so terminal/WS tear down.
+    const { host, name } = parseSessionKey(sessKey)
+    terminalPool.dispose(poolKeyFor(name, host || undefined))
   }, [closePane])
 
   const popOutPane = useCallback((sessKey: string) => {
@@ -564,6 +567,11 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     setActiveKey(prev => (prev === oldKey ? newKey : prev))
     setSingleView(prev => (prev === oldKey ? newKey : prev))
 
+    // Rekey pool entry: preserve terminal/WS, update reconnect identity.
+    // If destination already has an entry (collision), dispose it first.
+    terminalPool.dispose(newKey)
+    terminalPool.rekey(oldKey, newKey)
+
     const { host: oldHost, name: oldName } = parseSessionKey(oldKey)
     const oldPath = oldHost
       ? `/session/${encodeURIComponent(oldHost)}/${encodeURIComponent(oldName)}`
@@ -696,6 +704,10 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     if (sessionsLoading || pruningSuspended) return
     const validKeys = new Set(sessions.map(s => sessionKey(s)))
     if (pendingSessionRef.current) validKeys.add(pendingSessionRef.current)
+
+    // Authoritative sweep: dispose pool entries for sessions gone from the
+    // server list. Only runs when NOT in recovery / reconnect-grace window.
+    terminalPool.disposeAbsent(validKeys)
 
     if (paneTree) {
       const toRemove = getLeaves(paneTree).filter(k => !validKeys.has(k))

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import type { ChangeEvent, DragEvent, ReactNode } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
@@ -214,10 +214,19 @@ export function Terminal({ sessionName, hostId, backend, fullscreen, onToggleFul
     const node = popNodeRef.current, home = popHomeRef.current
     if (!node || !home) return
     try {
-      const restore = await popOut(node, home)
+      const onRestore = () => {
+        restorePipRef.current = null
+        setPoppedOut(false)
+        rebind()
+      }
+      const result = await popOut(node, home, { onRestore })
       setPoppedOut(true)
       rebind()
-      restorePipRef.current = () => { restore(); restorePipRef.current = null; setPoppedOut(false); rebind() }
+      restorePipRef.current = () => {
+        if (restorePipRef.current === null) return // idempotent guard
+        result.restore()
+        onRestore()
+      }
     } catch { /* user denied */ }
   }, [rebind])
 
@@ -251,19 +260,26 @@ export function Terminal({ sessionName, hostId, backend, fullscreen, onToggleFul
     return () => window.removeEventListener('keydown', onKey)
   }, [selectionMenu, setSelectionMenu])
 
-  useEffect(() => {
-    if (containerRef.current) {
-      connect(containerRef.current)
-    }
+  // Layout-phase checkout/checkin: checkout before paint, checkin during cleanup.
+  // Depends on canonical identity (name + host + backend) so backend changes
+  // trigger a fresh cold-acquire via the pool, and same-identity warm switches
+  // reuse the existing entry.
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    connect(container)
     return () => disconnect()
-  }, [sessionName])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionName, hostId, backend])
 
   // Reconfigure the live terminal when renderer, grapheme, or predictive-echo
   // prefs change, without tearing down the WebSocket connection.
   useEffect(() => {
     if (!prefs) return
     reconfigure(prefs.terminal.renderer, prefs.terminal.unicode_graphemes, prefs.terminal.predictive_echo)
-  }, [prefs.terminal.renderer, prefs.terminal.unicode_graphemes, prefs.terminal.predictive_echo, reconfigure])
+  }, [prefs.terminal.renderer, prefs.terminal.unicode_graphemes, prefs.terminal.predictive_echo,
+      prefs.terminal.scrollback, prefs.terminal.font_size, prefs.terminal.font_family,
+      prefs.theme, reconfigure])
 
   // Auto-focus on mount only for the active pane — the inactive pane's
   // auto-focus would steal focus from the intended target.
@@ -469,6 +485,19 @@ export function Terminal({ sessionName, hostId, backend, fullscreen, onToggleFul
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [fullscreen, onToggleFullscreen])
+
+  // Idempotent PiP cleanup on unmount: if component unmounts while popped out,
+  // restore the wrapper to home (or close empty PiP window) and let the pool
+  // checkin move the terminal to the hidden host.
+  useEffect(() => {
+    return () => {
+      if (restorePipRef.current) {
+        restorePipRef.current()
+        restorePipRef.current = null
+        setPoppedOut(false)
+      }
+    }
+  }, [])
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
 

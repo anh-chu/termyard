@@ -10,13 +10,28 @@ export function pipUnavailableReason(): string | null {
     return 'This browser does not support pop-out windows. Use Chrome/Edge or Firefox 151+.'
   return null
 }
-// Move `node` into a PiP window. Returns a cleanup that restores it to `home`.
-// Caller keeps a placeholder in the page; we re-append `node` to `home` on close.
+// Move `node` into `dest` via appendChild. Reports whether the owner
+// document changed (cross-document move). Never clones; never mutates xterm.
+export function transferNode(
+  node: HTMLElement,
+  dest: HTMLElement,
+): { crossedDocument: boolean } {
+  const crossedDocument = node.ownerDocument !== dest.ownerDocument
+  dest.appendChild(node)
+  return { crossedDocument }
+}
+
+// Move `node` into a PiP window. Returns restore metadata plus control.
+// Caller keeps a placeholder in the page; restore moves `node` back to `home`.
 export async function popOut(
   node: HTMLElement,
   home: HTMLElement,
-  opts?: { width?: number; height?: number },
-): Promise<() => void> {
+  opts?: { width?: number; height?: number; onRestore?: () => void },
+): Promise<{
+  restore: () => void
+  pipWindow: Window
+  home: HTMLElement
+}> {
   // @ts-expect-error: not in lib.dom yet
   const pip: Window = await window.documentPictureInPicture.requestWindow({
     width: opts?.width ?? 800,
@@ -43,15 +58,18 @@ export async function popOut(
   }
 
   pip.document.body.style.margin = '0'
-  pip.document.body.appendChild(node)
+  transferNode(node, pip.document.body)
 
   let cleaned = false
   const restore = () => {
     if (cleaned) return
     cleaned = true
-    home.appendChild(node)
+    transferNode(node, home)
     pip.close()
   }
-  pip.addEventListener('pagehide', restore, { once: true })
-  return restore
+  pip.addEventListener('pagehide', () => {
+    restore()
+    opts?.onRestore?.()
+  }, { once: true })
+  return { restore, pipWindow: pip, home }
 }
