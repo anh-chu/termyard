@@ -144,18 +144,38 @@ async function sendPastedImage(
   }))
 }
 
-// Scroll-preserving fit
+// Scroll-preserving fit.
+//
+// fitAddon.fit() reflows rows and can move the viewport, so we restore the
+// user's prior scroll anchor afterward.
+//
+// CRITICAL: we decide whether to preserve a non-bottom offset using
+// entry.userScrolled (set only by real wheel/touch/scrollbar gestures), NOT
+// buffer geometry. xterm updates viewportY asynchronously during rapid writes
+// (spinner/redraw animations), so capturing `baseY - viewportY` mid-frame
+// reads a stale in-between state and "restores" the terminal to a phantom
+// offset, pinning it mid-history and flashing on every redraw.
+//
+// When the user is following output (not scrolled), we just scrollToBottom
+// once and let xterm auto-stick on subsequent writes. No multi-frame deferred
+// restore pile: that competed with xterm's own scroll-on-write and was itself
+// a source of visible flashing during TUI animations.
 function fitPreservingScroll(
-  term: Terminal,
-  fitAddon: FitAddon,
+  entry: PoolEntryState,
   container: HTMLElement,
   opts?: { refreshAfter?: boolean },
 ): void {
+  const term = entry.terminal
+  const fitAddon = entry.fitAddon
   if (container.clientWidth <= 0 || container.clientHeight <= 0) return
 
+  const myEpoch = ++entry.fitEpoch
   const buf = term.buffer.active
-  const distFromBottom = Math.max(0, buf.baseY - buf.viewportY)
-  const wasAtBottom = distFromBottom === 0
+  // Only preserve a real user offset. geometry-based distFromBottom is
+  // unreliable during async writes (see header comment).
+  const userOffset = entry.userScrolled ? Math.max(0, buf.baseY - buf.viewportY) : 0
+
+  const isStale = () => entry.fitEpoch !== myEpoch
 
   neutralizeXtermScrollbarFallback(term)
   fitAddon.fit()
@@ -164,34 +184,35 @@ function fitPreservingScroll(
     try { term.refresh(0, term.rows - 1) } catch { /* renderer dispose race */ }
   }
 
-  const restoreScroll = () => {
+  if (userOffset === 0) {
+    // Following output: pin to bottom once. xterm keeps it there on writes.
+    try { term.scrollToBottom() } catch { /* renderer dispose race */ }
+    const forceDOM = () => {
+      if (isStale()) return
+      const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
+      if (vp && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
+        vp.scrollTop = vp.scrollHeight
+      }
+    }
+    requestAnimationFrame(forceDOM)
+    return
+  }
+
+  // User is genuinely scrolled up: restore the captured offset, but only
+  // across a single deferred frame (xterm recomputes viewport async). Epoch
+  // gating cancels this if the user scrolls again or a newer fit runs.
+  const restoreOnce = () => {
+    if (isStale() || !entry.userScrolled) return
     try {
-      if (wasAtBottom) { term.scrollToBottom(); return }
       const after = term.buffer.active
-      if (distFromBottom > after.baseY) { term.scrollToBottom(); return }
-      const target = after.baseY - distFromBottom
+      if (userOffset > after.baseY) { term.scrollToBottom(); return }
+      const target = after.baseY - userOffset
       const delta = target - after.viewportY
       if (delta !== 0) term.scrollLines(delta)
     } catch { /* renderer dispose race */ }
   }
-  const forceDOM = () => {
-    if (!wasAtBottom) return
-    const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
-    if (vp && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
-      vp.scrollTop = vp.scrollHeight
-    }
-  }
-
-  restoreScroll()
-  requestAnimationFrame(() => {
-    restoreScroll()
-    requestAnimationFrame(() => {
-      restoreScroll()
-      forceDOM()
-    })
-  })
-  setTimeout(() => { restoreScroll(); forceDOM() }, 50)
-  setTimeout(() => { restoreScroll(); forceDOM() }, 200)
+  restoreOnce()
+  requestAnimationFrame(restoreOnce)
 }
 
 // --- Types -------------------------------------------------------------
@@ -322,6 +343,27 @@ interface PoolEntryState {
 
   // Lease
   generation: number
+
+  // Fit-scheduling epoch. Incremented on every fit() and on user scroll so
+  // stale deferred scroll-restore callbacks from a prior fit can no-op.
+  fitEpoch: number
+
+  // True only when the user has taken control of the viewport via a real
+  // gesture (wheel, touch, scrollbar drag). Buffer geometry (baseY vs
+  // viewportY) is NOT a reliable signal: xterm updates viewportY
+  // asynchronously during rapid writes (spinner/redraw animations), so the
+  // viewport can momentarily lag baseY by a few lines mid-frame. Treating
+  // that lag as a user scroll caused fit/restore logic to pin the view
+  // mid-history and flash on every redraw. We key all scroll-preserving
+  // behavior off this gesture flag instead.
+  userScrolled: boolean
+
+  // Pin-to-bottom guard interval, armed on first byte after (re)connect to
+  // land the scrollback replay at the bottom. Tracked on the entry so a new
+  // connect clears any prior guard instead of stacking (stacked guards each
+  // forced scrollToBottom at 5Hz and fought xterm's redraw, causing visible
+  // flashing during spinner/output animations).
+  pinGuardInterval: number | undefined
 
   // Active container state
   activeContainer: HTMLElement | null
@@ -467,7 +509,7 @@ export class TerminalPool {
 
     // Fit and resize
     if (container.clientWidth > 0 && container.clientHeight > 0) {
-      fitPreservingScroll(entry.terminal, entry.fitAddon, container, { refreshAfter: true })
+      fitPreservingScroll(entry, container, { refreshAfter: true })
       if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
         const { cols, rows } = entry.terminal
         entry.ws.send(JSON.stringify({ type: 'resize', cols, rows }))
@@ -534,7 +576,7 @@ export class TerminalPool {
     if (!entry || !entry.activeContainer) return
     const container = entry.activeContainer
     if (container.clientWidth <= 0 || container.clientHeight <= 0) return
-    fitPreservingScroll(entry.terminal, entry.fitAddon, container, { refreshAfter: true })
+    fitPreservingScroll(entry, container, { refreshAfter: true })
   }
 
   focus(lease: LeaseToken): void {
@@ -724,7 +766,7 @@ export class TerminalPool {
           this.attachListeners(newEntry)
           // Load renderer-dependent addons (WebGL) AFTER open() above.
           this.reconcilePrefs(newEntry, prefs)
-          fitPreservingScroll(newEntry.terminal, newEntry.fitAddon, prevContainer, { refreshAfter: true })
+          fitPreservingScroll(newEntry, prevContainer, { refreshAfter: true })
           // Send resize
           if (newEntry.ws && newEntry.ws.readyState === WebSocket.OPEN) {
             const { cols, rows } = newEntry.terminal
@@ -937,6 +979,9 @@ export class TerminalPool {
       latencySamples: [],
 
       generation: 0,
+      fitEpoch: 0,
+      userScrolled: false,
+      pinGuardInterval: undefined,
 
       activeContainer: null,
       activeCallbacks: null,
@@ -976,6 +1021,7 @@ export class TerminalPool {
     // reset, reconnects replay scrollback but the guard never fires, so
     // the terminal lands mid-history instead of pinned to the bottom.
     entry.sawFirstByte = false
+    entry.userScrolled = false
     const cols = term.cols || 80
     const rows = term.rows || 24
 
@@ -1036,35 +1082,64 @@ export class TerminalPool {
 
     ws.onmessage = (evt) => {
       armWatchdog()
+      // Re-assert "follow output" per write. reconnect replay of the raw
+      // ring buffer (and TUI redraw streams) can move xterm's viewport off the
+      // bottom; once off-bottom xterm stops auto-following, parking the view
+      // and repainting old content = flash. Correct it in the write callback.
+      // Mitigation, not root fix (see ADR: reconnect resume protocol).
+      const followOutput = () => {
+        if (entry.userScrolled) return
+        const b = entry.terminal.buffer.active
+        if (b.type !== 'normal') return
+        if (b.baseY - b.viewportY > 2) {
+          try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
+        }
+      }
       if (evt.data instanceof ArrayBuffer) {
         entry.msgCount++
         entry.totalBytes += evt.data.byteLength
         if (!entry.sawFirstByte) {
           entry.sawFirstByte = true
+          entry.userScrolled = false
+          // Clear any prior guard so rapid reconnects don't stack intervals.
+          if (entry.pinGuardInterval !== undefined) {
+            clearInterval(entry.pinGuardInterval)
+          }
           if (entry.activeContainer) {
             const container = entry.activeContainer
-            let userScrolled = false
-            const onUserScroll = () => { userScrolled = true }
-            container.addEventListener('wheel', onUserScroll, { passive: true })
-            container.addEventListener('touchmove', onUserScroll, { passive: true })
-            const guardInterval = window.setInterval(() => {
-              if (userScrolled) {
-                clearInterval(guardInterval)
-                container.removeEventListener('wheel', onUserScroll)
-                container.removeEventListener('touchmove', onUserScroll)
+            let guardTicks = 0
+            const disarm = (reason: string) => {
+              if (entry.pinGuardInterval === undefined) return
+              clearInterval(entry.pinGuardInterval)
+              entry.pinGuardInterval = undefined
+              console.debug('[termyard-scroll] pin guard disarmed (%s)', reason)
+            }
+            // Tick at 100ms while the scrollback replay is flushing, but
+            // DISARM THE MOMENT we reach the bottom — no need to force
+            // scrollToBottom for a full 10s. A long-running guard kept
+            // yanking the viewport during live spinner/output redraws,
+            // which flashed the screen every 200ms.
+            entry.pinGuardInterval = window.setInterval(() => {
+              guardTicks++
+              if (entry.userScrolled) { disarm('user scroll'); return }
+              const buf = entry.terminal.buffer.active
+              const atBottomBuf = buf.baseY - buf.viewportY <= 0
+              const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
+              const atBottomDOM = !vp || vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 2
+              if (atBottomBuf && atBottomDOM) {
+                // Replay has landed at the bottom; xterm auto-follows from here.
+                disarm('caught up')
                 return
               }
               entry.terminal.scrollToBottom()
-              const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
               if (vp && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
                 vp.scrollTop = vp.scrollHeight
               }
-            }, 200)
-            setTimeout(() => {
-              clearInterval(guardInterval)
-              container.removeEventListener('wheel', onUserScroll)
-              container.removeEventListener('touchmove', onUserScroll)
-            }, 10000)
+              // Hard cap: if we somehow never settle (e.g. endless replay
+              // stream), stop forcing after 3s so we don't fight live output.
+              if (guardTicks > 30) disarm('3s cap')
+            }, 100)
+            console.debug('[termyard-scroll] pin-to-bottom guard armed')
           }
         }
         const data = new Uint8Array(evt.data)
@@ -1082,9 +1157,10 @@ export class TerminalPool {
               entry.latencySamples.shift()
             }
             entry.writePending = false
+            followOutput()
           })
         } else {
-          entry.terminal.write(data)
+          entry.terminal.write(data, followOutput)
         }
       } else {
         if (typeof evt.data === 'string') {
@@ -1093,7 +1169,7 @@ export class TerminalPool {
             if (ctrl && ctrl.type === 'pong') return
           } catch { /* not JSON */ }
         }
-        entry.terminal.write(evt.data as string)
+        entry.terminal.write(evt.data as string, followOutput)
       }
     }
 
@@ -1278,6 +1354,30 @@ export class TerminalPool {
       }
     }
 
+    // User took over the viewport. We track this with a gesture-driven flag
+    // (NOT buffer geometry, which lies during async writes) so
+    // fitPreservingScroll and the reconnect pin-guard know when to stop
+    // forcing scroll-to-bottom.
+    const markUserScroll = () => {
+      if (!entry.userScrolled) {
+        entry.userScrolled = true
+        entry.fitEpoch++
+      }
+    }
+    // Clear the flag when the user scrolls back to the bottom so output
+    // following resumes.
+    const onViewportScroll = () => {
+      if (!entry.userScrolled || !vpEl) return
+      if (vpEl.scrollTop + vpEl.clientHeight >= vpEl.scrollHeight - 2) {
+        entry.userScrolled = false
+      }
+    }
+    const onWheel = () => markUserScroll()
+    const vpEl = container.querySelector('.xterm-viewport') as HTMLElement | null
+    vpEl?.addEventListener('scroll', onViewportScroll, { passive: true })
+    container.addEventListener('wheel', onWheel, { passive: true })
+    container.addEventListener('touchmove', markUserScroll, { passive: true })
+
     container.addEventListener('mousedown', onMouseDown, true)
     container.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('keydown', onWindowKeyDownCapture, true)
@@ -1351,6 +1451,9 @@ export class TerminalPool {
       window.removeEventListener('keydown', onWindowKeyDownCapture, true)
       helperTextarea?.removeEventListener('paste', onPaste)
       container.removeEventListener('contextmenu', onContextMenu)
+      if (vpEl) vpEl.removeEventListener('scroll', onViewportScroll)
+      container.removeEventListener('wheel', onWheel)
+      container.removeEventListener('touchmove', markUserScroll)
     }
   }
 
@@ -1365,6 +1468,7 @@ export class TerminalPool {
     if (entry.heartbeatTimer) { clearInterval(entry.heartbeatTimer); entry.heartbeatTimer = undefined }
     if (entry.watchdogTimer) { clearTimeout(entry.watchdogTimer); entry.watchdogTimer = undefined }
     if (entry.telemetryInterval) { clearInterval(entry.telemetryInterval); entry.telemetryInterval = undefined }
+    if (entry.pinGuardInterval !== undefined) { clearInterval(entry.pinGuardInterval); entry.pinGuardInterval = undefined }
 
     // Close WS
     if (entry.ws) {
