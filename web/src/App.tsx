@@ -648,7 +648,16 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
       refresh()
       return
     }
-    if (['session-added', 'session-removed', 'sessions-changed'].includes(evt.type)) {
+    if (evt.type === 'session-removed') {
+      // Drop an optimistic stub the moment the backend confirms the session is
+      // gone, BEFORE refresh(). Otherwise refresh() preserves the stub (it is
+      // still pendingOptimistic and absent from /api/sessions), which shields
+      // the dead leaf behind a ghost entry: validKeys keeps the key, the prune
+      // effect never closes the pane or disposes the pool entry, and the
+      // terminal sits on a dead daemon socket — black screen / reconnecting.
+      removeSession(evt.session || '', evt.host || undefined)
+      refresh()
+    } else if (['session-added', 'sessions-changed'].includes(evt.type)) {
       refresh()
     }
     if (evt.type === 'session-order-updated') {
@@ -673,7 +682,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     if (evt.type === 'sessions-crashed') {
       crashedHook.refresh()
     }
-  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs, refreshSessionOrder, refreshGroups, migrateSessionKey, crashedHook.refresh])
+  }, [refresh, refreshHosts, handleToolEvent, processToolEvent, handleActivityEvent, refreshSessionAttrs, refreshSessionOrder, refreshGroups, migrateSessionKey, removeSession, crashedHook.refresh])
 
   const { connected } = useWebSocket('/ws/events', onEvent)
 

@@ -112,11 +112,14 @@ export function optimisticSession(name: string, hostId?: string, hostName?: stri
 export function useSessions() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
-  // Names inserted optimistically before the server confirms them. Tracked so
-  // a real /api/sessions refresh does not flicker the stub out before the
-  // daemon appears in discovery. Cleared once the server's list contains the
-  // name for the first time, or on explicit removeSession.
-  const pendingOptimistic = useRef<Set<string>>(new Set())
+  // Names inserted optimistically before the server confirms them, mapped to
+  // their insertion timestamp. Tracked so a real /api/sessions refresh does
+  // not flicker the stub out before the daemon appears in discovery. Cleared
+  // once the server's list contains the name, on explicit removeSession, or
+  // after a TTL safety net in case the create silently failed and no
+  // session-removed broadcast ever arrives.
+  const STUB_TTL_MS = 6000
+  const pendingOptimistic = useRef<Map<string, number>>(new Map())
 
   const refresh = useCallback(async () => {
     try {
@@ -124,17 +127,22 @@ export function useSessions() {
       if (res.ok) {
         const data = (await res.json()) as Session[] || []
         const confirmed = new Set(data.map(s => s.name))
-        // Drop optimistic stubs whose serverside name has now appeared — the
-        // real record replaces them. Keep stubs still pending confirmation.
+        const now = performance.now()
+        // Drop optimistic stubs that the server confirmed (real record
+        // replaces them) or that have outlived their TTL (create failed
+        // without a removal broadcast). Surviving pending stubs within TTL
+        // are preserved so the cold-start gap does not flicker them out.
+        for (const name of [...pendingOptimistic.current.keys()]) {
+          const insertedAt = pendingOptimistic.current.get(name)!
+          if (confirmed.has(name) || now - insertedAt > STUB_TTL_MS) {
+            pendingOptimistic.current.delete(name)
+          }
+        }
         setSessions(prev => {
           if (pendingOptimistic.current.size === 0) return data
-          const kept = prev.filter(s =>
-            pendingOptimistic.current.has(s.name) && !confirmed.has(s.name))
+          const kept = prev.filter(s => pendingOptimistic.current.has(s.name))
           return kept.length ? [...kept, ...data] : data
         })
-        for (const name of [...pendingOptimistic.current]) {
-          if (confirmed.has(name)) pendingOptimistic.current.delete(name)
-        }
       }
     } catch (err) {
       console.error('Failed to fetch sessions:', err)
@@ -147,7 +155,7 @@ export function useSessions() {
   // terminal view render instantly while the backend daemon cold-starts. The
   // next successful refresh reconciles it with the real server record.
   const upsertSession = useCallback((session: Session) => {
-    pendingOptimistic.current.add(session.name)
+    pendingOptimistic.current.set(session.name, performance.now())
     setSessions(prev => {
       const idx = prev.findIndex(s => s.name === session.name)
       if (idx === -1) return [session, ...prev]
@@ -157,11 +165,15 @@ export function useSessions() {
     })
   }, [])
 
-  // Remove an optimistic stub (e.g. create failed). Leaves any real server
-  // record untouched.
-  const removeSession = useCallback((name: string) => {
+  // Remove an optimistic stub (e.g. create failed, or the server just
+  // confirmed the session is gone via session-removed). In multi-host setups
+  // drop by sessionKey (host/name) so a same-named session on another host
+  // is not nuked. Leaves any real server record untouched.
+  const removeSession = useCallback((name: string, host?: string) => {
     pendingOptimistic.current.delete(name)
-    setSessions(prev => prev.filter(s => s.name !== name))
+    setSessions(prev => prev.filter(s =>
+      host ? !(s.name === name && (s.host || '') === host) : s.name !== name
+    ))
   }, [])
 
   useEffect(() => {

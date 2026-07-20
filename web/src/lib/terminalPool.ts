@@ -441,21 +441,21 @@ export class TerminalPool {
     }
     entry.activeCallbacks = callbacks
 
-    // Move terminal to foreground container using shared transfer primitive
+    // Bind terminal to the foreground container. On a cold entry (just
+    // created, never opened) term.element is undefined, so we MUST still call
+    // term.open(container) here to create the renderer and viewport — skipping
+    // it leaves the terminal with no renderer, and any later fit/refresh/
+    // syncScrollArea call throws `this._renderer.value is undefined` and can
+    // infinite-recurse in setRenderer. This path is hit exactly when a prior
+    // kill disposed the pooled entry and a new session cold-creates one.
     const term = entry.terminal
     const root = term.element as HTMLElement | undefined
     if (root) {
-      const { crossedDocument } = (_transferNode ?? transferNode)(root, container)
-      if (crossedDocument) {
-        // Re-open terminal to rebind to new document
-        try { term.open(container) } catch { /* ignored */ }
-        neutralizeXtermScrollbarFallback(term)
-      } else {
-        // Refresh renderer attachment for same document
-        try { term.open(container) } catch { /* ignored */ }
-        neutralizeXtermScrollbarFallback(term)
-      }
+      // Already opened: move the existing DOM node into the new container first.
+      (_transferNode ?? transferNode)(root, container)
     }
+    try { term.open(container) } catch { /* ignored */ }
+    neutralizeXtermScrollbarFallback(term)
 
     entry.activeContainer = container
 
@@ -714,12 +714,16 @@ export class TerminalPool {
           newEntry.generation++
           newEntry.activeContainer = prevContainer
           const root = newEntry.terminal.element as HTMLElement | undefined
-          if (root) {
-            prevContainer.appendChild(root)
-            try { newEntry.terminal.open(prevContainer) } catch { /* ignored */ }
-            neutralizeXtermScrollbarFallback(newEntry.terminal)
-          }
+          // newEntry was just createEntry()'d (terminal never opened); always
+          // open() it into prevContainer so the renderer is bound, not just
+          // when a stale root happens to exist.
+          try { newEntry.terminal.open(prevContainer) } catch { /* ignored */ }
+          neutralizeXtermScrollbarFallback(newEntry.terminal)
+          // (root is only relevant for re-appending the existing DOM node.)
+          if (root) prevContainer.appendChild(root)
           this.attachListeners(newEntry)
+          // Load renderer-dependent addons (WebGL) AFTER open() above.
+          this.reconcilePrefs(newEntry, prefs)
           fitPreservingScroll(newEntry.terminal, newEntry.fitAddon, prevContainer, { refreshAfter: true })
           // Send resize
           if (newEntry.ws && newEntry.ws.readyState === WebSocket.OPEN) {
@@ -865,20 +869,12 @@ export class TerminalPool {
     term.loadAddon(ef.createWebLinksAddon())
     term.loadAddon(ef.createClipboardAddon(clipboardProvider))
 
-    // WebGL
+    // WebGL renderer is NOT loaded here: the WebGL addon must be loaded
+    // AFTER term.open() (xterm.js requirement). Loading it before open makes
+    // setRenderer infinite-recurse ("InternalError: too much recursion"). It
+    // is loaded lazily in reconcilePrefs(), which runs after open() in both
+    // checkout() and the scrollback-rebuild path.
     let webglAddon: WebglAddon | null = null
-    if (prefs.renderer === 'webgl') {
-      const wa = ef.createWebglAddon()
-      if (wa) {
-        wa.onContextLoss(() => {
-          wa.dispose()
-          // Don't null the reference here since we're in a closure;
-          // the entry will pick up the null on next reconcile.
-        })
-        try { term.loadAddon(wa) } catch { /* ignored */ }
-        webglAddon = wa as WebglAddon
-      }
-    }
 
     // Image addon
     const imageAddon = ef.createImageAddon()
