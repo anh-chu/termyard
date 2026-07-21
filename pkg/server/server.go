@@ -3053,6 +3053,8 @@ func handleDaemonSession(w http.ResponseWriter, r *http.Request, opts *Options) 
 		rows = 40
 	}
 
+	replayGated := r.URL.Query().Get("replay") == "1"
+
 	socketPath := opts.DaemonReg.SocketPath(name)
 	sess, err := pty.NewDaemonSession(socketPath)
 	if err != nil {
@@ -3080,7 +3082,7 @@ func handleDaemonSession(w http.ResponseWriter, r *http.Request, opts *Options) 
 	if opts.OnDaemonOutput != nil {
 		onOutput = func() { opts.OnDaemonOutput(paneID) }
 	}
-	ws.BridgeDirectPTY(conn, sess, name, opts.ActivityTracker, log, onOutput)
+	ws.BridgeDirectPTY(conn, sess, name, opts.ActivityTracker, log, replayGated, onOutput)
 
 	// The bridge returned: either this tab disconnected (daemon still alive)
 	// or the daemon/shell exited (Ctrl+D, kill, crash). Reconcile discovery now

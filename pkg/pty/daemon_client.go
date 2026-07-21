@@ -27,7 +27,20 @@ type DaemonSession struct {
 	// Internal buffering for Read() calls.
 	mu   sync.Mutex
 	cond *sync.Cond
-	buf  bytes.Buffer
+
+	// Replay and live output are kept in separate buffers so that a framed
+	// reader can emit boundary signals and guarantee a single ReadFramed
+	// call never mixes replay bytes with live bytes.
+	replayBuf bytes.Buffer
+	liveBuf   bytes.Buffer
+
+	// replaySeen is set when a FrameReplay frame arrives. It is used to
+	// emit the ChunkReplayBoundary sentinel exactly once after the replay
+	// buffer has been drained. Connections with no initial replay do not
+	// emit the boundary.
+	replaySeen      bool
+	boundaryEmitted bool
+
 	done bool // set when connection is closed or daemon exits
 }
 
@@ -91,8 +104,10 @@ func (d *DaemonSession) readFrames() {
 		}
 
 		switch ftype {
-		case FrameOutput, FrameReplay:
-			d.appendData(payload)
+		case FrameReplay:
+			d.appendReplay(payload)
+		case FrameOutput:
+			d.appendLive(payload)
 		case FrameClose:
 			// Daemon is shutting down.
 			d.signalDone()
@@ -101,19 +116,37 @@ func (d *DaemonSession) readFrames() {
 	}
 }
 
-// appendData adds data to the internal buffer and wakes blocked readers.
+// appendReplay adds data to the replay buffer and wakes blocked readers.
 // If the buffer would exceed maxClientBuffer, the oldest data is discarded.
-func (d *DaemonSession) appendData(data []byte) {
+func (d *DaemonSession) appendReplay(data []byte) {
 	d.mu.Lock()
-	if d.buf.Len()+len(data) > maxClientBuffer {
+	if d.replayBuf.Len()+len(data) > maxClientBuffer {
 		// Discard the oldest buffered data to make room.
 		// If the incoming data alone exceeds the cap, keep only the tail.
-		d.buf.Reset()
+		d.replayBuf.Reset()
 		if len(data) > maxClientBuffer {
 			data = data[len(data)-maxClientBuffer:]
 		}
 	}
-	d.buf.Write(data)
+	d.replayBuf.Write(data)
+	d.replaySeen = true
+	d.mu.Unlock()
+	d.cond.Broadcast()
+}
+
+// appendLive adds data to the live buffer and wakes blocked readers.
+// If the buffer would exceed maxClientBuffer, the oldest data is discarded.
+func (d *DaemonSession) appendLive(data []byte) {
+	d.mu.Lock()
+	if d.liveBuf.Len()+len(data) > maxClientBuffer {
+		// Discard the oldest buffered data to make room.
+		// If the incoming data alone exceeds the cap, keep only the tail.
+		d.liveBuf.Reset()
+		if len(data) > maxClientBuffer {
+			data = data[len(data)-maxClientBuffer:]
+		}
+	}
+	d.liveBuf.Write(data)
 	d.mu.Unlock()
 	d.cond.Broadcast()
 }
@@ -126,28 +159,72 @@ func (d *DaemonSession) signalDone() {
 	d.cond.Broadcast()
 }
 
-// Read implements Session — returns PTY output bytes.
+// Read implements Session — returns PTY output bytes (replay first, then live),
+// flattened for legacy callers that do not understand framing.
 // Blocks until data is available or the session is closed.
 func (d *DaemonSession) Read(buf []byte) (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	// Wait until there is data or we're done.
-	for d.buf.Len() == 0 && !d.done {
+	for d.replayBuf.Len() == 0 && d.liveBuf.Len() == 0 && !d.done {
 		d.cond.Wait()
 	}
 
-	if d.buf.Len() == 0 && d.done {
+	if d.replayBuf.Len() > 0 {
+		n, _ := d.replayBuf.Read(buf)
+		return n, nil
+	}
+
+	if d.liveBuf.Len() == 0 && d.done {
 		return 0, io.EOF
 	}
 
-	n, err := d.buf.Read(buf)
+	// liveBuf has data.
+	n, err := d.liveBuf.Read(buf)
 	// If we drained the buffer but there's more data coming, return what we have.
 	// Only signal EOF when both buffer is empty AND done.
 	if err == io.EOF {
 		err = nil // buffer EOF is not a real error
 	}
 	return n, err
+}
+
+// ReadFramed reads output with explicit framing. It satisfies the
+// FramedReader interface. A single call never returns bytes from both
+// replay and live buffers.
+//
+// The order of returns is: all ChunkReplay bytes, exactly one
+// ChunkReplayBoundary with n == 0, then all ChunkLive bytes. If no replay
+// frame is received on this connection, the boundary is never emitted.
+func (d *DaemonSession) ReadFramed(buf []byte) (int, ChunkKind, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.replayBuf.Len() > 0 {
+		n, _ := d.replayBuf.Read(buf)
+		return n, ChunkReplay, nil
+	}
+
+	if d.replaySeen && !d.boundaryEmitted {
+		d.boundaryEmitted = true
+		return 0, ChunkReplayBoundary, nil
+	}
+
+	// Replay drained; wait for live data.
+	for d.liveBuf.Len() == 0 && !d.done {
+		d.cond.Wait()
+	}
+
+	if d.liveBuf.Len() > 0 {
+		n, err := d.liveBuf.Read(buf)
+		if err == io.EOF {
+			err = nil
+		}
+		return n, ChunkLive, err
+	}
+
+	return 0, ChunkLive, io.EOF
 }
 
 // Write implements Session — sends an Input frame to the daemon.

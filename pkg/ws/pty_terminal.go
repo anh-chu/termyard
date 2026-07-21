@@ -19,6 +19,11 @@ import (
 // pongFrame is the canonical reply to a browser heartbeat ping.
 var pongFrame = []byte(`{"type":"pong"}`)
 
+// replayStartJSON and replayEndJSON delimit the initial daemon ring-buffer
+// replay on sessions that opt into replay gating.
+var replayStartJSON = []byte(`{"type":"replay-start"}`)
+var replayEndJSON = []byte(`{"type":"replay-end"}`)
+
 // isPing reports whether a text control frame is a heartbeat ping.
 func isPing(msg []byte) bool {
 	var control struct {
@@ -41,7 +46,7 @@ func NewPTYTerminalHandler(activityTracker *activity.Tracker, tracker *toolevent
 	}
 }
 
-func bridgeSessionWithCB(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, onOutput func(), log *logrus.Entry) {
+func bridgeSessionWithCB(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, onOutput func(), log *logrus.Entry, replayGated bool) {
 	conn.SetReadLimit(model.MaxPTYControlMessageBytes)
 
 	output := newOutputCoalescer(func(mt int, payload []byte) error {
@@ -60,6 +65,63 @@ func bridgeSessionWithCB(conn *websocket.Conn, sess pty.Session, session string,
 		defer output.CloseAndFlush()
 
 		buffer := make([]byte, 32*1024)
+
+		if fr, isFramed := sess.(pty.FramedReader); replayGated && isFramed {
+			var firstChunkDone, inReplay bool
+			for {
+				n, kind, readErr := fr.ReadFramed(buffer)
+				switch kind {
+				case pty.ChunkReplay:
+					if n == 0 {
+						continue
+					}
+					if !firstChunkDone {
+						output.SubmitControl(replayStartJSON)
+						firstChunkDone = true
+						inReplay = true
+					}
+					ptyReads++
+					if act != nil {
+						act.Record(session, n)
+					}
+					if onOutput != nil {
+						onOutput()
+					}
+					output.Submit(append([]byte(nil), buffer[:n]...))
+				case pty.ChunkReplayBoundary:
+					if inReplay {
+						output.SubmitControl(replayEndJSON)
+						inReplay = false
+					}
+				case pty.ChunkLive:
+					if n == 0 && readErr == nil {
+						continue
+					}
+					if inReplay {
+						output.SubmitControl(replayEndJSON)
+						inReplay = false
+					}
+					if n > 0 {
+						ptyReads++
+						if act != nil {
+							act.Record(session, n)
+						}
+						if onOutput != nil {
+							onOutput()
+						}
+						output.Submit(append([]byte(nil), buffer[:n]...))
+					}
+				}
+				if readErr != nil {
+					if inReplay {
+						output.SubmitControl(replayEndJSON)
+					}
+					_ = conn.SetReadDeadline(time.Now())
+					return
+				}
+			}
+		}
+
 		for {
 			n, readErr := sess.Read(buffer)
 			if n > 0 {
@@ -125,12 +187,12 @@ outer:
 // BridgeDirectPTY pumps a direct PTY session over an already-open WebSocket
 // connection. An optional onOutput callback is invoked on every PTY read so
 // the silence monitor can track daemon output activity.
-func BridgeDirectPTY(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, log *logrus.Entry, onOutput ...func()) {
+func BridgeDirectPTY(conn *websocket.Conn, sess pty.Session, session string, act *activity.Tracker, log *logrus.Entry, replayGated bool, onOutput ...func()) {
 	var cb func()
 	if len(onOutput) > 0 {
 		cb = onOutput[0]
 	}
-	bridgeSessionWithCB(conn, sess, session, act, cb, log)
+	bridgeSessionWithCB(conn, sess, session, act, cb, log, replayGated)
 }
 
 // SpliceConns pumps bytes between an upgraded browser WS and a peer data conn.
@@ -255,5 +317,5 @@ func (h *PTYTerminalHandler) HandleDirectSession(w http.ResponseWriter, r *http.
 	})
 	log.Info("direct session ws client connected")
 
-	BridgeDirectPTY(conn, sess, cwd, h.activityTracker, log)
+	BridgeDirectPTY(conn, sess, cwd, h.activityTracker, log, false)
 }

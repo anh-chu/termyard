@@ -8,8 +8,8 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { TerminalPool, keyFor, __injectTransferNode } from './terminalPool'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { TerminalPool, keyFor, __injectTransferNode, MAX_REPLAY_BUFFER_BYTES, concatU8 } from './terminalPool'
 import type { PoolFactory, PoolIdentity, TerminalPrefs, CheckoutCallbacks, LeaseToken } from './terminalPool'
 
 // ── Counters ──────────────────────────────────────────────────────────
@@ -170,7 +170,17 @@ class FakeTerminal {
   scrollLines(_delta: number) {}
   focus() {}
   refresh(_start: number, _end: number) {}
-  write(_data: any, _cb?: () => void) {}
+  writes: { data: Uint8Array | string; cb?: () => void }[] = []
+  write(data: any, cb?: () => void) {
+    if (data instanceof ArrayBuffer) {
+      this.writes.push({ data: new Uint8Array(data), cb })
+    } else if (typeof data === 'object' && data && typeof data.length === 'number' && !(data instanceof Uint8Array)) {
+      this.writes.push({ data: new Uint8Array(data), cb })
+    } else {
+      this.writes.push({ data, cb })
+    }
+    if (cb) cb()
+  }
 
   _fireData(data: string) { this._dataListeners.forEach(fn => fn(data)) }
   _fireResize(cols: number, rows: number) {
@@ -656,5 +666,272 @@ describe('TerminalPool', () => {
     // Second checkout (warm) — WS is already OPEN, checkout sends resize
     const l2 = pool.checkout(defId('s1'), defPrefs(), container, noopCbs())
     expect(socketSendCount).toBeGreaterThan(scAfterCheckin)
+  })
+
+  // ── Replay & sync helpers ───────────────────────────────────────────
+
+  function openSession(name = 's1', backend?: string) {
+    const container = fakeEl()
+    const id = defId(name, undefined, backend)
+    const l = pool.checkout(id, defPrefs(), container, noopCbs())
+    const entry = pool._debug_entry(l.key)!
+    const ws = entry.ws as unknown as FakeWebSocket
+    ws._open()
+    const term = entry.terminal as unknown as FakeTerminal
+    term.writes = []
+    return { l, entry, ws, term }
+  }
+
+  function currentEntry(name: string) {
+    const entry = pool._debug_entry(name)!
+    return {
+      entry,
+      ws: entry.ws as unknown as FakeWebSocket,
+      term: entry.terminal as unknown as FakeTerminal,
+    }
+  }
+
+  // ── Replay buffering ───────────────────────────────────────────────
+
+  it('wsUrl includes replay=1 for daemon backend', () => {
+    const { ws } = openSession('s1', 'daemon')
+    expect(ws.url).toContain('/ws/daemon-session')
+    expect(ws.url).toContain('replay=1')
+  })
+
+  it('wsUrl includes replay=1 for default session', () => {
+    const { ws } = openSession('s1')
+    expect(ws.url).toContain('/ws/session')
+    expect(ws.url).toContain('replay=1')
+  })
+
+  it('wsUrl does NOT include replay=1 for direct-session', () => {
+    const { ws } = openSession('direct-pty:test')
+    expect(ws.url).toContain('/ws/direct-session')
+    expect(ws.url).not.toContain('replay=1')
+  })
+
+  it('replay buffers binary and writes once on replay-end', () => {
+    const { ws, term } = openSession('s1')
+    ws._message(JSON.stringify({ type: 'replay-start' }))
+    ws._message(new Uint8Array([0x01, 0x02]).buffer)
+    ws._message(new Uint8Array([0x03, 0x04]).buffer)
+    expect(term.writes.length).toBe(0)
+    ws._message(JSON.stringify({ type: 'replay-end' }))
+    expect(term.writes.length).toBe(1)
+    const written = term.writes[0].data
+    expect(written).toBeInstanceOf(Uint8Array)
+    expect([...(written as Uint8Array)]).toEqual([1, 2, 3, 4])
+  })
+
+  it('no replay-start -> binary passthrough after fallback timer', () => {
+    vi.useFakeTimers()
+    const { ws, term } = openSession('s1')
+    // Without replay-start, data before the fallback timer is held as
+    // replay candidates; after the timer fires it is flushed and subsequent
+    // bytes are written immediately.
+    ws._message(new Uint8Array([0x01]).buffer)
+    const writesBefore = term.writes.length
+    vi.advanceTimersByTime(250)
+    expect(term.writes.length).toBeGreaterThanOrEqual(writesBefore)
+    ws._message(new Uint8Array([0x02]).buffer)
+    const payloads = term.writes.map(w => [...(w.data as Uint8Array)])
+    expect(payloads.flat()).toContain(2)
+    vi.useRealTimers()
+  })
+
+  it('late replay-start after fallback is ignored and bytes passthrough', () => {
+    vi.useFakeTimers()
+    const { ws, term } = openSession('s1')
+    vi.advanceTimersByTime(250)
+    ws._message(JSON.stringify({ type: 'replay-start' }))
+    ws._message(new Uint8Array([0x05]).buffer)
+    expect(term.writes.length).toBe(1)
+    expect([...(term.writes[0].data as Uint8Array)]).toEqual([5])
+    vi.useRealTimers()
+  })
+
+  it('reconnect resets replay state and requires fresh replay-start', () => {
+    vi.useFakeTimers()
+    const { ws } = openSession('s1')
+    ws._message(JSON.stringify({ type: 'replay-start' }))
+    ws._message(new Uint8Array([0x09]).buffer)
+    const oldConnId = pool._debug_entry('s1')!.connId
+
+    // Simulate reconnect by closing and advancing reconnect timer
+    ws.close()
+    vi.advanceTimersByTime(2500)
+
+    const { ws: ws2, term } = currentEntry('s1')
+    expect(pool._debug_entry('s1')!.connId).not.toBeUndefined()
+    ws2._open()
+    expect(term.writes.length).toBe(0)
+    ws2._message(new Uint8Array([0x0a]).buffer)
+    vi.advanceTimersByTime(250)
+    expect(term.writes.length).toBe(1)
+    expect([...(term.writes[0].data as Uint8Array)]).toEqual([0x0a])
+    vi.useRealTimers()
+  })
+
+  it('replay buffer cap flushes immediately and arms passthrough', () => {
+    vi.useFakeTimers()
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+    const { ws, term } = openSession('s1')
+    ws._message(JSON.stringify({ type: 'replay-start' }))
+    const chunk = new Uint8Array(MAX_REPLAY_BUFFER_BYTES + 1)
+    ws._message(chunk.buffer)
+    expect(term.writes.length).toBe(1)
+    expect((term.writes[0].data as Uint8Array).length).toBe(MAX_REPLAY_BUFFER_BYTES + 1)
+    expect(debugSpy).toHaveBeenCalledWith('[termyard-replay] 32MB cap exceeded, passthrough')
+    // After cap, bytes should be written immediately (passthroughArmed).
+    ws._message(new Uint8Array([0x07]).buffer)
+    expect(term.writes.length).toBe(2)
+    expect([...(term.writes[1].data as Uint8Array)]).toEqual([7])
+    debugSpy.mockRestore()
+    vi.useRealTimers()
+  })
+
+  // ── BSU/ESU synchronized output ────────────────────────────────────
+
+  it('BSU/ESU wraps content into a single write with markers stripped', () => {
+    const { ws, term } = openSession('s1')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(250) // arm passthrough so bytes are live
+    const bsu = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x68])
+    const chunkA = new Uint8Array([0x61, 0x62])
+    const chunkB = new Uint8Array([0x63, 0x64])
+    const esu = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c])
+    ws._message(concatU8([bsu, chunkA]).buffer)
+    ws._message(concatU8([chunkB, esu]).buffer)
+    vi.advanceTimersByTime(0)
+    const syncWrites = term.writes.filter(w => w.data instanceof Uint8Array && (w.data as Uint8Array).length > 0)
+    expect(syncWrites.length).toBe(1)
+    expect([...(syncWrites[0].data as Uint8Array)]).toEqual([0x61, 0x62, 0x63, 0x64])
+    vi.useRealTimers()
+  })
+
+  it('BSU marker straddling chunk boundaries is reassembled', () => {
+    const { ws, term } = openSession('s1')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(250)
+    const part1 = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x30]) // \x1b[?2020 — not a marker yet, but ends with \x1b[?202 prefix tail
+    const part2prefix = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x68]) // \x1b[?2026h
+    const content = new Uint8Array([0x70, 0x71])
+    const esu = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c])
+    ws._message(part1.buffer)
+    ws._message(concatU8([part2prefix, content, esu]).buffer)
+    vi.advanceTimersByTime(0)
+    const syncWrites = term.writes.filter(w => w.data instanceof Uint8Array && (w.data as Uint8Array).length > 0)
+    // First write carries \x1b[?2020 preceding bytes (marker prefix that turned out not to be a marker).
+    expect(syncWrites.length).toBeGreaterThanOrEqual(1)
+    expect([...(syncWrites[syncWrites.length - 1].data as Uint8Array)]).toEqual([0x70, 0x71])
+    vi.useRealTimers()
+  })
+
+  it('ESU without prior BSU is a no-op and bytes pass through', () => {
+    const { ws, term } = openSession('s1')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(250)
+    const payload = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c, 0x77])
+    ws._message(payload.buffer)
+    vi.advanceTimersByTime(0)
+    expect(term.writes.length).toBe(1)
+    expect([...(term.writes[0].data as Uint8Array)]).toEqual([0x77])
+    vi.useRealTimers()
+  })
+
+  it('BSU marker straddling chunk boundaries: no marker bytes leaked', () => {
+    const { ws, term } = openSession('s1')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(250)
+    // part1 ends with a partial prefix tail that is NOT a valid marker prefix,
+    // so it must be flushed as plain output. The real marker starts fresh in part2.
+    const prefixTail = new Uint8Array([0x1b, 0x5b, 0x3f])
+    const part1 = concatU8([new Uint8Array([0x70, 0x71]), prefixTail])
+    const part2prefix = new Uint8Array([0x32, 0x30, 0x32, 0x36, 0x68]) // completes BSU
+    const content = new Uint8Array([0x72, 0x73])
+    const esu = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c])
+    ws._message(part1.buffer)
+    ws._message(concatU8([part2prefix, content, esu]).buffer)
+    vi.advanceTimersByTime(0)
+    const syncWrites = term.writes.filter(w => w.data instanceof Uint8Array && (w.data as Uint8Array).length > 0)
+    expect(syncWrites.length).toBeGreaterThanOrEqual(1)
+    expect([...(syncWrites[syncWrites.length - 1].data as Uint8Array)]).toEqual([0x72, 0x73])
+    const nonMarkerBytes = term.writes
+      .filter(w => w.data instanceof Uint8Array)
+      .flatMap(w => [...(w.data as Uint8Array)])
+    expect(nonMarkerBytes.filter(b => b === 0x1b)).toEqual([])
+    vi.useRealTimers()
+  })
+
+  it('partial marker prefix straddle is reassembled without leaking tail', () => {
+    const { ws, term } = openSession('s1')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(250)
+    const markerPrefix = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32])
+    for (let partialLen = 1; partialLen <= markerPrefix.length; partialLen++) {
+      const chunk1 = concatU8([new Uint8Array([0x4c, 0x4f, 0x47, 0x49, 0x4e]), markerPrefix.subarray(0, partialLen)])
+      const chunk2 = concatU8([markerPrefix.subarray(partialLen), new Uint8Array([0x36, 0x68, 0x57, 0x4f, 0x52, 0x4c, 0x44])])
+      const esu = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c])
+      term.writes = []
+      ws._message(chunk1.buffer)
+      ws._message(concatU8([chunk2, esu]).buffer)
+      vi.advanceTimersByTime(0)
+      const bytes = term.writes.filter(w => w.data instanceof Uint8Array).flatMap(w => [...(w.data as Uint8Array)])
+      expect(bytes).toEqual([0x4c, 0x4f, 0x47, 0x49, 0x4e, 0x57, 0x4f, 0x52, 0x4c, 0x44])
+      for (const w of term.writes) {
+        const b = w.data instanceof Uint8Array ? w.data : new TextEncoder().encode(String(w.data))
+        for (let i = 0; i <= b.length - 3; i++) {
+          if (b[i] === 0x1b && b[i + 1] === 0x5b && b[i + 2] === 0x3f) {
+            throw new Error(`leaked marker prefix in write at offset ${i}`)
+          }
+        }
+      }
+    }
+    vi.useRealTimers()
+  })
+
+  it('ESU straddling chunk boundaries ends sync normally', () => {
+    const { ws, term } = openSession('s1')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(250)
+    const bsu = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x68])
+    const content = new Uint8Array([0x78, 0x79])
+    const esuPart1 = new Uint8Array([0x1b, 0x5b])
+    const esuPart2 = new Uint8Array([0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c])
+    ws._message(bsu.buffer)
+    ws._message(content.buffer)
+    ws._message(esuPart1.buffer)
+    ws._message(esuPart2.buffer)
+    vi.advanceTimersByTime(0)
+    const syncWrites = term.writes.filter(w => w.data instanceof Uint8Array)
+    expect(syncWrites.length).toBe(1)
+    expect([...(syncWrites[0].data as Uint8Array)]).toEqual([0x78, 0x79])
+    vi.useRealTimers()
+  })
+
+  it('carryover is consumed and next plain chunk writes normally', () => {
+    const { ws, term } = openSession('s1')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(250)
+    const chunk1 = concatU8([
+      new Uint8Array([0x41]),
+      new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30]),
+    ])
+    const chunk2 = concatU8([
+      new Uint8Array([0x32, 0x36, 0x68, 0x42]),
+      new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c]),
+    ])
+    const chunk3 = new Uint8Array([0x43])
+    term.writes = []
+    ws._message(chunk1.buffer)
+    ws._message(chunk2.buffer)
+    ws._message(chunk3.buffer)
+    vi.advanceTimersByTime(0)
+    const bytes = term.writes.filter(w => w.data instanceof Uint8Array).flatMap(w => [...(w.data as Uint8Array)])
+    expect(bytes).toEqual([0x41, 0x42, 0x43])
+    const entry = pool._debug_entry('s1')!
+    expect(entry.syncCarryover).toBeNull()
+    vi.useRealTimers()
   })
 })

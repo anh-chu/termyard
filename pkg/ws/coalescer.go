@@ -2,6 +2,7 @@ package ws
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -53,6 +54,11 @@ type outputCoalescerStats struct {
 	slowWrites int64
 }
 
+type controlFrame struct {
+	payload []byte
+	ack     chan struct{}
+}
+
 type outputCoalescer struct {
 	write        outputWriterFunc
 	onWriteError outputWriteErrorFunc
@@ -60,11 +66,13 @@ type outputCoalescer struct {
 	quietWindow  time.Duration
 	maxFrame     int
 
-	chunks chan []byte
-	pongs  chan struct{}
-	done   chan struct{}
+	chunks   chan []byte
+	pongs    chan struct{}
+	controls chan controlFrame
+	done     chan struct{}
 
 	closeOnce sync.Once
+	closed    atomic.Bool
 	stats     outputCoalescerStats
 }
 
@@ -77,6 +85,7 @@ func newOutputCoalescer(write outputWriterFunc, onWriteError outputWriteErrorFun
 		maxFrame:     maxOutputFrameBytes,
 		chunks:       make(chan []byte, outputQueueCapacity),
 		pongs:        make(chan struct{}, 4),
+		controls:     make(chan controlFrame, 8),
 		done:         make(chan struct{}),
 	}
 	go coalescer.run()
@@ -96,8 +105,27 @@ func (c *outputCoalescer) RequestPong() bool {
 	}
 }
 
+func (c *outputCoalescer) SubmitControl(payload []byte) bool {
+	if c.closed.Load() {
+		return false
+	}
+	ev := controlFrame{payload: payload, ack: make(chan struct{})}
+	select {
+	case c.controls <- ev:
+		select {
+		case <-ev.ack:
+			return true
+		case <-c.done:
+			return false
+		}
+	case <-c.done:
+		return false
+	}
+}
+
 func (c *outputCoalescer) CloseAndFlush() {
 	c.closeOnce.Do(func() {
+		c.closed.Store(true)
 		close(c.chunks)
 	})
 	<-c.done
@@ -151,6 +179,19 @@ func (c *outputCoalescer) run() {
 		return true
 	}
 
+	processControl := func(cf controlFrame) bool {
+		// Flush any binary already buffered so the control frame is ordered
+		// after previously-Submitted chunks (e.g. replay-end follows replay).
+		if !flush() {
+			return false
+		}
+		if !c.writeFrame(websocket.TextMessage, cf.payload) {
+			return false
+		}
+		close(cf.ack)
+		return true
+	}
+
 	for {
 		select {
 		case <-c.pongs:
@@ -167,6 +208,48 @@ func (c *outputCoalescer) run() {
 			return
 		}
 
+		// Drain chunks that were already accepted so they are ordered before
+		// any pending control frame (replay binary before replay-end text).
+		for {
+			select {
+			case chunk, ok := <-c.chunks:
+				if !ok {
+					c.timer.Stop()
+					flush()
+					for {
+						select {
+						case <-c.pongs:
+							if !c.writeFrame(websocket.TextMessage, pongFrame) {
+								return
+							}
+						case cf := <-c.controls:
+							if !processControl(cf) {
+								return
+							}
+						default:
+							return
+						}
+					}
+				}
+				if !appendChunk(chunk) {
+					writeFailed = true
+				}
+				continue
+			default:
+			}
+			break
+		}
+
+		// Process any control that is already waiting.
+		select {
+		case cf := <-c.controls:
+			if !processControl(cf) {
+				writeFailed = true
+			}
+			continue
+		default:
+		}
+
 		select {
 		case chunk, ok := <-c.chunks:
 			if !ok {
@@ -176,6 +259,10 @@ func (c *outputCoalescer) run() {
 					select {
 					case <-c.pongs:
 						if !c.writeFrame(websocket.TextMessage, pongFrame) {
+							return
+						}
+					case cf := <-c.controls:
+						if !processControl(cf) {
 							return
 						}
 					default:
@@ -192,6 +279,10 @@ func (c *outputCoalescer) run() {
 			}
 		case <-c.pongs:
 			if !c.writeFrame(websocket.TextMessage, pongFrame) {
+				writeFailed = true
+			}
+		case cf := <-c.controls:
+			if !processControl(cf) {
 				writeFailed = true
 			}
 		}

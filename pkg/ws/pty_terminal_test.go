@@ -12,7 +12,155 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
+
+	"github.com/anh-chu/termyard/pkg/pty"
 )
+
+type fakeFramedSession struct {
+	steps []struct {
+		n    int
+		kind pty.ChunkKind
+		err  error
+	}
+	pos int
+}
+
+func (f *fakeFramedSession) Read(p []byte) (int, error) { return 0, io.EOF }
+func (f *fakeFramedSession) Write(p []byte) (int, error) { return len(p), nil }
+func (f *fakeFramedSession) Close()                      {}
+func (f *fakeFramedSession) Resize(cols, rows uint16) error { return nil }
+
+func (f *fakeFramedSession) ReadFramed(p []byte) (int, pty.ChunkKind, error) {
+	if f.pos >= len(f.steps) {
+		return 0, pty.ChunkLive, io.EOF
+	}
+	s := f.steps[f.pos]
+	f.pos++
+	n := s.n
+	if n > len(p) {
+		n = len(p)
+	}
+	if n > 0 {
+		for i := range p[:n] {
+			p[i] = byte('0' + f.pos%10)
+		}
+	}
+	return n, s.kind, s.err
+}
+
+func readWSFrames(t *testing.T, client *websocket.Conn, n int) []recordedFrame {
+	t.Helper()
+	frames := make([]recordedFrame, 0, n)
+	for i := 0; i < n; i++ {
+		mt, payload := mustReadWSMessage(t, client)
+		frames = append(frames, recordedFrame{messageType: mt, payload: bytes.Clone(payload)})
+	}
+	return frames
+}
+
+func TestBridgeDirectPTYReplayGatedFramed(t *testing.T) {
+	client, server := mustWSConnPair(t)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	log := logrus.NewEntry(logger)
+
+	fs := &fakeFramedSession{
+		steps: []struct {
+			n    int
+			kind pty.ChunkKind
+			err  error
+		}{
+			{n: 6, kind: pty.ChunkReplay},
+			{n: 0, kind: pty.ChunkReplayBoundary},
+			{n: 0, kind: pty.ChunkLive, err: io.EOF},
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		BridgeDirectPTY(server, fs, "test", nil, log, true)
+		close(done)
+	}()
+
+	frames := readWSFrames(t, client, 3)
+	_ = client.Close()
+	<-done
+
+	want := []recordedFrame{
+		{messageType: websocket.TextMessage, payload: replayStartJSON},
+		{messageType: websocket.BinaryMessage, payload: []byte("111111")},
+		{messageType: websocket.TextMessage, payload: replayEndJSON},
+	}
+	for i, w := range want {
+		got := frames[i]
+		if got.messageType != w.messageType || !bytes.Equal(got.payload, w.payload) {
+			t.Fatalf("frame %d = (%d, %q), want (%d, %q)", i, got.messageType, got.payload, w.messageType, w.payload)
+		}
+	}
+}
+
+func TestBridgeDirectPTYReplayGatedFalseNoControlFrames(t *testing.T) {
+	client, server := mustWSConnPair(t)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	log := logrus.NewEntry(logger)
+
+	fake := &fakeReadSession{data: []byte("replaylive")}
+
+	done := make(chan struct{})
+	go func() {
+		BridgeDirectPTY(server, fake, "test", nil, log, false)
+		close(done)
+	}()
+
+	frames := readWSFrames(t, client, 1)
+	_ = client.Close()
+	<-done
+
+	if len(frames) != 1 || frames[0].messageType != websocket.BinaryMessage || !bytes.Equal(frames[0].payload, []byte("replaylive")) {
+		t.Fatalf("got frames %+v, want one binary frame", frames)
+	}
+}
+
+func TestBridgeDirectPTYNonFramedFallback(t *testing.T) {
+	client, server := mustWSConnPair(t)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	log := logrus.NewEntry(logger)
+
+	fake := &fakeReadSession{data: []byte("hello")}
+
+	done := make(chan struct{})
+	go func() {
+		BridgeDirectPTY(server, fake, "test", nil, log, true)
+		close(done)
+	}()
+
+	frames := readWSFrames(t, client, 1)
+	_ = client.Close()
+	<-done
+
+	if len(frames) != 1 || frames[0].messageType != websocket.BinaryMessage || !bytes.Equal(frames[0].payload, []byte("hello")) {
+		t.Fatalf("got frames %+v, want one binary hello", frames)
+	}
+}
+
+type fakeReadSession struct {
+	data []byte
+	done bool
+}
+
+func (f *fakeReadSession) Read(p []byte) (int, error) {
+	if f.done {
+		return 0, io.EOF
+	}
+	f.done = true
+	n := copy(p, f.data)
+	return n, nil
+}
+func (f *fakeReadSession) Write(p []byte) (int, error) { return len(p), nil }
+func (f *fakeReadSession) Close()                      {}
+func (f *fakeReadSession) Resize(cols, rows uint16) error { return nil }
 
 func TestIsPing(t *testing.T) {
 	if !isPing([]byte(`{"type":"ping"}`)) {

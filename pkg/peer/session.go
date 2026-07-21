@@ -565,7 +565,7 @@ func handleOpenTerminal(p OpenTerminalPayload, pc *PeerConnection, deps SessionD
 	}
 	defer ds.Close()
 	_ = ds.Resize(p.Cols, p.Rows)
-	ws.BridgeDirectPTY(conn, ds, p.Session, deps.ActTracker, log)
+	ws.BridgeDirectPTY(conn, ds, p.Session, deps.ActTracker, log, false)
 }
 
 // handleCapturePane captures the daemon ring buffer for the requested session.

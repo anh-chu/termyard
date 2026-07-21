@@ -112,6 +112,39 @@ const clipboardProvider: IClipboardProvider = {
 
 const MAX_PASTED_FILE_BYTES = 10 * 1024 * 1024
 
+export function concatU8(parts: Uint8Array[]): Uint8Array {
+  let len = 0
+  for (const p of parts) len += p.length
+  const out = new Uint8Array(len)
+  let off = 0
+  for (const p of parts) {
+    out.set(p, off)
+    off += p.length
+  }
+  return out
+}
+
+function indexOfU8(haystack: Uint8Array, needle: Uint8Array, start = 0): number {
+  if (needle.length === 0) return start
+  outer: for (let i = start; i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer
+    }
+    return i
+  }
+  return -1
+}
+
+// Maximum bytes to buffer while waiting for replay-end. If a replay stream
+// exceeds this we flush what we have and switch to passthrough so the UI
+// never wedges on an unbounded backlog.
+export const MAX_REPLAY_BUFFER_BYTES = 32 * 1024 * 1024
+
+// Shared prefix of the DEC mode 2026 synchronized-update markers.
+// BSU = \x1b[?2026h, ESU = \x1b[?2026l. The 6-byte prefix is shared; the
+// 7th byte disambiguates start (0x68) vs end (0x6c).
+const SYNC_MARKER_PREFIX = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36])
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   const chunkSize = 0x8000
@@ -325,11 +358,11 @@ interface PoolEntryState {
   heartbeatTimer: number | undefined
   watchdogTimer: number | undefined
   telemetryInterval: number | undefined
+  fallbackTimer: number | undefined
 
   // Connection
   connId: number
   connected: boolean
-  sawFirstByte: boolean
 
   // Telemetry
   msgCount: number
@@ -357,13 +390,6 @@ interface PoolEntryState {
   // mid-history and flash on every redraw. We key all scroll-preserving
   // behavior off this gesture flag instead.
   userScrolled: boolean
-
-  // Pin-to-bottom guard interval, armed on first byte after (re)connect to
-  // land the scrollback replay at the bottom. Tracked on the entry so a new
-  // connect clears any prior guard instead of stacking (stacked guards each
-  // forced scrollToBottom at 5Hz and fought xterm's redraw, causing visible
-  // flashing during spinner/output animations).
-  pinGuardInterval: number | undefined
 
   // Active container state
   activeContainer: HTMLElement | null
@@ -393,6 +419,15 @@ interface PoolEntryState {
   reconnectSessionName: string
   reconnectHostId?: string
   reconnectBackend?: string
+
+  // Replay/sync state
+  inReplay: boolean
+  passthroughArmed: boolean
+  replayPending: Uint8Array[]
+  replayBytesAccum: number
+  syncCarryover: Uint8Array | null
+  syncActive: boolean
+  syncBuffer: Uint8Array[]
 }
 
 // --- Pool singleton ----------------------------------------------------
@@ -964,10 +999,10 @@ export class TerminalPool {
       heartbeatTimer: undefined,
       watchdogTimer: undefined,
       telemetryInterval: undefined,
+      fallbackTimer: undefined,
 
       connId,
       connected: false,
-      sawFirstByte: false,
 
       msgCount: 0,
       totalBytes: 0,
@@ -981,7 +1016,6 @@ export class TerminalPool {
       generation: 0,
       fitEpoch: 0,
       userScrolled: false,
-      pinGuardInterval: undefined,
 
       activeContainer: null,
       activeCallbacks: null,
@@ -1004,6 +1038,14 @@ export class TerminalPool {
       reconnectSessionName: identity.sessionName,
       reconnectHostId: identity.hostId,
       reconnectBackend: identity.backend,
+
+      inReplay: false,
+      passthroughArmed: false,
+      replayPending: [],
+      replayBytesAccum: 0,
+      syncCarryover: null,
+      syncActive: false,
+      syncBuffer: [],
     }
 
     // Initiate WebSocket connection
@@ -1016,12 +1058,20 @@ export class TerminalPool {
 
   private connect(entry: PoolEntryState): void {
     const term = entry.terminal
-    // Re-arm the scrollback-replay scroll-to-bottom guard on every
-    // (re)connection. sawFirstByte is set-once per connect; without this
-    // reset, reconnects replay scrollback but the guard never fires, so
-    // the terminal lands mid-history instead of pinned to the bottom.
-    entry.sawFirstByte = false
     entry.userScrolled = false
+    // Reset replay/sync state on every (re)connect. Reconnect reuses the
+    // same entry, so any in-flight replay must start fresh.
+    entry.inReplay = false
+    entry.passthroughArmed = false
+    entry.replayPending = []
+    entry.replayBytesAccum = 0
+    entry.syncCarryover = null
+    entry.syncActive = false
+    entry.syncBuffer = []
+    if (entry.fallbackTimer !== undefined) {
+      clearTimeout(entry.fallbackTimer)
+      entry.fallbackTimer = undefined
+    }
     const cols = term.cols || 80
     const rows = term.rows || 24
 
@@ -1033,11 +1083,11 @@ export class TerminalPool {
     const hostParam = hostId ? `&host=${encodeURIComponent(hostId)}` : ''
     let wsUrl: string
     if (backend === 'daemon') {
-      wsUrl = `${protocol}//${window.location.host}/ws/daemon-session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
+      wsUrl = `${protocol}//${window.location.host}/ws/daemon-session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}&replay=1`
     } else if (sessionName.startsWith('direct-pty:')) {
       wsUrl = `${protocol}//${window.location.host}/ws/direct-session?cols=${cols}&rows=${rows}`
     } else {
-      wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}`
+      wsUrl = `${protocol}//${window.location.host}/ws/session?name=${encodeURIComponent(sessionName)}&cols=${cols}&rows=${rows}${hostParam}&replay=1`
     }
 
     const ws = this.factory.createWebSocket(wsUrl)
@@ -1067,6 +1117,26 @@ export class TerminalPool {
         }
       }, HEARTBEAT_MS)
 
+      // If the server does not send a replay-start control within 250ms,
+      // assume it is an old server or no replay was requested. Arm
+      // passthrough for the lifetime of this connection so late controls are
+      // ignored and bytes are written immediately.
+      entry.fallbackTimer = window.setTimeout(() => {
+        if (entry.connId !== connId) return
+        entry.passthroughArmed = true
+        entry.inReplay = false
+        if (entry.replayPending.length) {
+          const concat = concatU8(entry.replayPending)
+          entry.replayPending = []
+          entry.replayBytesAccum = 0
+          entry.predictiveEcho?.clear()
+          entry.terminal.write(concat)
+          if (!entry.userScrolled) {
+            try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
+          }
+        }
+      }, 250) as unknown as number
+
       // Pending resize
       if (entry.pendingResizeOnOpen && entry.activeContainer) {
         entry.pendingResizeOnOpen = false
@@ -1082,94 +1152,28 @@ export class TerminalPool {
 
     ws.onmessage = (evt) => {
       armWatchdog()
-      // Re-assert "follow output" per write. reconnect replay of the raw
-      // ring buffer (and TUI redraw streams) can move xterm's viewport off the
-      // bottom; once off-bottom xterm stops auto-following, parking the view
-      // and repainting old content = flash. Correct it in the write callback.
-      // Mitigation, not root fix (see ADR: reconnect resume protocol).
-      const followOutput = () => {
-        if (entry.userScrolled) return
-        const b = entry.terminal.buffer.active
-        if (b.type !== 'normal') return
-        if (b.baseY - b.viewportY > 2) {
-          try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
-        }
-      }
       if (evt.data instanceof ArrayBuffer) {
         entry.msgCount++
         entry.totalBytes += evt.data.byteLength
-        if (!entry.sawFirstByte) {
-          entry.sawFirstByte = true
-          entry.userScrolled = false
-          // Clear any prior guard so rapid reconnects don't stack intervals.
-          if (entry.pinGuardInterval !== undefined) {
-            clearInterval(entry.pinGuardInterval)
-          }
-          if (entry.activeContainer) {
-            const container = entry.activeContainer
-            let guardTicks = 0
-            const disarm = (reason: string) => {
-              if (entry.pinGuardInterval === undefined) return
-              clearInterval(entry.pinGuardInterval)
-              entry.pinGuardInterval = undefined
-              console.debug('[termyard-scroll] pin guard disarmed (%s)', reason)
-            }
-            // Tick at 100ms while the scrollback replay is flushing, but
-            // DISARM THE MOMENT we reach the bottom — no need to force
-            // scrollToBottom for a full 10s. A long-running guard kept
-            // yanking the viewport during live spinner/output redraws,
-            // which flashed the screen every 200ms.
-            entry.pinGuardInterval = window.setInterval(() => {
-              guardTicks++
-              if (entry.userScrolled) { disarm('user scroll'); return }
-              const buf = entry.terminal.buffer.active
-              const atBottomBuf = buf.baseY - buf.viewportY <= 0
-              const vp = container.querySelector('.xterm-viewport') as HTMLElement | null
-              const atBottomDOM = !vp || vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 2
-              if (atBottomBuf && atBottomDOM) {
-                // Replay has landed at the bottom; xterm auto-follows from here.
-                disarm('caught up')
-                return
-              }
-              entry.terminal.scrollToBottom()
-              if (vp && vp.scrollTop + vp.clientHeight < vp.scrollHeight - 5) {
-                vp.scrollTop = vp.scrollHeight
-              }
-              // Hard cap: if we somehow never settle (e.g. endless replay
-              // stream), stop forcing after 3s so we don't fight live output.
-              if (guardTicks > 30) disarm('3s cap')
-            }, 100)
-            console.debug('[termyard-scroll] pin-to-bottom guard armed')
-          }
-        }
         const data = new Uint8Array(evt.data)
-        entry.predictiveEcho?.clear()
-
-        if (entry.pendingInputTs !== null) {
-          const inputToFrameMs = performance.now() - entry.pendingInputTs
-          const capturedTs = entry.pendingInputTs
-          entry.pendingInputTs = null
-          entry.writePending = true
-          entry.terminal.write(data, () => {
-            const inputToWriteCompleteMs = performance.now() - capturedTs
-            entry.latencySamples.push({ inputToFrameMs, inputToWriteCompleteMs })
-            if (entry.latencySamples.length > MAX_TELEMETRY_SAMPLES) {
-              entry.latencySamples.shift()
-            }
-            entry.writePending = false
-            followOutput()
-          })
-        } else {
-          entry.terminal.write(data, followOutput)
+        if (entry.inReplay) {
+          entry.replayPending.push(data)
+          entry.replayBytesAccum += data.byteLength
+          if (entry.replayBytesAccum > MAX_REPLAY_BUFFER_BYTES) {
+            const all = concatU8(entry.replayPending)
+            entry.predictiveEcho?.clear()
+            entry.terminal.write(all)
+            entry.replayPending = []
+            entry.replayBytesAccum = 0
+            entry.inReplay = false
+            entry.passthroughArmed = true
+            console.debug('[termyard-replay] 32MB cap exceeded, passthrough')
+          }
+          return
         }
-      } else {
-        if (typeof evt.data === 'string') {
-          try {
-            const ctrl = JSON.parse(evt.data)
-            if (ctrl && ctrl.type === 'pong') return
-          } catch { /* not JSON */ }
-        }
-        entry.terminal.write(evt.data as string, followOutput)
+        this.dispatchLiveOutput(entry, data)
+      } else if (typeof evt.data === 'string') {
+        this.handleTextControl(entry, evt.data)
       }
     }
 
@@ -1178,6 +1182,7 @@ export class TerminalPool {
       if (entry.heartbeatTimer) { clearInterval(entry.heartbeatTimer); entry.heartbeatTimer = undefined }
       if (entry.watchdogTimer) { clearTimeout(entry.watchdogTimer); entry.watchdogTimer = undefined }
       if (entry.telemetryInterval) { clearInterval(entry.telemetryInterval); entry.telemetryInterval = undefined }
+      if (entry.fallbackTimer !== undefined) { clearTimeout(entry.fallbackTimer); entry.fallbackTimer = undefined }
       if (entry.connected) {
         entry.connected = false
         if (!document.hidden) {
@@ -1199,7 +1204,7 @@ export class TerminalPool {
           if (entry.connId === connId) {
             this.connect(entry)
           }
-        }, 2000)
+        }, 2000) as unknown as number
       }
     }
 
@@ -1222,6 +1227,196 @@ export class TerminalPool {
       })
     }
     entry.telemetryInterval = window.setInterval(() => emitTelemetry('periodic'), TELEMETRY_INTERVAL_MS)
+  }
+
+  private handleTextControl(entry: PoolEntryState, text: string): void {
+    let ctrl: { type?: string } | null = null
+    try {
+      ctrl = JSON.parse(text)
+    } catch {
+      // Not a JSON control; fall through to terminal.write below.
+    }
+    if (ctrl && ctrl.type === 'pong') return
+
+    if (ctrl && ctrl.type === 'replay-start') {
+      if (entry.passthroughArmed) {
+        // Late replay-start after fallback timer; ignore and keep passthrough.
+        return
+      }
+      if (entry.fallbackTimer !== undefined) {
+        clearTimeout(entry.fallbackTimer)
+        entry.fallbackTimer = undefined
+      }
+      entry.inReplay = true
+      entry.replayPending = []
+      entry.replayBytesAccum = 0
+      return
+    }
+
+    if (ctrl && ctrl.type === 'replay-end') {
+      if (!entry.inReplay) return
+      const all = concatU8(entry.replayPending)
+      entry.predictiveEcho?.clear()
+      entry.terminal.write(all)
+      entry.replayPending = []
+      entry.replayBytesAccum = 0
+      entry.inReplay = false
+      if (!entry.userScrolled) {
+        try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
+      }
+      return
+    }
+
+    // Non-control string (or unknown control): write directly. Do not use
+    // per-write polling; rely on userScrolled for scroll decisions.
+    entry.terminal.write(text)
+    if (!entry.userScrolled) {
+      try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
+    }
+  }
+
+  // Live output dispatcher. Handles DEC mode 2026 synchronized-update
+  // markers (BSU/ESU) by buffering bytes between markers and flushing them
+  // as a single terminal.write. Markers are stripped. Straddling markers are
+  // handled via syncCarryover. Replay bytes bypass this path entirely.
+  private dispatchLiveOutput(entry: PoolEntryState, data: Uint8Array): void {
+    if (entry.syncCarryover !== null) {
+      data = concatU8([entry.syncCarryover, data])
+      entry.syncCarryover = null
+    }
+
+    const out: Uint8Array[] = []
+    let cursor = 0
+
+    while (cursor < data.length) {
+      const idx = indexOfU8(data, SYNC_MARKER_PREFIX, cursor)
+      if (idx === -1) {
+        const rest = data.subarray(cursor)
+        const tail = this.findSyncMarkerPrefixTail(rest)
+        if (tail !== null) {
+          if (tail.length < rest.length) {
+            out.push(rest.subarray(0, rest.length - tail.length))
+          }
+          entry.syncCarryover = tail
+        } else {
+          out.push(rest)
+        }
+        cursor = data.length
+        break
+      }
+
+      if (idx + SYNC_MARKER_PREFIX.length >= data.length) {
+        // Marker prefix runs right up to (or past) the end; carry the whole
+        // tail over to the next chunk.
+        out.push(data.subarray(cursor, idx))
+        entry.syncCarryover = data.subarray(idx)
+        cursor = data.length
+        break
+      }
+
+      const markerByte = data[idx + SYNC_MARKER_PREFIX.length]
+      if (markerByte !== 0x68 && markerByte !== 0x6c) {
+        // Looks like the prefix but is not a valid BSU/ESU; treat as ordinary
+        // bytes and continue scanning after the prefix so we do not loop.
+        out.push(data.subarray(cursor, idx + SYNC_MARKER_PREFIX.length))
+        cursor = idx + SYNC_MARKER_PREFIX.length
+        continue
+      }
+
+      // Slice before the marker.
+      if (idx > cursor) {
+        out.push(data.subarray(cursor, idx))
+      }
+
+      if (markerByte === 0x68) {
+        // Begin Synchronized Update.
+        this.flushLiveSlices(entry, out)
+        out.length = 0
+        entry.syncActive = true
+        entry.syncBuffer = []
+      } else {
+        // End Synchronized Update.
+        if (entry.syncActive) {
+          // Accumulate any plain bytes that arrived after the BSU and before
+          // this ESU into the sync buffer.
+          if (out.length) {
+            entry.syncBuffer.push(...out)
+            out.length = 0
+          }
+          const all = concatU8(entry.syncBuffer)
+          entry.predictiveEcho?.clear()
+          entry.terminal.write(all)
+          entry.syncBuffer = []
+          entry.syncActive = false
+          if (!entry.userScrolled) {
+            try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
+          }
+        }
+        // ESU without matching BSU is a no-op; marker stripped.
+      }
+
+      cursor = idx + SYNC_MARKER_PREFIX.length + 1
+    }
+
+    // Handle any remaining plain slices.
+    this.flushLiveSlices(entry, out)
+  }
+
+  private flushLiveSlices(entry: PoolEntryState, slices: Uint8Array[]): void {
+    if (slices.length === 0) return
+    const data = concatU8(slices)
+    slices.length = 0
+    if (entry.syncActive) {
+      entry.syncBuffer.push(data)
+      return
+    }
+    this.writeLiveRaw(entry, data)
+  }
+
+  private writeLiveRaw(entry: PoolEntryState, data: Uint8Array): void {
+    entry.predictiveEcho?.clear()
+    if (entry.pendingInputTs !== null) {
+      const inputToFrameMs = performance.now() - entry.pendingInputTs
+      const capturedTs = entry.pendingInputTs
+      entry.pendingInputTs = null
+      entry.writePending = true
+      entry.terminal.write(data, () => {
+        const inputToWriteCompleteMs = performance.now() - capturedTs
+        entry.latencySamples.push({ inputToFrameMs, inputToWriteCompleteMs })
+        if (entry.latencySamples.length > MAX_TELEMETRY_SAMPLES) {
+          entry.latencySamples.shift()
+        }
+        entry.writePending = false
+        if (!entry.userScrolled) {
+          try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
+        }
+      })
+    } else {
+      entry.terminal.write(data, () => {
+        if (!entry.userScrolled) {
+          try { entry.terminal.scrollToBottom() } catch { /* ignored */ }
+        }
+      })
+    }
+  }
+
+  // Returns the longest non-empty suffix of `data` that is a prefix of the
+  // 7-byte marker sequence, or null if none exists. This allows BSU/ESU
+  // sequences split across WebSocket frames to be reassembled.
+  private findSyncMarkerPrefixTail(data: Uint8Array): Uint8Array | null {
+    const marker = SYNC_MARKER_PREFIX
+    const max = Math.min(data.length, marker.length - 1)
+    for (let len = max; len >= 1; len--) {
+      let ok = true
+      for (let i = 0; i < len; i++) {
+        if (data[data.length - len + i] !== marker[i]) {
+          ok = false
+          break
+        }
+      }
+      if (ok) return data.subarray(data.length - len)
+    }
+    return null
   }
 
   // ── foreground listeners ────────────────────────────────────────────
@@ -1468,7 +1663,7 @@ export class TerminalPool {
     if (entry.heartbeatTimer) { clearInterval(entry.heartbeatTimer); entry.heartbeatTimer = undefined }
     if (entry.watchdogTimer) { clearTimeout(entry.watchdogTimer); entry.watchdogTimer = undefined }
     if (entry.telemetryInterval) { clearInterval(entry.telemetryInterval); entry.telemetryInterval = undefined }
-    if (entry.pinGuardInterval !== undefined) { clearInterval(entry.pinGuardInterval); entry.pinGuardInterval = undefined }
+    if (entry.fallbackTimer !== undefined) { clearTimeout(entry.fallbackTimer); entry.fallbackTimer = undefined }
 
     // Close WS
     if (entry.ws) {

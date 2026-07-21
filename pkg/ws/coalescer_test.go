@@ -218,6 +218,75 @@ func (w *blockingWriter) Write(mt int, payload []byte) error {
 	return nil
 }
 
+func TestOutputCoalescerSerializesControlWithOutput(t *testing.T) {
+	writer := newRecordingOutputWriter()
+	timer := newManualOutputTimer()
+	coalescer := newOutputCoalescer(writer.Write, func(error) {}, timer)
+
+	if !coalescer.SubmitControl(replayStartJSON) {
+		t.Fatal("control start rejected")
+	}
+	coalescer.Submit([]byte("replay"))
+	<-timer.resetC
+	if !coalescer.SubmitControl(replayEndJSON) {
+		t.Fatal("control end rejected")
+	}
+	coalescer.Submit([]byte("live"))
+	<-timer.resetC
+	coalescer.CloseAndFlush()
+
+	if len(writer.frames) != 4 {
+		t.Fatalf("frames = %d, want 4", len(writer.frames))
+	}
+	want := []recordedFrame{
+		{messageType: websocket.TextMessage, payload: replayStartJSON},
+		{messageType: websocket.BinaryMessage, payload: []byte("replay")},
+		{messageType: websocket.TextMessage, payload: replayEndJSON},
+		{messageType: websocket.BinaryMessage, payload: []byte("live")},
+	}
+	for i, w := range want {
+		got := writer.frames[i]
+		if got.messageType != w.messageType || !bytes.Equal(got.payload, w.payload) {
+			t.Fatalf("frame %d = (%d, %q), want (%d, %q)", i, got.messageType, got.payload, w.messageType, w.payload)
+		}
+	}
+}
+
+func TestOutputCoalescerControlFlushesImmediately(t *testing.T) {
+	writer := newRecordingOutputWriter()
+	timer := newManualOutputTimer()
+	coalescer := newOutputCoalescer(writer.Write, func(error) {}, timer)
+
+	coalescer.Submit([]byte("buffered"))
+	<-timer.resetC
+	coalescer.SubmitControl(replayStartJSON)
+	<-writer.wrote
+
+	// The control frame must flush any buffered binary out first so ordering
+	// is preserved: buffered binary is emitted before the text control.
+	if len(writer.frames) != 2 {
+		t.Fatalf("frames = %d, want 2", len(writer.frames))
+	}
+	if got := writer.frames[0]; got.messageType != websocket.BinaryMessage || !bytes.Equal(got.payload, []byte("buffered")) {
+		t.Fatalf("first frame = (%d, %q), want buffered binary", got.messageType, got.payload)
+	}
+	if got := writer.frames[1]; got.messageType != websocket.TextMessage || !bytes.Equal(got.payload, replayStartJSON) {
+		t.Fatalf("second frame = (%d, %q), want replay-start text", got.messageType, got.payload)
+	}
+
+	coalescer.CloseAndFlush()
+}
+
+func TestSubmitControlAfterClose(t *testing.T) {
+	writer := newRecordingOutputWriter()
+	coalescer := newOutputCoalescer(writer.Write, func(error) {}, newManualOutputTimer())
+
+	coalescer.CloseAndFlush()
+	if coalescer.SubmitControl(replayStartJSON) {
+		t.Fatal("SubmitControl after CloseAndFlush returned true, want false")
+	}
+}
+
 func TestRequestPongBlocksWhenQueueFull(t *testing.T) {
 	bw := newBlockingWriter()
 	timer := newManualOutputTimer()
