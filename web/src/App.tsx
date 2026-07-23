@@ -307,6 +307,34 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   }, [deleteGroup, setGroupTree])
 
   const handleDropSession = useCallback((sessKey: string, targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
+    // Dropping onto a standalone (singleView) session pairs the two into their
+    // OWN new group. singleView leaves paneTree/activeGroupId pointing at the
+    // previously-viewed group, so merging into the active tree would wrongly
+    // dump the dragged session into that background group.
+    if (singleView && (targetKey === singleView || targetKey === '')) {
+      const anchor = singleView
+      detachFromOtherGroups(sessKey)
+      detachFromOtherGroups(anchor)
+      const direction: 'h' | 'v' = (edge === 'top' || edge === 'bottom') ? 'v' : 'h'
+      const newFirst = edge === 'left' || edge === 'top'
+      const base = popOut(anchor)
+      const newTree = newFirst
+        ? insertBesideLeaf(base, anchor, direction, sessKey, true)
+        : splitLeaf(base, anchor, direction, sessKey)
+      const newGroupId = Math.random().toString(36).slice(2)
+      const currentRank = syncedGroups[activeGroupId]?.rank ?? null
+      if (paneTree) {
+        void setGroupTree(activeGroupId, paneTree)
+        if (!currentRank) void setGroupRank(activeGroupId, generateKeyBetween(null, generateKeyBetween(currentRank, null)))
+      }
+      void setGroupTree(newGroupId, newTree)
+      void setGroupRank(newGroupId, generateKeyBetween(currentRank, null))
+      setPaneTree(newTree)
+      setActiveKey(sessKey)
+      setActiveGroupId(newGroupId)
+      setSingleView(null)
+      return
+    }
     setSingleView(null)
     detachFromOtherGroups(sessKey)
     const currentActive = activeKeyRef.current
@@ -333,7 +361,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
         : splitLeaf(prev, key, direction, sessKey)
     })
     setActiveKey(sessKey)
-  }, [detachFromOtherGroups])
+  }, [detachFromOtherGroups, singleView, paneTree, activeGroupId, syncedGroups, setGroupTree, setGroupRank])
 
   const closePane = useCallback((sessKey: string) => {
     setPaneTree(prev => {
