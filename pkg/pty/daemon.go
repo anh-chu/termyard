@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -85,7 +86,25 @@ func RunDaemon(cfg DaemonConfig) error {
 	})
 
 	// 1. Create PTY + spawn shell.
-	cmd := exec.Command(cfg.Shell)
+	//
+	// When Shell is a bare interactive shell binary (bash/zsh/etc.), run it
+	// directly. Otherwise treat it as a command to run inside the user's default
+	// shell. The command is injected into the PTY after startup so the shell
+	// stays alive after the command exits (user lands at a shell prompt).
+	// This also handles commands with arguments like "pi -c" which exec.Command
+	// cannot spawn directly (it would look for a binary named "pi -c").
+	var cmd *exec.Cmd
+	var initCommand string // non-empty → inject into PTY after shell starts
+	if isInteractiveShell(cfg.Shell) {
+		cmd = exec.Command(cfg.Shell)
+	} else {
+		defaultShell := os.Getenv("SHELL")
+		if defaultShell == "" {
+			defaultShell = "/bin/bash"
+		}
+		cmd = exec.Command(defaultShell)
+		initCommand = cfg.Shell
+	}
 	cmd.Env = directLocaleEnv()
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 	cmd.Env = append(cmd.Env, "TERMYARD_SESSION="+cfg.ID)
@@ -102,6 +121,17 @@ func RunDaemon(cfg DaemonConfig) error {
 		return fmt.Errorf("start PTY: %w", err)
 	}
 	log.Info("started session daemon PTY")
+
+	// If a non-shell command was requested, inject it into the PTY now.
+	// The shell buffers the input and executes it once it shows its first
+	// prompt. A short delay lets the shell finish its rc-file sourcing so
+	// PATH and environment are fully set up before the command runs.
+	if initCommand != "" {
+		go func() {
+			time.Sleep(150 * time.Millisecond)
+			_, _ = ptyFd.Write([]byte(initCommand + "\n"))
+		}()
+	}
 
 	// 2. Ring buffer.
 	ring := newRingBuffer(cfg.BufferSize)
@@ -512,6 +542,23 @@ func isDaemonAlive(socketPath string) bool {
 	}
 	conn.Close()
 	return true
+}
+
+// isInteractiveShell returns true when name is a bare shell binary (no spaces,
+// no arguments) that should be spawned directly as the session shell.
+// Any other value — a command with arguments or a non-shell binary — should be
+// wrapped inside a shell so the session outlives the command.
+var knownShells = map[string]bool{
+	"bash": true, "zsh": true, "sh": true, "fish": true,
+	"dash": true, "tcsh": true, "csh": true, "ksh": true,
+	"mksh": true, "pdksh": true,
+}
+
+func isInteractiveShell(name string) bool {
+	if strings.ContainsAny(name, " \t") {
+		return false // has arguments — not a bare shell
+	}
+	return knownShells[filepath.Base(name)]
 }
 
 // killProcessGroup sends SIGKILL to the process group identified by pgid.
