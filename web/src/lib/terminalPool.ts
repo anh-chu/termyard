@@ -556,6 +556,25 @@ export class TerminalPool {
       }
     }
 
+    // Deferred refresh: xterm's IntersectionObserver pauses rendering while the
+    // terminal element is off-screen (hidden pool). The synchronous refresh()
+    // calls above set _needsFullRefresh=true internally but don't actually
+    // paint — the observer un-pauses asynchronously in the next frame. Schedule
+    // a second fit+refresh in rAF so the render fires once the observer has
+    // cleared the pause, avoiding a blank frame on warm switches.
+    const deferredKey = lease.key
+    const deferredGen = entry.generation
+    window.requestAnimationFrame(() => {
+      const e = this.entries.get(deferredKey)
+      if (!e || e.generation !== deferredGen || !e.activeContainer) return
+      const c = e.activeContainer
+      if (c.clientWidth > 0 && c.clientHeight > 0) {
+        fitPreservingScroll(e, c, { refreshAfter: true })
+      } else {
+        try { e.terminal.refresh(0, e.terminal.rows - 1) } catch { /* ignored */ }
+      }
+    })
+
     // Publish initial snapshot
     callbacks.onConnectionChange(entry.connected)
     callbacks.onCtrlModifierChange(entry.ctrlModifierActive)
