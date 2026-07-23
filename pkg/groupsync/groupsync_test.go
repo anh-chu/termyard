@@ -95,6 +95,27 @@ func TestDeleteTombstoneStaysDeletedAgainstStaleSnapshot(t *testing.T) {
 	}
 }
 
+func TestSetTreeResurrectsTombstonedGroup(t *testing.T) {
+	s := &Store{path: filepath.Join(t.TempDir(), "groups.json"), groups: map[string]Group{
+		"g1": {
+			Tree:          json.RawMessage(`{"type":"leaf","sessionKey":"a"}`),
+			TreeUpdatedAt: mustTime(10),
+			DeletedAt:     mustTime(20),
+		},
+	}}
+
+	got, err := s.SetTree("g1", json.RawMessage(`{"type":"leaf","sessionKey":"b"}`))
+	if err != nil {
+		t.Fatalf("SetTree: %v", err)
+	}
+	if !got.DeletedAt.IsZero() {
+		t.Fatalf("local SetTree should clear tombstone, got deleted_at = %v", got.DeletedAt)
+	}
+	if live := s.Live(); len(live) != 1 {
+		t.Fatalf("resurrected group should be live, got %#v", live)
+	}
+}
+
 func TestMigrateKeyRewritesOwnedLeavesOnly(t *testing.T) {
 	s := &Store{path: filepath.Join(t.TempDir(), "groups.json"), groups: map[string]Group{
 		"g1": {

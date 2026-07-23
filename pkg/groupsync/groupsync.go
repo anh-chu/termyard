@@ -92,6 +92,9 @@ func (s *Store) SetTree(id string, tree json.RawMessage) (Group, error) {
 	g := s.groups[id]
 	g.Tree = append(json.RawMessage(nil), tree...)
 	g.TreeUpdatedAt = time.Now()
+	// A local edit resurrects a tombstoned group: without clearing DeletedAt a
+	// re-created id stays invisible because Live() filters non-zero DeletedAt.
+	g.DeletedAt = time.Time{}
 	s.groups[id] = g
 	if err := s.save(); err != nil {
 		return Group{}, err

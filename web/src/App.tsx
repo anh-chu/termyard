@@ -291,8 +291,24 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     setSingleView(sessKey)
   }, [])
 
+  // Remove a session leaf from every saved group EXCEPT the active one. Dropping
+  // a session into the current view must not leave a duplicate leaf lingering in
+  // its previous group: leaves are keyed by session name and the terminal pool
+  // is keyed the same, so a cross-group duplicate mirrors one terminal into two
+  // groups and the split appears to "land" in the wrong (old) group.
+  const detachFromOtherGroups = useCallback((sessKey: string) => {
+    const active = activeGroupIdRef.current
+    for (const [id, g] of Object.entries(syncedGroupsRef.current)) {
+      if (id === active || !findLeaf(g.tree, sessKey)) continue
+      const pruned = removeLeaf(g.tree, sessKey)
+      if (pruned === null) void deleteGroup(id)
+      else void setGroupTree(id, pruned)
+    }
+  }, [deleteGroup, setGroupTree])
+
   const handleDropSession = useCallback((sessKey: string, targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
     setSingleView(null)
+    detachFromOtherGroups(sessKey)
     const currentActive = activeKeyRef.current
     setPaneTree(prev => {
       // Standalone session: target is the anchor, dragged session always second
@@ -317,7 +333,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
         : splitLeaf(prev, key, direction, sessKey)
     })
     setActiveKey(sessKey)
-  }, [])
+  }, [detachFromOtherGroups])
 
   const closePane = useCallback((sessKey: string) => {
     setPaneTree(prev => {
@@ -441,6 +457,8 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
   selectedSessionRef.current = selectedSession
   const syncedGroupsRef = useRef(syncedGroups)
   syncedGroupsRef.current = syncedGroups
+  const activeGroupIdRef = useRef(activeGroupId)
+  activeGroupIdRef.current = activeGroupId
   const setActiveKeyRef = useRef(setActiveKey)
   setActiveKeyRef.current = setActiveKey
   const switchToGroupRef = useRef<((id: string) => void) | null>(null)
@@ -564,6 +582,9 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
 
     setPaneTree(prev => {
       if (prev === null || !findLeaf(prev, oldKey)) return prev
+      // newKey already present: replacing would create a duplicate leaf, so
+      // drop the stale optimistic leaf instead of renaming onto it.
+      if (findLeaf(prev, newKey)) return removeLeaf(prev, oldKey) ?? prev
       return replaceLeaf(prev, oldKey, newKey)
     })
     setActiveKey(prev => (prev === oldKey ? newKey : prev))
@@ -853,6 +874,8 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
 
   const handlePairSessions = useCallback((draggedKey: string, targetKey: string) => {
     setSingleView(null)
+    detachFromOtherGroups(draggedKey)
+    detachFromOtherGroups(targetKey)
     const inCurrentTree = paneTree && (findLeaf(paneTree, draggedKey) || findLeaf(paneTree, targetKey))
     if (!inCurrentTree) {
       // Neither session is in the active group — create a new background group
@@ -892,7 +915,7 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     const path = host ? `/session/${encodeURIComponent(host)}/${encodeURIComponent(name)}` : `/session/${encodeURIComponent(name)}`
     if (window.location.pathname !== path) window.history.pushState(null, '', path)
     setCurrentView('session')
-  }, [paneTree, activeGroupId, syncedGroups, setGroupRank, setGroupTree])
+  }, [paneTree, activeGroupId, syncedGroups, setGroupRank, setGroupTree, detachFromOtherGroups])
 
   const switchToGroup = useCallback((groupId: string, focusKey?: string) => {
     // If re-selecting the already-active group (e.g. after navigating to a standalone session),
@@ -1012,6 +1035,9 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
       if (target) {
         setPaneTree(prev => {
           if (prev === null) return popOut(optimisticKey)
+          // Never insert a duplicate leaf: keys are session names and the
+          // terminal pool is keyed by name, so a dup would share one terminal.
+          if (findLeaf(prev, optimisticKey)) { setActiveKey(optimisticKey); return prev }
           if (findLeaf(prev, target.key)) {
             return target.newFirst
               ? insertBesideLeaf(prev, target.key, target.direction, optimisticKey, true)
@@ -1099,7 +1125,10 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
 
 
   const handleDropNewSession = useCallback((targetKey: string, edge: 'left'|'right'|'top'|'bottom'|'center') => {
-    let key = targetKey || activeKey
+    // Fall back to the first pane when a split is visible but no active pane is
+    // set, so a drop that lands on the container (not a pane) still splits
+    // instead of silently spawning a standalone session ("refuse to split").
+    let key = targetKey || activeKey || (paneTree ? getLeaves(paneTree)[0] ?? null : null)
 
     // Dropping onto a singleView session (standalone, not in any group):
     // save current group to background and start a new group from singleView
@@ -1133,8 +1162,14 @@ function AppInner({ onLogout, authenticated }: { onLogout?: () => void; authenti
     const sess = key ? sessionsRef.current.find(s => sessionKey(s) === key) : undefined
     const panes = sess?.windows.flatMap(w => w.panes) ?? []
     const cwd = panes.find(p => p.active)?.current_path || sess?.project_path || '~'
+    // Unique name so the optimistic pane-tree key can't collide with an
+    // existing leaf. A literal 'shell' would duplicate any live 'shell' leaf
+    // (shared pool entry) and get mangled when the server dedup migrates it.
+    const existingNames = new Set(sessionsRef.current.map(s => s.name))
+    let name = 'shell'
+    for (let n = 2; existingNames.has(name); n++) name = `shell-${n}`
     // Pass splitTarget directly — avoids ref race when event fires on both pane and container
-    handleCreateSession('shell', cwd, '', host || undefined, undefined, undefined, splitTarget)
+    handleCreateSession(name, cwd, '', host || undefined, undefined, undefined, splitTarget)
   }, [singleView, activeKey, activeGroupId, paneTree, handleCreateSession])
 
   const toggleFullscreen = useCallback(() => {

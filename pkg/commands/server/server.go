@@ -493,6 +493,9 @@ func runShellNameWatcher(ctx context.Context, mgr *state.Manager, daemonReg *pty
 // pane content as a hint for naming. Falls back to [foreground] if nothing
 // useful is found.
 func defaultSessionDir() string {
+	if dir := os.Getenv("TERMYARD_SESSION_DIR"); dir != "" {
+		return dir
+	}
 	uid := fmt.Sprintf("%d", os.Getuid())
 	return fmt.Sprintf("/tmp/termyard-sessions-%s", uid)
 }
