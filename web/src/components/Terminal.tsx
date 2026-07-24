@@ -190,6 +190,18 @@ export function Terminal({ sessionName, hostId, backend, fullscreen, onToggleFul
       })
       .catch(() => tab?.close())
   }, [sessionName, hostId])
+  const downloadArtifact = useCallback((path: string, name: string) => {
+    grantArtifactToken(path, sessionName, undefined, hostId)
+      .then((token) => {
+        const a = document.createElement('a')
+        a.href = `/file?token=${encodeURIComponent(token)}`
+        a.download = name || path.split('/').pop() || 'download'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+      })
+      .catch((err) => console.error('Download failed:', err))
+  }, [sessionName, hostId])
   // The mobile key bar renders into a single shared slot at the bottom of the
   // app so split views show one full-width bar (active pane only), not one per pane.
   const [keyBarSlot, setKeyBarSlot] = useState<HTMLElement | null>(null)
@@ -741,6 +753,19 @@ export function Terminal({ sessionName, hostId, backend, fullscreen, onToggleFul
                             {kind !== 'other' && <span>{kind}</span>}
                           </div>
                         </button>
+                        {!art.stale && (
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => downloadArtifact(art.path, art.name)}
+                            title="Download"
+                            className="flex-none rounded-sm border border-hairline px-1.5 py-1 text-mute hover:text-primary transition-colors"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                          </button>
+                        )}
                         {canPreview && (
                           <button
                             type="button"
